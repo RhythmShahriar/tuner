@@ -1,0 +1,26 @@
+id: php-session-upload-progress
+name: phpinfo() shows settings exposed to CVE-2026-115560
+severity: medium
+confidence: low
+tags: [php, session, vuln, cve-2026-115560]
+request:
+  path: ["/phpinfo.php", "/info.php", "/php_info.php", "/php.php", "/test.php", "/i.php"]
+match:
+  all:
+    - status: 200
+    - regex: '<title>(?:PHP [0-9.]+ - )?phpinfo\(\)</title>'
+    # The first value column is the effective (local) value.
+    - regex: '<td class="e">session\.serialize_handler\s*</td><td class="v">(?:php_binary|php_serialize)\s*</td>'
+    - regex: '<td class="e">session\.upload_progress\.enabled\s*</td><td class="v">On\s*</td>'
+impact: |
+  CVE-2026-115560 is an unpatched flaw in PHP's session upload progress. It is reachable when the
+  serialize handler is php_binary or php_serialize, the application switches it to php with
+  ini_set() before session_start(), and upload progress is enabled. This page shows the two
+  configuration conditions hold; whether the code switches the handler can only be checked on the
+  server: run `rhythm tuner scan /path/to/site` there.
+fix: |
+  Until PHP releases a fix, set session.upload_progress.enabled = 0 in php.ini or the PHP-FPM pool
+  (php_admin_flag[session.upload_progress.enabled] = off) and restart PHP. Also delete this
+  phpinfo() page.
+references:
+  - https://www.cve.org/CVERecord?id=CVE-2026-115560

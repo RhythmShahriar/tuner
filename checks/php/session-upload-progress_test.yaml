@@ -1,0 +1,24 @@
+positive:
+  - name: phpinfo with php_serialize and upload progress on
+    routes:
+      /info.php:
+        body: '<html><head><title>PHP 8.3.6 - phpinfo()</title></head><body><table><tr><td class="e">session.serialize_handler</td><td class="v">php_serialize</td><td class="v">php_serialize</td></tr><tr><td class="e">session.upload_progress.enabled</td><td class="v">On</td><td class="v">On</td></tr></table></body></html>'
+  - name: php_binary set locally over a php master value
+    routes:
+      /phpinfo.php:
+        body: '<html><head><title>PHP 8.3.6 - phpinfo()</title></head><body><table><tr><td class="e">session.serialize_handler</td><td class="v">php_binary</td><td class="v">php</td></tr><tr><td class="e">session.upload_progress.enabled</td><td class="v">On</td><td class="v">On</td></tr></table></body></html>'
+negative:
+  - name: default php handler
+    routes:
+      /info.php:
+        body: '<html><head><title>PHP 8.3.6 - phpinfo()</title></head><body><table><tr><td class="e">session.serialize_handler</td><td class="v">php</td><td class="v">php</td></tr><tr><td class="e">session.upload_progress.enabled</td><td class="v">On</td><td class="v">On</td></tr></table></body></html>'
+  - name: mitigated, upload progress off
+    routes:
+      /info.php:
+        body: '<html><head><title>PHP 8.3.6 - phpinfo()</title></head><body><table><tr><td class="e">session.serialize_handler</td><td class="v">php_serialize</td><td class="v">php_serialize</td></tr><tr><td class="e">session.upload_progress.enabled</td><td class="v">Off</td><td class="v">On</td></tr></table></body></html>'
+  - name: master value unsafe but local value php
+    routes:
+      /info.php:
+        body: '<html><head><title>PHP 8.3.6 - phpinfo()</title></head><body><table><tr><td class="e">session.serialize_handler</td><td class="v">php</td><td class="v">php_serialize</td></tr><tr><td class="e">session.upload_progress.enabled</td><td class="v">On</td><td class="v">On</td></tr></table></body></html>'
+  - name: no phpinfo page
+    routes: {}
