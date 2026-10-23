@@ -5,12 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/fs"
-	"os"
 	"strings"
 	"text/tabwriter"
 
-	"github.com/RhythmShahriar/tuner/checks"
 	"github.com/RhythmShahriar/tuner/engine"
 )
 
@@ -19,7 +16,7 @@ func listChecks(args []string, stdout, stderr io.Writer) int {
 	var (
 		profile, severity, dir             string
 		tags, excludeTags, ids, excludeIDs listFlag
-		asJSON                             bool
+		asJSON, offline, noUpdates         bool
 	)
 	flags := flag.NewFlagSet("checks", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -31,20 +28,22 @@ func listChecks(args []string, stdout, stderr io.Writer) int {
 	flags.Var(&ids, "id", "")
 	flags.Var(&excludeIDs, "exclude-id", "")
 	flags.BoolVar(&asJSON, "json", false, "")
+	flags.BoolVar(&offline, "offline", false, "")
+	flags.BoolVar(&noUpdates, "no-check-updates", false, "")
 	if err := flags.Parse(args); err != nil {
 		return exitUsage
 	}
 
-	var fsys fs.FS = checks.FS
-	if dir != "" {
-		fsys = os.DirFS(dir)
-	}
-	all, err := engine.LoadChecks(fsys)
+	ua := fmt.Sprintf("rhythm-tuner/%s (+https://rythm.sh/tuner)", version)
+	set, err := loadCheckSet(dir, !noUpdates, offline, ua, nil)
 	if err != nil {
 		fmt.Fprintln(stderr, "rhythm tuner: loading checks:", err)
 		return exitError
 	}
-	sel, err := engine.Select(all, engine.Selector{
+	for _, w := range set.warnings {
+		fmt.Fprintln(stderr, "rhythm tuner:", w)
+	}
+	sel, err := engine.Select(set.checks, engine.Selector{
 		Profile: engine.Profile(profile), Tags: tags, ExcludeTags: excludeTags,
 		IDs: ids, ExcludeIDs: excludeIDs, MinSeverity: engine.Severity(severity),
 	})
@@ -83,7 +82,8 @@ func listChecks(args []string, stdout, stderr io.Writer) int {
 	if err := tw.Flush(); err != nil {
 		return exitError
 	}
-	fmt.Fprintf(stdout, "\n%d checks, plus vulnerability matching for core, plugins, themes, PHP and\n"+
+	fmt.Fprintf(stdout, "\nUsing %s.\n", set.describe(dir))
+	fmt.Fprintf(stdout, "%d checks, plus vulnerability matching for core, plugins, themes, PHP and\n"+
 		"nginx/Apache (vuln-*, wp-components-*, *-eol); skip it with --no-vulns.\n", len(sel))
 	return exitOK
 }

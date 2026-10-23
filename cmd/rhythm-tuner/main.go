@@ -59,7 +59,7 @@ Usage:
   rhythm tuner                       interactive picker
   rhythm tuner scan <url>... [flags] scan one or more sites
   rhythm tuner checks [flags]        list the checks
-  rhythm tuner update [--clear]      refresh vulnerability data now
+  rhythm tuner update [--clear]      refresh the check pack and vulnerability data now
 
 Output:
       --json               JSON report (an array when scanning several targets)
@@ -81,8 +81,9 @@ Checks:
       --exclude-id <list>
       --severity <level>   skip checks below this severity
       --checks <dir>       load checks from a directory
+      --no-check-updates   use the built-in checks, not the latest check pack
       --no-vulns           skip known-vulnerability matching
-      --offline            use cached vulnerability data only
+      --offline            use cached vulnerability data and check pack only
 
 Requests:
       --rate <n>           max requests per second per site (default 5)
@@ -104,9 +105,10 @@ Batch and CI:
       --baseline <file>    hide findings already in this JSON report
 
 Vulnerability data comes from WPVulnerability (CC0), api.wordpress.org and
-php.net. It's cached under your user cache directory and refreshed
-automatically once a day; TUNER_VULN_API, TUNER_WPORG_API and
-TUNER_PHPNET_API point Tuner at mirrors.
+php.net. New checks arrive as a check pack from Tuner's GitHub releases. Both
+are cached under your user cache directory and refreshed automatically once a
+day; TUNER_VULN_API, TUNER_WPORG_API, TUNER_PHPNET_API and TUNER_CHECKS_URL
+point Tuner at mirrors.
 
 Exit codes: 0 ok · 1 findings at --fail-on · 2 usage error · 3 scan error · 130 interrupted
 

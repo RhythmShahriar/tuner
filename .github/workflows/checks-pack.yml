@@ -1,0 +1,89 @@
+# Publishes checks/ as a check pack on the rolling checks-latest release,
+# so new checks reach users without a new binary. rhythm-tuner downloads
+# the pack (see checkpack/ and docs/checks.md), verifies its checksums and
+# uses it when it's newer than the checks compiled into the binary.
+#
+# The release is a prerelease and is never marked latest: `rhythm update`
+# and the installers read /releases/latest, which per GitHub's docs only
+# returns "the most recent non-prerelease, non-draft release".
+name: checks-pack
+on:
+  push:
+    branches: [master]
+    paths:
+      - "checks/**"
+      - ".github/workflows/checks-pack.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# One publish at a time, in order; a newer run waits rather than cancelling
+# an upload halfway.
+concurrency:
+  group: checks-pack
+  cancel-in-progress: false
+
+env:
+  TAG: checks-latest
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # Every check must pass its positive and negative fixtures.
+      - name: Test checks
+        run: go test ./engine ./checkpack
+
+      # The same command as a local `make pack`, so the assets can be
+      # rebuilt and compared byte for byte.
+      - name: Build pack
+        run: make pack
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          version=$(jq -r .version dist/checks-pack/checks-manifest.json)
+          notes="Check pack $version, built from $GITHUB_SHA.
+
+          This is not a Tuner release. rhythm-tuner downloads these assets
+          automatically, checks them against checks-sha256.txt, and uses them
+          when they are newer than its built-in checks. See docs/checks.md."
+
+          if ! gh release view "$TAG" --repo "$repo" >/dev/null 2>&1; then
+            # Anchor the tag on a parentless commit holding only a README.
+            # It is never reachable from master, so git describe and
+            # GoReleaser can't mistake it for the current or previous
+            # version tag.
+            if ! gh api "repos/$repo/git/ref/tags/$TAG" >/dev/null 2>&1; then
+              readme="This tag only anchors the $TAG release, where CI publishes Tuner's check pack."
+              tree=$(jq -n --arg c "$readme" '{tree: [{path: "README.md", mode: "100644", type: "blob", content: $c}]}' |
+                gh api "repos/$repo/git/trees" --input - --jq .sha)
+              commit=$(jq -n --arg t "$tree" --arg m "chore: anchor the $TAG release" '{message: $m, tree: $t, parents: []}' |
+                gh api "repos/$repo/git/commits" --input - --jq .sha)
+              gh api "repos/$repo/git/refs" -f "ref=refs/tags/$TAG" -f "sha=$commit" >/dev/null
+            fi
+            gh release create "$TAG" --repo "$repo" --verify-tag --prerelease --latest=false \
+              --title "Check pack" --notes "$notes"
+          fi
+
+          # Clients verify all three files together, so a client that reads
+          # them mid-upload sees a checksum mismatch and keeps its cached pack.
+          gh release upload "$TAG" --repo "$repo" --clobber \
+            dist/checks-pack/checks.tar.gz \
+            dist/checks-pack/checks-manifest.json \
+            dist/checks-pack/checks-sha256.txt
+          gh release edit "$TAG" --repo "$repo" --prerelease --latest=false \
+            --title "Check pack" --notes "$notes"
+
+          echo "Published check pack $version" >> "$GITHUB_STEP_SUMMARY"

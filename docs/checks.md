@@ -84,3 +84,21 @@ enumeration that sends many requests.
 - Detect, never exploit. Requests are plain GETs of public URLs with no payloads.
 - Never print a secret unmasked. Use `extract.secrets`; evidence is redacted automatically.
 - Try a check locally with `rhythm tuner scan <url> --checks ./checks`.
+
+## Check packs
+
+New checks reach users without a new release. When a change to `checks/` lands on `master`, the [checks-pack workflow](../.github/workflows/checks-pack.yml) runs every check's fixtures, then publishes the tree as a check pack on the rolling [`checks-latest`](https://github.com/RhythmShahriar/tuner/releases/tag/checks-latest) release:
+
+| Asset | |
+|---|---|
+| `checks.tar.gz` | the checks and their LICENSE; fixtures stay out |
+| `checks-manifest.json` | pack version, schema, `min_tuner`, commit and commit time, check count |
+| `checks-sha256.txt` | SHA-256 of the other two |
+
+`make pack` builds the same assets into `dist/checks-pack`, byte for byte as CI does from the same commit with the same Go version.
+
+**`min_tuner`.** `checks/pack.json` sets the oldest rhythm-tuner that can run the checks. A check that uses a new matcher field doesn't need a bump: older binaries reject unknown fields and keep their own checks. Bump it when a change would load fine on an older binary but behave differently there, for example a new allowed value for an existing field.
+
+**How Tuner picks a pack.** A scan uses the newest pack that passes verification, if it was built from a later commit than the binary's own checks (release binaries know their commit time). A binary built with uncommitted changes always uses its own checks, so you always run the checks you're editing; so does `--checks <dir>`. Packs are cached under your user cache directory (`~/.cache/rhythm/tuner/checks` on Linux) and checked for updates once a day. Any problem with a pack, such as no network, a bad checksum or an incompatible pack, prints a warning and the scan carries on with the cached or built-in checks; a pack never fails a scan.
+
+**Trust.** A pack can't run code. Checks are declarative YAML: they can only make GET requests to the site being scanned and match the replies, and Tuner rejects any field it doesn't know. A pack is downloaded over HTTPS from this repository's releases, verified against `checks-sha256.txt`, and unpacked in memory, never to disk; absolute paths, `..`, links and oversized files reject the whole pack. The assets are not signed yet, so the checksum protects against corruption and partial uploads, not against someone able to publish to this repository's releases.
