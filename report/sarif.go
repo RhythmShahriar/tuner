@@ -125,6 +125,13 @@ func SARIF(w io.Writer, reports []Report, version string) error {
 			var loc sarifLocation
 			loc.PhysicalLocation.ArtifactLocation.URI = f.URL
 			res.Locations = []sarifLocation{loc}
+			if len(f.Advisories) > 0 {
+				var cves []string
+				for _, a := range f.Advisories {
+					cves = append(cves, a.CVEs...)
+				}
+				res.Properties = map[string]any{"cves": cves, "advisories": len(f.Advisories), "source": f.Source}
+			}
 			if len(f.Evidence.Secrets) > 0 {
 				var secrets []string
 				for _, s := range f.Evidence.Secrets {

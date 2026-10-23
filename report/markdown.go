@@ -39,8 +39,10 @@ func Markdown(w io.Writer, reports []Report) error {
 		for _, f := range r.Findings {
 			fmt.Fprintf(&b, "\n### %s %s\n\n", sevEmoji(f.Severity), mdEscape(f.Title))
 			fmt.Fprintf(&b, "- **Check:** `%s` · **Severity:** %s · **Confidence:** %s\n", f.ID, f.Severity, f.Confidence)
-			fmt.Fprintf(&b, "- **Request:** `%s` → %d\n", f.Evidence.Request, f.Evidence.Status)
-			for _, m := range f.Evidence.Matched {
+			if f.Evidence.Status != 0 {
+				fmt.Fprintf(&b, "- **Request:** `%s` → %d\n", f.Evidence.Request, f.Evidence.Status)
+			}
+			for _, m := range f.Evidence.Matched[:matchedLimit(f)] {
 				fmt.Fprintf(&b, "- **Evidence:** `%s`\n", strings.ReplaceAll(m, "`", "'"))
 			}
 			for _, s := range f.Evidence.Secrets {
@@ -48,6 +50,23 @@ func Markdown(w io.Writer, reports []Report) error {
 			}
 			if f.Impact != "" {
 				fmt.Fprintf(&b, "\n%s\n", f.Impact)
+			}
+			if len(f.Advisories) > 0 {
+				b.WriteString("\n| Severity | CVE | Advisory | Fixed in |\n|---|---|---|---|\n")
+				for _, a := range f.Advisories {
+					cve := strings.Join(a.CVEs, ", ")
+					title := mdEscape(a.Title)
+					if a.KEV {
+						title += " ⚠️ actively exploited"
+					}
+					if len(a.References) > 0 {
+						title = "[" + title + "](" + a.References[len(a.References)-1] + ")"
+					}
+					fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", or(string(a.Severity), "unrated"), or(cve, "—"), title, or(a.FixedIn, "—"))
+				}
+			}
+			if f.Source != "" {
+				fmt.Fprintf(&b, "\n_Data: %s_\n", f.Source)
 			}
 			if f.Fix != "" {
 				fmt.Fprintf(&b, "\n**Fix**\n\n```\n%s\n```\n", f.Fix)
@@ -85,4 +104,12 @@ func or(s, fallback string) string {
 		return fallback
 	}
 	return s
+}
+
+// Advisory findings get a table instead of evidence lines.
+func matchedLimit(f engine.Finding) int {
+	if len(f.Advisories) > 0 {
+		return 0
+	}
+	return len(f.Evidence.Matched)
 }

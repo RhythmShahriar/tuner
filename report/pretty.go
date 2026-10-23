@@ -28,6 +28,8 @@ type Pretty struct {
 	o       PrettyOptions
 	start   time.Time
 	drawn   bool // a progress line is on screen and must be cleared first
+
+	sawAdvisories bool // a vulnerability finding was shown, so credit the data source
 }
 
 func NewPretty(w, errw io.Writer, o PrettyOptions) *Pretty {
@@ -144,11 +146,24 @@ func (p *Pretty) Finding(f engine.Finding) {
 	if len(f.Evidence.Matched) > 0 && len(secrets) == 0 {
 		detail = f.Evidence.Matched[0]
 	}
+	// Vulnerability findings list their worst advisories.
+	var advisories []string
+	if len(f.Advisories) > 0 {
+		advisories = f.Evidence.Matched[:min(3, len(f.Evidence.Matched))]
+		if n := len(f.Advisories) - len(advisories); n > 0 {
+			advisories = append(advisories, fmt.Sprintf("…and %d more", n))
+		}
+		detail = ""
+		p.sawAdvisories = true
+	}
 
 	if p.o.Plain {
 		fmt.Fprintf(p.w, "[%s] %s - %s\n", sev, f.Title, f.URL)
 		if detail != "" {
 			fmt.Fprintf(p.w, "  evidence: %s\n", detail)
+		}
+		for _, a := range advisories {
+			fmt.Fprintf(p.w, "  - %s\n", a)
 		}
 		if len(secrets) > 0 {
 			fmt.Fprintf(p.w, "  secrets: %s\n", strings.Join(secrets, "  "))
@@ -168,6 +183,9 @@ func (p *Pretty) Finding(f engine.Finding) {
 		} else if detail != "" {
 			lines = append(lines, ui.Dim.Render("  "+detail))
 		}
+		for _, a := range advisories {
+			lines = append(lines, ui.Dim.Render(truncate("  "+a, width-4)))
+		}
 		if fix != "" {
 			lines = append(lines, ui.Dim.Render(truncate("  fix → "+fix, width-4)))
 		}
@@ -179,6 +197,9 @@ func (p *Pretty) Finding(f engine.Finding) {
 	fmt.Fprintf(p.w, "  %s  %s  %s\n", tag.Render(fmt.Sprintf("%s %-6s", glyphs[f.Severity], sev)), f.Title, ui.Dim.Render(f.Path))
 	if len(secrets) > 0 {
 		fmt.Fprintf(p.w, "             %s\n", strings.Join(secrets, "  "))
+	}
+	for _, a := range advisories {
+		fmt.Fprintf(p.w, "             %s\n", ui.Dim.Render(truncate(a, width)))
 	}
 	if f.Severity == engine.High {
 		if detail != "" {
@@ -216,11 +237,20 @@ func (p *Pretty) Summary(res *engine.Result, target string, suppressed int) {
 	}
 	score := fmt.Sprintf("Score %d/100", res.Score)
 
+	var notes []string
+	notes = append(notes, res.Warnings...)
+	if p.sawAdvisories {
+		notes = append(notes, "vulnerability data: WPVulnerability (wpvulnerability.com, CC0)")
+	}
+
 	if p.o.Plain {
 		if len(parts) == 0 {
 			parts = []string{"no findings"}
 		}
 		fmt.Fprintf(p.w, "\n%s - %s - %s\n", score, strings.Join(parts, ", "), strings.Join(stats, ", "))
+		for _, n := range notes {
+			fmt.Fprintf(p.w, "note: %s\n", n)
+		}
 		return
 	}
 	scoreColor := ui.Danger
@@ -235,6 +265,9 @@ func (p *Pretty) Summary(res *engine.Result, target string, suppressed int) {
 		parts = []string{ui.Good.Render("✔ nothing out of tune")}
 	}
 	fmt.Fprintf(p.w, "\n  %s · %s\n  %s\n", score, strings.Join(parts, " · "), ui.Dim.Render(strings.Join(stats, " · ")))
+	for _, n := range notes {
+		fmt.Fprintf(p.w, "  %s\n", ui.Dim.Render("! "+n))
+	}
 	fmt.Fprintf(p.w, "  %s\n\n", ui.Dim.Render("→ rhythm tuner scan "+target+" --md > report.md"))
 }
 
