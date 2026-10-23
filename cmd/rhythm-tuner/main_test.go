@@ -323,3 +323,15 @@ func TestKnownExploitedTagSelectsVulnMatching(t *testing.T) {
 		t.Errorf("--tags known-exploited: exit %d: %s", code, errs)
 	}
 }
+
+// A batch gives an array even when only one site could be scanned, so
+// scripts can always loop over the result.
+func TestBatchJSONStaysArray(t *testing.T) {
+	dead := httptest.NewServer(http.NotFoundHandler())
+	dead.Close()
+	_, out, _ := tuner(t, "scan", cleanSite(t).URL, dead.URL, "--json")
+	var reps []struct{ Target string }
+	if err := json.Unmarshal([]byte(out), &reps); err != nil || len(reps) != 1 {
+		t.Errorf("want an array with the one reachable site, got %v:\n%.200s", err, out)
+	}
+}

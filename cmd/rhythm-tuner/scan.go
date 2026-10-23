@@ -466,7 +466,7 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 	var werr error
 	switch p.format {
 	case "json":
-		werr = report.JSON(out, reports)
+		werr = report.JSON(out, reports, len(p.targets) > 1)
 	case "sarif":
 		werr = report.SARIF(out, reports, version)
 	case "md":

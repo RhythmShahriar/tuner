@@ -44,11 +44,15 @@ func encoder(w io.Writer) *json.Encoder {
 	return enc
 }
 
-// JSON writes one report as an object, or several as an array.
-func JSON(w io.Writer, reports []Report) error {
+// JSON writes one target's report as an object, or several targets' as an array.
+//
+// many says whether several targets were scanned. The shape follows the
+// request, not how many scans succeeded, so a script reading a batch
+// always gets an array even when only one site could be reached.
+func JSON(w io.Writer, reports []Report, many bool) error {
 	enc := encoder(w)
 	enc.SetIndent("", "  ")
-	if len(reports) == 1 {
+	if len(reports) == 1 && !many {
 		return enc.Encode(reports[0])
 	}
 	if reports == nil {
