@@ -82,6 +82,15 @@ func (c *Client) supportedBranches(ctx context.Context, now time.Time) ([]Branch
 	return out, stale, nil
 }
 
+// branchOf returns the major.minor branch of a version: 8.1.2 → 8.1.
+func branchOf(v string) string {
+	p := strings.SplitN(v, ".", 3)
+	if len(p) < 2 {
+		return v
+	}
+	return p[0] + "." + p[1]
+}
+
 func published(v Vuln) (time.Time, bool) {
 	if len(v.Published) < len(time.DateOnly) {
 		return time.Time{}, false
@@ -97,6 +106,52 @@ func advisoryKey(v Vuln) string {
 		return v.CVEs[0]
 	}
 	return v.ID
+}
+
+// newerPHPFlaws finds advisories disclosed after an end-of-life branch lost
+// support. WPVulnerability stops listing new CVEs for such branches, so they
+// are inferred: an advisory for the oldest supported branch with no lower
+// bound affects every older release too, and will never be fixed on an EOL
+// branch. Advisories rec already lists are skipped. It returns nothing when
+// version's branch is still supported.
+func (a *Advisor) newerPHPFlaws(ctx context.Context, rec *Record, version string, now time.Time) (flaws []Vuln, from string, stale bool, err error) {
+	eol, perr := time.Parse(time.DateOnly, rec.EndOfLife)
+	if perr != nil || !now.After(eol) {
+		return nil, "", false, nil
+	}
+	supported, stale, err := a.Client.supportedBranches(ctx, now)
+	if err != nil {
+		return nil, "", false, err
+	}
+	i := slices.IndexFunc(supported, func(b Branch) bool { return Compare(b.Version, branchOf(version)) > 0 })
+	if i < 0 {
+		return nil, "", stale, nil
+	}
+	from = supported[i].Version
+	newer, s, err := a.Client.Advisories(ctx, "php", from+".0")
+	if err != nil {
+		return nil, "", false, err
+	}
+	known := map[string]bool{}
+	for _, v := range rec.Vulns {
+		known[v.ID] = true
+		for _, c := range v.CVEs {
+			known[c] = true
+		}
+	}
+	for _, v := range newer.Vulns {
+		pub, ok := published(v)
+		if v.Min != "" || !ok || !pub.After(eol) || known[v.ID] || slices.ContainsFunc(v.CVEs, func(c string) bool { return known[c] }) {
+			continue
+		}
+		known[v.ID] = true
+		for _, c := range v.CVEs {
+			known[c] = true
+		}
+		v.Max, v.MaxOp, v.Unfixed = "", "", true
+		flaws = append(flaws, v)
+	}
+	return flaws, from, stale || s, nil
 }
 
 // recentFlaw is one critical or actively exploited PHP advisory, merged

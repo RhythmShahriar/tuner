@@ -188,8 +188,8 @@ func TestAdvise(t *testing.T) {
 	if ev := php.Evidence.Matched; ev[len(ev)-1] != "version from x-powered-by /wp-login.php" {
 		t.Errorf("php evidence doesn't say where the version came from: %v", ev)
 	}
-	if _, ok := got["php-eol"]; !ok {
-		t.Error("no php-eol finding for PHP 7.4")
+	if eol := got["php-eol"]; eol.Severity != engine.High || !strings.Contains(eol.Impact, "never fixed") {
+		t.Errorf("php-eol for PHP 7.4 = %+v", eol)
 	}
 	if _, ok := got["php-version-hidden"]; ok {
 		t.Error("php-version-hidden with a known PHP version")

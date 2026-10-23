@@ -120,3 +120,110 @@ func TestPHPVersionHiddenQuiet(t *testing.T) {
 		t.Errorf("php.net down: findings %v, warnings %v", keys(byID(findings)), warnings)
 	}
 }
+
+func TestPHPEndOfLife(t *testing.T) {
+	f := newFakeAPI(t)
+	a := newAdvisor(f, t.TempDir())
+	fp := fingerprint.Result{Tech: []string{"wordpress", "php"}, PHP: "8.1.2", PHPSource: "x-powered-by /wp-login.php"}
+	findings, warnings := a.Advise(context.Background(), base, fp)
+	if len(warnings) != 0 {
+		t.Errorf("warnings: %v", warnings)
+	}
+	got := byID(findings)
+	if _, ok := got["php-version-hidden"]; ok {
+		t.Error("php-version-hidden with a known version")
+	}
+
+	eol := got["php-eol"]
+	if eol.Severity != engine.High || !strings.Contains(eol.Impact, "never fixed") || !strings.Contains(eol.Impact, "13 flaws disclosed since support ended") ||
+		!strings.Contains(eol.Fix, "8.2 or later") {
+		t.Errorf("php-eol = %+v", eol)
+	}
+
+	php := got["vuln-php"]
+	byCVE := map[string]engine.Advisory{}
+	for _, ad := range php.Advisories {
+		for _, c := range ad.CVEs {
+			if _, dup := byCVE[c]; dup {
+				t.Errorf("%s listed twice", c)
+			}
+			byCVE[c] = ad
+		}
+	}
+	// Disclosed after 8.1's end of life (2025-12-31): inferred from 8.2, unfixed.
+	if ad, ok := byCVE["CVE-2026-109618"]; !ok || ad.FixedIn != "" || ad.Severity != engine.Critical {
+		t.Errorf("CVE-2026-109618 = %+v", ad)
+	}
+	// 8.2-only flaws from before 8.1's end of life aren't inferred.
+	if _, ok := byCVE["CVE-2024-8932"]; ok && byCVE["CVE-2024-8932"].FixedIn == "" {
+		t.Error("CVE-2024-8932 inferred, but it predates 8.1's end of life")
+	}
+	// 8.1's own advisories keep their fixed version.
+	if ad := byCVE["CVE-2025-14177"]; ad.FixedIn != "8.1.34" {
+		t.Errorf("CVE-2025-14177 = %+v", ad)
+	}
+	ev := strings.Join(php.Evidence.Matched, "\n")
+	if !strings.Contains(ev, "(no fix for this branch)") || !strings.Contains(ev, "version from x-powered-by /wp-login.php") {
+		t.Errorf("evidence:\n%s", ev)
+	}
+	if php.Severity != engine.Critical || php.Confidence != "high" || !strings.Contains(php.Fix, "supported PHP branch (8.2 or later)") ||
+		!strings.Contains(php.Impact, "never be fixed") {
+		t.Errorf("vuln-php: %s %s\nfix %s\nimpact %s", php.Severity, php.Confidence, php.Fix, php.Impact)
+	}
+}
+
+// Fixtures reproduce the API's quirks: "impact": [] for unscored advisories,
+// unfixed as 0 or "0", and null bounds.
+func TestNewerPHPFlaws(t *testing.T) {
+	f := newFakeAPI(t, map[string]string{
+		"/php/7.4.33/": `{"error":0,"data":{"php":"7.4","name":"PHP 7.4","date_end":"2022-11-28","vulnerability":[
+			{"uuid":"own","name":"PHP 7.4 < 7.4.33","operator":{"min_version":null,"max_version":"7.4.33","max_operator":"lt","unfixed":0},
+			 "source":[{"id":"CVE-2022-0001","link":"https://cve.org/1","description":"[en] Own flaw.","date":"2022-10-01"}],"impact":[]}]}}`,
+		"/php/8.2.0/": `{"error":0,"data":{"php":"8.2","name":"PHP 8.2","date_end":"2026-12-31","vulnerability":[
+			{"uuid":"a","name":"PHP 8.2 < 8.2.20","operator":{"min_version":null,"min_operator":null,"max_version":"8.2.20","max_operator":"lt","unfixed":"0"},
+			 "source":[{"id":"CVE-2024-0002","link":"https://cve.org/2","description":"[en] In PHP versions 8.1.* before 8.1.29, 8.2.* before 8.2.20, the parser overflows.","date":"2024-06-01"}],
+			 "impact":{"cvss3":{"score":"9.8","severity":"c"},"kev":{"date_added":"2024-07-01"}}},
+			{"uuid":"b","name":"PHP 8.2 < 8.2.20","operator":{"min_version":"8.2.0","min_operator":"ge","max_version":"8.2.20","max_operator":"lt","unfixed":0},
+			 "source":[{"id":"CVE-2024-0003","link":"https://cve.org/3","description":"[en] Only 8.2.","date":"2024-06-01"}],"impact":[]},
+			{"uuid":"c","name":"PHP 8.2 < 8.2.5","operator":{"max_version":"8.2.5","max_operator":"lt","unfixed":0},
+			 "source":[{"id":"CVE-2022-0001","link":"https://cve.org/1","description":"[en] Own flaw.","date":"2023-01-05"}],"impact":[]},
+			{"uuid":"d","name":"PHP 8.2 < 8.2.1","operator":{"max_version":"8.2.1","max_operator":"lt","unfixed":0},
+			 "source":[{"id":"CVE-2022-0004","link":"https://cve.org/4","description":"[en] Old.","date":"2022-11-01"}],"impact":[]},
+			{"uuid":"e","name":"PHP 8.2 < 8.2.30","operator":{"max_version":"8.2.30","max_operator":"lt","unfixed":0},
+			 "source":[{"id":"CVE-2025-0005","link":"https://cve.org/5","description":"[en] Unscored.","date":"2025-03-01"}],"impact":[]}
+		]}}`,
+	})
+	a := newAdvisor(f, t.TempDir())
+	ctx := context.Background()
+	rec, _, err := a.Client.Advisories(ctx, "php", "7.4.33")
+	if err != nil {
+		t.Fatal(err)
+	}
+	flaws, from, _, err := a.newerPHPFlaws(ctx, rec, "7.4.33", a.Now())
+	if err != nil || from != "8.2" {
+		t.Fatalf("from %q, err %v", from, err)
+	}
+	var ids []string
+	for _, v := range flaws {
+		ids = append(ids, v.CVEs[0])
+		if v.FixedIn() != "" || !v.Affects("7.4.33") {
+			t.Errorf("%s: fixed in %q", v.CVEs[0], v.FixedIn())
+		}
+	}
+	// 0003 has a lower bound, 0001 is already listed, 0004 predates the end of life.
+	if want := []string{"CVE-2024-0002", "CVE-2025-0005"}; !slices.Equal(ids, want) {
+		t.Errorf("inferred %v, want %v", ids, want)
+	}
+	if flaws[0].Title != "The parser overflows." || !flaws[0].KEV || flaws[0].Severity != "critical" {
+		t.Errorf("flaw %+v", flaws[0])
+	}
+
+	// A supported branch infers nothing, and doesn't ask php.net.
+	rec.EndOfLife = "2099-01-01"
+	f.mu.Lock()
+	f.paths = nil
+	f.mu.Unlock()
+	if flaws, _, _, err := a.newerPHPFlaws(ctx, rec, "7.4.33", a.Now()); len(flaws) != 0 || err != nil || f.requested("/releases/") {
+		t.Errorf("supported: %v %v", flaws, err)
+	}
+}
