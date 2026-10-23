@@ -135,7 +135,24 @@ The command line `php` can differ from the PHP your web server runs (PHP-FPM poo
 
 Secrets found in these files are shown masked, as everywhere else. For a Laravel project (an `artisan` file and a `public/` folder), only `public/` is the web root, so the project's own `.env` and `.git` aren't reported.
 
-**What it reads.** Tuner never changes the scanned files and never runs the site's code: `php` runs with `-n`, so no php.ini (and no `auto_prepend_file`) is loaded. The walk skips `node_modules`, `vendor`, `wp-content/cache` and the media folders in `wp-content/uploads/<year>`; it doesn't follow symlinks, reads at most 1 MB of any file, and stops after 250,000 entries. Request flags (`--rate`, `-H`, `--proxy` for the site…) don't apply, and the HTTP checks don't run; select local findings with `--id 'local-*'` or `--tags local`.
+**Session upload progress (CVE-2026-115560).** This unpatched PHP flaw is only reachable when all four hold: `session.serialize_handler` is `php_binary` or `php_serialize`; the application switches it to `php` with `ini_set()`; it does so before `session_start()`; and `session.upload_progress.enabled` is on (the default). A local scan checks each one and shows ✓, ✗ or ? with the file or setting behind it:
+
+- **Settings** come from what `php` itself reports and, because the CLI's settings often differ from the web server's, from the web server's own ini files and PHP-FPM pools (Debian/Ubuntu `/etc/php/<v>/{fpm,apache2,cgi}`, `/etc/php-fpm.d`, Alpine `/etc/php*/php-fpm.d`, the official Docker images' `/usr/local/etc/php-fpm.d`) and `.user.ini`/`.htaccess` overrides in the site. When the web server's settings are found, the CLI's don't count.
+- **Code** is every PHP file in the site, `vendor/` included (libraries manage sessions too). Comments and text inside strings are ignored.
+
+| Result | Severity |
+|---|---|
+| all four conditions confirmed | high |
+| configuration unsafe, but the order of calls couldn't be confirmed from one file | high, *likely* |
+| the code switches the handler but PHP's configuration couldn't be read | medium, *likely* |
+| the code switches the handler, but the configured handler is `php` | low |
+| upload progress is off everywhere checked | info: mitigated |
+
+Sites whose code never switches the handler get no finding: PHP says they aren't affected. The fix, until PHP releases one, is `session.upload_progress.enabled = 0` in php.ini or the FPM pool (`php_admin_flag[session.upload_progress.enabled] = off`).
+
+From outside, Tuner can only see the two settings, and only when a `phpinfo()` page is exposed: `php-session-upload-progress` reports that, at low confidence, alongside `php-phpinfo`.
+
+**What it reads.** Tuner never changes the scanned files and never runs the site's code. The version query runs `php -n`, so no php.ini (and no `auto_prepend_file`) is loaded; the session-settings query loads php.ini, to see the real values, with `auto_prepend_file` and `auto_append_file` forced empty. The stray-file walk skips `node_modules`, `vendor`, `wp-content/cache` and the media folders in `wp-content/uploads/<year>`; it doesn't follow symlinks, reads at most 1 MB of any file, and stops after 250,000 entries. Request flags (`--rate`, `-H`, `--proxy` for the site…) don't apply, and the HTTP checks don't run; select local findings with `--id 'local-*'` or `--tags local`.
 
 ## Updating Tuner
 
