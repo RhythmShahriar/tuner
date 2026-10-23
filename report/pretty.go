@@ -178,7 +178,14 @@ func (p *Pretty) Finding(f engine.Finding) {
 	for _, s := range f.Evidence.Secrets {
 		secrets = append(secrets, s.String())
 	}
-	fmt.Fprintf(p.w, "[%s] %s - %s\n", strings.ToUpper(string(f.Severity)), f.Title, f.URL)
+	label := strings.ToUpper(string(f.Severity))
+	if f.Confidence == "low" {
+		label += ", likely"
+	}
+	fmt.Fprintf(p.w, "[%s] %s - %s\n", label, f.Title, f.URL)
+	if f.Confidence == "low" && f.Caveat != "" {
+		fmt.Fprintf(p.w, "  %s\n", f.Caveat)
+	}
 	switch {
 	case len(f.Advisories) > 0:
 		for _, a := range advisoryLines(f, 3) {
