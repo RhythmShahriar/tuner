@@ -85,6 +85,7 @@ type Finding struct {
 	Title      string     `json:"title"`
 	Severity   Severity   `json:"severity"`
 	Confidence string     `json:"confidence"`
+	Caveat     string     `json:"caveat,omitempty"` // why confidence is low, e.g. "a distro build may already include the fix"
 	Target     string     `json:"target"`
 	URL        string     `json:"url"`
 	Path       string     `json:"path"`

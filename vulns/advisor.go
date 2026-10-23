@@ -346,6 +346,7 @@ func (a *Advisor) vulnFinding(base *url.URL, l *lookup) (engine.Finding, bool) {
 func (a *Advisor) distroCaveat(f *engine.Finding, build string) {
 	if backported.MatchString(build) {
 		f.Confidence = "low"
+		f.Caveat = "a distro build may already include the fix"
 		f.Impact += " The server reports a distribution build (" + build + "), which may include backported fixes; check the package's security status before acting."
 	}
 }

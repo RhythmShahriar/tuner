@@ -1,6 +1,7 @@
 package report
 
 import (
+	"cmp"
 	"fmt"
 	"io"
 	"strings"
@@ -232,7 +233,7 @@ func card(f engine.Finding) string {
 		body = append(body, indent+style.Render(truncate(s, width-titleIndent-2)))
 	}
 	if lowConf {
-		add("~ likely: a distro build may already include the fix", muted.Italic(true))
+		add("~ likely: "+cmp.Or(f.Caveat, "not confirmed from outside"), muted.Italic(true))
 	}
 	var secrets []string
 	for _, s := range f.Evidence.Secrets {
