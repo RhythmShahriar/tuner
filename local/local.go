@@ -51,6 +51,9 @@ type Options struct {
 	// MaxEntries caps how many files and directories the walk visits; 0
 	// means 250,000.
 	MaxEntries int
+	// ConfigRoot is where PHP's system configuration (/etc/php…, PHP-FPM
+	// pools) is read from; empty means "/". Tests point it at a fake tree.
+	ConfigRoot string
 }
 
 // Scan scans the directory root. The fingerprint and then each finding
@@ -109,6 +112,7 @@ func Scan(ctx context.Context, root string, opts Options, h engine.Hooks) (*engi
 	findings = append(findings, s.laravelEnv()...)
 	findings = append(findings, s.walk(ctx)...)
 	findings = append(findings, s.composer(ctx)...)
+	findings = append(findings, s.sessionUploadProgress(ctx)...)
 	findings, _ = engine.Filtered(static(findings), opts.Select).Advise(ctx, s.base, *fp)
 	if opts.Advisor != nil && ctx.Err() == nil {
 		more, warnings := opts.Advisor.Advise(ctx, s.base, *fp)
