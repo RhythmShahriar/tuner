@@ -37,6 +37,7 @@ type Pretty struct {
 	o       PrettyOptions
 	start   time.Time
 	drawn   bool // a progress line is on screen and must be cleared first
+	spaced  bool // a blank line already separates the scan steps from the report
 	tally   map[engine.Severity]int
 }
 
@@ -108,6 +109,7 @@ func (p *Pretty) Baseline(soft404 bool) {
 	}
 	if !p.o.Quiet {
 		fmt.Fprintln(p.w)
+		p.spaced = true
 	}
 }
 
@@ -294,7 +296,11 @@ func (p *Pretty) Summary(res *engine.Result, target string, suppressed int) {
 			parts = append(parts, fmt.Sprintf("%d %s", n, s))
 		}
 	}
-	stats := []string{fmt.Sprintf("%d checks", res.Checks), fmt.Sprintf("%d requests", res.Requests), res.Duration.Round(100 * time.Millisecond).String()}
+	stats := []string{fmt.Sprintf("%d checks", res.Checks)}
+	if res.Requests > 0 { // local scans make none
+		stats = append(stats, fmt.Sprintf("%d requests", res.Requests))
+	}
+	stats = append(stats, res.Duration.Round(100*time.Millisecond).String())
 	if suppressed > 0 {
 		stats = append(stats, fmt.Sprintf("%d baselined", suppressed))
 	}
@@ -337,6 +343,9 @@ func (p *Pretty) Summary(res *engine.Result, target string, suppressed int) {
 // report prints findings grouped by severity: cards for critical, high and
 // medium, a compact list for low and info.
 func (p *Pretty) report(findings []engine.Finding) {
+	if !p.spaced && !p.o.Quiet && len(findings) > 0 {
+		fmt.Fprintln(p.w) // local scans have no baseline step to print it
+	}
 	groups := map[engine.Severity][]engine.Finding{}
 	for _, f := range findings {
 		groups[f.Severity] = append(groups[f.Severity], f)

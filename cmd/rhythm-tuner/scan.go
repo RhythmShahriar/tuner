@@ -255,7 +255,8 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 	}
 
 	// Checks.
-	p.checkSet, err = loadCheckSet(o.checksDir, !o.noCheckUpdates, o.offline, ua, proxy)
+	// Local scans don't run HTTP checks, so they never need a check pack.
+	p.checkSet, err = loadCheckSet(o.checksDir, !o.noCheckUpdates && !allLocal, o.offline, ua, proxy)
 	if err != nil {
 		return nil, fmt.Errorf("loading checks: %w", err)
 	}
