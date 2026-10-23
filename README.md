@@ -33,3 +33,8 @@ Scan only sites you own or are authorised to test.
 make hooks   # Conventional Commits check
 make check   # lint + tests (every check runs against its fixtures)
 ```
+
+## License
+
+The scanner is [AGPL-3.0](LICENSE); the checks in [`checks/`](checks) are [MIT](checks/LICENSE), so anyone can reuse them.
+Copyright 2026 Rhythm Shahriar.
