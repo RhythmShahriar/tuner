@@ -540,7 +540,7 @@ func wantsVulns(s engine.Selector) bool {
 	if slices.Contains(s.ExcludeTags, "vuln") {
 		return false
 	}
-	advisorTags := []string{"vuln", "wordpress", "php", "outdated", "abandoned", "nginx", "apache", "core", "plugin", "theme", "composer"}
+	advisorTags := []string{"vuln", "wordpress", "php", "outdated", "abandoned", "nginx", "apache", "core", "plugin", "theme", "composer", "known-exploited"}
 	if len(s.Tags) > 0 && !hasAny(s.Tags, advisorTags) {
 		return false
 	}
