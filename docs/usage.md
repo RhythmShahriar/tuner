@@ -14,6 +14,7 @@ rhythm tuner checks                  # list checks
 2. **TLS.** For https sites, reads the certificate's expiry and trust and tests whether TLS 1.0/1.1 are still accepted.
 3. **Baseline.** Requests random paths to learn how the server answers "not found", so sites that return 200 for everything don't produce false findings.
 4. **Checks.** Runs each check's requests, without following redirects, and streams findings as they're found.
+5. **Known vulnerabilities.** Matches the WordPress, plugin, theme, PHP, nginx and Apache versions it found against public advisories (see below). This runs alongside the checks.
 
 Tuner only sends plain GET requests to public URLs. It never sends exploit payloads.
 
@@ -33,6 +34,49 @@ Tuner only sends plain GET requests to public URLs. It never sends exploit paylo
 
 `rhythm tuner checks` accepts the same flags, so you can preview a selection.
 
+## Known vulnerabilities
+
+Tuner reports one finding per vulnerable component, listing every advisory that applies, with its CVE, severity, the version that fixes it, and whether it's in CISA's Known Exploited Vulnerabilities catalog:
+
+```
+✖ CRITICAL  WordPress 6.9.3: 22 known vulnerabilities
+■ MEDIUM    elementor 3.20.1: 26 known vulnerabilities
+              MEDIUM CVE-2024-54444 Elementor Website Builder <= 3.25.10 - …
+```
+
+It also reports:
+
+| ID | When |
+|---|---|
+| `vuln-core`, `vuln-plugin-<slug>`, `vuln-theme-<slug>` | published vulnerabilities affect the installed version |
+| `vuln-php`, `vuln-nginx`, `vuln-apache` | the server software version has known vulnerabilities |
+| `php-eol`, `nginx-eol`, `apache-eol` | the branch no longer gets security fixes |
+| `wp-core-outdated`, `wp-components-outdated` | a newer release exists |
+| `wp-plugin-closed`, `wp-theme-closed` | removed from wordpress.org, often for an unfixed security issue |
+| `wp-components-abandoned` | no release in over two years |
+| `wp-components-unverified` | known vulnerabilities exist but the installed version couldn't be read |
+
+Versions reported by distribution packages (e.g. `PHP/7.4.3-4ubuntu2.19`, `Apache/2.4.41 (Ubuntu)`) get low confidence: distributions backport security fixes without changing the version number.
+
+**Data.** Advisories come from [WPVulnerability](https://www.wpvulnerability.com/), which aggregates CVE, Wordfence, WPScan and Patchstack and publishes them as public domain (CC0). Latest-release information comes from the wordpress.org API. No API key is needed.
+
+**Updates are automatic.** Each component's data is cached under your user cache directory (`~/.cache/rhythm/tuner/vulns` on Linux) and refreshed during a scan once it's a day old. If the data services can't be reached, Tuner uses the cached copy and says so.
+
+| | |
+|---|---|
+| `rhythm tuner update` | refresh all cached data now |
+| `rhythm tuner update --clear` | delete the cache |
+| `--offline` | use cached data only; never contact the data services |
+| `--no-vulns` | skip vulnerability matching |
+| `--id 'vuln-*'` | only vulnerability matching |
+| `TUNER_VULN_API`, `TUNER_WPORG_API` | use mirrors of the two APIs |
+
+## Updating Tuner
+
+`rhythm update` updates rhythm, every installed tool, and their data. Each download is checked against the release's `checksums.txt` before anything is replaced. `rhythm update --check` only reports.
+
+After a scan, Tuner mentions when a newer release is out. It checks GitHub at most once a day, never in CI, and never when `RHYTHM_NO_UPDATE_CHECK=1` is set. Binaries are never replaced without you running `rhythm update`.
+
 ## Requests
 
 | Flag | Default | |
@@ -45,7 +89,7 @@ Tuner only sends plain GET requests to public URLs. It never sends exploit paylo
 | `-A, --user-agent` | `rhythm-tuner/<version> (+https://rythm.sh/tuner)` | |
 | `-H, --header` | | `"Name: value"`, repeatable; `Host:` sets the virtual host |
 | `--cookie` | | e.g. `"wordpress_logged_in_x=…"` to scan as a logged-in user |
-| `--proxy` | `$HTTPS_PROXY` | `http://`, `https://` or `socks5://` |
+| `--proxy` | `$HTTPS_PROXY` | `http://`, `https://` or `socks5://`; also used for vulnerability data |
 | `-k, --insecure` | off | scan sites with invalid certificates (still reported) |
 
 **Throttling.** When a site answers `429 Too Many Requests` or `503`, Tuner waits as long as `Retry-After` asks (up to 30s), retries, and halves its request rate for the rest of the scan. The summary shows how often that happened.
