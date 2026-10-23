@@ -3,6 +3,7 @@
 ```sh
 rhythm tuner                         # interactive picker
 rhythm tuner scan example.com        # scan a site
+rhythm tuner scan /var/www/site      # scan a site's files on the server
 rhythm tuner checks                  # list checks
 ```
 
@@ -79,6 +80,62 @@ Versions reported by distribution packages (e.g. `PHP/7.4.3-4ubuntu2.19`, `Apach
 | `--id 'vuln-*'` | only vulnerability matching |
 | `TUNER_VULN_API`, `TUNER_WPORG_API`, `TUNER_PHPNET_API` | use mirrors of WPVulnerability, api.wordpress.org and php.net |
 | `TUNER_CHECKS_URL` | fetch check packs from a mirror of the `checks-latest` release assets |
+
+## Local scans
+
+Point Tuner at a directory instead of a URL to scan a site's files in place, usually on the server itself:
+
+```sh
+rhythm tuner scan /var/www/example.com
+rhythm tuner scan . --php /usr/bin/php8.3 --fail-on high
+```
+
+A target is local when it starts with `.`, `/` or `~`, or names an existing directory. From the outside Tuner has to guess versions, and many servers hide PHP's; on the machine it reads them:
+
+| What | Where it comes from |
+|---|---|
+| PHP | `php -n -r 'echo PHP_VERSION;'` using the `php` on `PATH`, or `--php <binary>` |
+| WordPress | `$wp_version` in `wp-includes/version.php` |
+| Plugins | the `Version:` header of each plugin's main file: the installed version, not readme.txt's Stable tag |
+| Themes | the `Version:` header of each theme's `style.css` |
+| Composer packages | `composer.lock` |
+
+These go through the same known-vulnerability matching as remote scans (`vuln-*`, `php-eol`, `wp-components-outdated`…), with `file://` locations. Composer packages are matched against [OSV.dev](https://osv.dev/) (GitHub Advisory Database and FriendsOfPHP), reported as `vuln-composer-<vendor>-<package>`, and cached with the rest of the vulnerability data; `TUNER_OSV_API` points at a mirror.
+
+The command line `php` can differ from the PHP your web server runs (PHP-FPM pools often use another version). If several are installed, pass the one that serves the site with `--php`. If no `php` is found, Tuner says so and skips the PHP check. Must-use plugins are listed but not matched: they're usually custom code.
+
+**wp-config.php** is read as text, never run. Settings that come from `getenv()` or other code aren't judged, and when wp-config.php includes other files, findings about missing settings are marked "likely".
+
+| ID | Severity | When |
+|---|---|---|
+| `local-wp-salts` | medium | keys and salts missing, left as the sample placeholder, empty, or duplicated. WordPress then falls back to salts stored in the database, so a database leak lets an attacker forge login cookies |
+| `local-wp-debug` | medium | `WP_DEBUG` on and errors shown to visitors, or logged to the public `wp-content/debug.log` |
+| | low | `WP_DEBUG` on, but errors hidden and logged elsewhere |
+| `local-wp-file-edit` | low | `DISALLOW_FILE_EDIT` not true: an admin account takeover becomes code execution. Defense in depth, so low |
+| `local-wp-config-perms` | low | wp-config.php readable by every user on the server |
+| `local-wp-table-prefix` | info | the default `wp_` table prefix. Obscurity only, so no score penalty |
+| `local-wp-force-ssl-admin` | info | `FORCE_SSL_ADMIN` not true. Most sites redirect to HTTPS at the server anyway |
+| `local-laravel-debug` | medium | `APP_DEBUG=true` in a Laravel project's `.env` |
+
+**Files that don't belong in a web root.** A local scan can't tell whether the server actually serves a file; the remote checks confirm that. So most are rated a level below their remote counterparts (an `.env` confirmed downloadable is critical; one sitting in the web root is high). PHP tools like phpinfo and Adminer keep their remote severity: in a web root they almost always run.
+
+| ID | Severity | What |
+|---|---|---|
+| `local-dotenv` | high (medium without secrets) | `.env`, `.env.production`… (not `.env.example`) |
+| `local-wp-config-backup` | high | `wp-config.php.bak`, `.old`, `.save`, `~`, `.swp`… served as plain text |
+| `local-sql-dump` | high | `*.sql`, `*.sql.gz` and other dumps, SQLite files |
+| `local-backup-archive` | high | backup-looking archives, `.wpress`, any archive at the top level |
+| `local-composer-auth` | high | Composer `auth.json` with tokens |
+| `local-private-key` | high | private keys (`*.pem`, `*.key`, `id_rsa`) |
+| `local-vcs-dir` | medium | `.git`, `.svn`, `.hg` |
+| `local-php-backup` | medium | backup copies of PHP files, e.g. `functions.php~` |
+| `local-log-file` | medium | `debug.log`, `error_log` |
+| `local-phpinfo` | medium | a PHP file that calls `phpinfo()` |
+| `local-db-admin` | medium | Adminer or phpMyAdmin |
+
+Secrets found in these files are shown masked, as everywhere else. For a Laravel project (an `artisan` file and a `public/` folder), only `public/` is the web root, so the project's own `.env` and `.git` aren't reported.
+
+**What it reads.** Tuner never changes the scanned files and never runs the site's code: `php` runs with `-n`, so no php.ini (and no `auto_prepend_file`) is loaded. The walk skips `node_modules`, `vendor`, `wp-content/cache` and the media folders in `wp-content/uploads/<year>`; it doesn't follow symlinks, reads at most 1 MB of any file, and stops after 250,000 entries. Request flags (`--rate`, `-H`, `--proxy` for the site…) don't apply, and the HTTP checks don't run; select local findings with `--id 'local-*'` or `--tags local`.
 
 ## Updating Tuner
 

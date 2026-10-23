@@ -58,6 +58,7 @@ func usage(w io.Writer) {
 Usage:
   rhythm tuner                       interactive picker
   rhythm tuner scan <url>... [flags] scan one or more sites
+  rhythm tuner scan <dir> [flags]    scan a site's files on the server
   rhythm tuner checks [flags]        list the checks
   rhythm tuner update [--clear]      refresh the check pack and vulnerability data now
 
@@ -97,6 +98,13 @@ Requests:
       --proxy <url>        http, https or socks5 proxy (HTTPS_PROXY also works)
   -k, --insecure           don't verify TLS certificates
 
+Local scans (when the target is a directory):
+      --php <binary>       php to ask for the PHP version (default: php on PATH)
+                           Reads WordPress, plugin, theme and composer.lock
+                           versions from disk, reviews wp-config.php and finds
+                           files that don't belong in a web root. Never runs
+                           site code; request flags don't apply.
+
 Batch and CI:
   -l, --list <file>        read targets from a file, one per line
       --stdin              read targets from stdin
@@ -105,10 +113,11 @@ Batch and CI:
       --baseline <file>    hide findings already in this JSON report
 
 Vulnerability data comes from WPVulnerability (CC0), api.wordpress.org and
-php.net. New checks arrive as a check pack from Tuner's GitHub releases. Both
-are cached under your user cache directory and refreshed automatically once a
-day; TUNER_VULN_API, TUNER_WPORG_API, TUNER_PHPNET_API and TUNER_CHECKS_URL
-point Tuner at mirrors.
+php.net; Composer packages are matched with OSV.dev. New checks arrive as a
+check pack from Tuner's GitHub releases. Both are cached under your user cache
+directory and refreshed automatically once a day; TUNER_VULN_API,
+TUNER_WPORG_API, TUNER_PHPNET_API, TUNER_OSV_API and TUNER_CHECKS_URL point
+Tuner at mirrors.
 
 Exit codes: 0 ok · 1 findings at --fail-on · 2 usage error · 3 scan error · 130 interrupted
 
@@ -118,5 +127,6 @@ Examples:
   rhythm tuner scan -l sites.txt --json > results.json
   rhythm tuner scan staging.example.com -H "Authorization: Basic dXNlcjpwYXNz" -k
   rhythm tuner scan example.com --sarif --fail-on high > tuner.sarif
+  rhythm tuner scan /var/www/example.com --php /usr/bin/php8.3
 `)
 }

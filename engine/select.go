@@ -31,9 +31,9 @@ func (p Profile) Rank() int { return slices.Index(Profiles, p) }
 var ErrNoChecks = errors.New("no checks match the selection; list them with: rhythm tuner checks")
 
 // IsAdvisorID reports whether an ID pattern names advisor findings
-// (vulnerability matching) rather than YAML checks.
+// (vulnerability matching) or local-scan findings rather than YAML checks.
 func IsAdvisorID(pattern string) bool {
-	for _, p := range []string{"vuln", "wp-core-", "wp-components-", "wp-plugin-closed", "wp-theme-closed", "php-eol", "php-version-hidden", "nginx-eol", "apache-eol"} {
+	for _, p := range []string{"vuln", "local-", "wp-core-", "wp-components-", "wp-plugin-closed", "wp-theme-closed", "php-eol", "php-version-hidden", "nginx-eol", "apache-eol"} {
 		if strings.HasPrefix(pattern, p) || strings.HasPrefix(p, strings.TrimSuffix(pattern, "*")) && strings.HasSuffix(pattern, "*") && pattern != "*" {
 			return true
 		}
