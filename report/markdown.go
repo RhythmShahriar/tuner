@@ -39,6 +39,9 @@ func Markdown(w io.Writer, reports []Report) error {
 		for _, f := range r.Findings {
 			fmt.Fprintf(&b, "\n### %s %s\n\n", sevEmoji(f.Severity), mdEscape(f.Title))
 			fmt.Fprintf(&b, "- **Check:** `%s` · **Severity:** %s · **Confidence:** %s\n", f.ID, f.Severity, f.Confidence)
+			if f.Confidence == "low" && f.Caveat != "" {
+				fmt.Fprintf(&b, "- **Why only likely:** %s\n", strings.TrimPrefix(f.Caveat, "likely: "))
+			}
 			if f.Evidence.Status != 0 {
 				fmt.Fprintf(&b, "- **Request:** `%s` → %d\n", f.Evidence.Request, f.Evidence.Status)
 			}
