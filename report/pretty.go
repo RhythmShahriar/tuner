@@ -106,7 +106,7 @@ func (p *Pretty) Progress(done, total int) {
 	const bar = 20
 	fill := bar * done / total
 	fmt.Fprintf(p.w, "\r\x1b[2K  %s %s %s  %d/%d · %s",
-		ui.Label.Render(spinner[done%len(spinner)]), ui.Label.Width(16).Render("Checks"),
+		ui.Brand.Render(spinner[done%len(spinner)]), ui.Label.Width(16).Render("Checks"),
 		ui.Brand.Render(strings.Repeat("█", fill))+ui.Dim.Render(strings.Repeat("░", bar-fill)),
 		done, total, time.Since(p.start).Round(100*time.Millisecond))
 	p.drawn = true
