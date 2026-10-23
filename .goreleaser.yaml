@@ -25,9 +25,14 @@ archives:
 checksum:
   name_template: checksums.txt
 
+# A tag like v0.4.0-rc1 is published as a prerelease, which GitHub never
+# reports as "latest", so rhythm update and the installers don't offer it.
+release:
+  prerelease: auto
+
 # Keyless Sigstore signature over checksums.txt. Verify with:
 #   cosign verify-blob --bundle checksums.txt.sigstore.json \
-#     --certificate-identity-regexp 'https://github.com/RhythmShahriar/' \
+#     --certificate-identity https://github.com/RhythmShahriar/.github/.github/workflows/release-go.yml@refs/heads/master \
 #     --certificate-oidc-issuer https://token.actions.githubusercontent.com checksums.txt
 signs:
   - cmd: cosign
@@ -50,4 +55,4 @@ changelog:
     - title: Other
       order: 999
   filters:
-    exclude: ['^docs:', '^test:', '^ci:', '^chore:', '^style:']
+    exclude: ['^(docs|test|ci|chore|style)(\(.+\))?!?:']
