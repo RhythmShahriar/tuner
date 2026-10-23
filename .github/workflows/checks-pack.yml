@@ -1,6 +1,6 @@
 # Publishes checks/ as a check pack on the rolling checks-latest release,
 # so new checks reach users without a new binary. rhythm-tuner downloads
-# the pack (see checkpack/ and docs/checks.md), verifies its checksums and
+# the pack (see checkpack/ and https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Check-Packs), verifies its checksums and
 # uses it when it's newer than the checks compiled into the binary.
 #
 # The release is a prerelease and is never marked latest: `rhythm update`
@@ -58,7 +58,7 @@ jobs:
 
           This is not a Tuner release. rhythm-tuner downloads these assets
           automatically, checks them against checks-sha256.txt, and uses them
-          when they are newer than its built-in checks. See docs/checks.md."
+          when they are newer than its built-in checks. See https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Check-Packs"
 
           if ! gh release view "$TAG" --repo "$repo" >/dev/null 2>&1; then
             # Anchor the tag on a parentless commit holding only a README.

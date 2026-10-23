@@ -21,9 +21,9 @@
   <a href="#install">Install</a> ·
   <a href="#scan">Scan</a> ·
   <a href="#what-it-finds">What it finds</a> ·
-  <a href="docs/usage.md">Docs</a> ·
-  <a href="docs/ci.md">CI</a> ·
-  <a href="docs/checks.md">Write a check</a>
+  <a href="https://github.com/RhythmShahriar/rhythm/wiki/Tuner">Docs</a> ·
+  <a href="https://github.com/RhythmShahriar/rhythm/wiki/Tuner-CI">CI</a> ·
+  <a href="https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Writing-Checks">Write a check</a>
 </p>
 
 <br>
@@ -73,7 +73,7 @@ That's it. Tuner fingerprints the site, learns how it answers "not found", runs 
 | Scan all your clients' sites | `rhythm tuner scan -l sites.txt -o all.md` |
 | Fail a CI build on serious findings | `rhythm tuner scan yoursite.com --fail-on high` |
 
-Every flag is in the [usage guide](docs/usage.md).
+Every flag is in the [CLI reference](https://github.com/RhythmShahriar/rhythm/wiki/Tuner-CLI-Reference), and the [documentation wiki](https://github.com/RhythmShahriar/rhythm/wiki) covers everything else.
 
 > [!IMPORTANT]
 > Scan only sites you own or have permission to test. Tuner is non-intrusive (plain GET requests, no exploit payloads, 5 requests a second by default), but a scan of someone else's site without permission may still be illegal. See [Responsible use](#responsible-use--disclaimer).
@@ -116,8 +116,8 @@ Security headers, cookie flags, version leaks, plain HTTP, expired or untrusted 
 - **No key, no limits.** Vulnerability data is free and public domain, cached locally and refreshed daily. Works offline from cache.
 - **Low false positives.** Every file check is compared against how the server answers a random path, so sites that return "200 OK" for everything don't flood you with noise. Versions a Linux distribution may have patched are marked *likely*, not confirmed.
 - **Tells you how to fix it.** Every finding comes with the exact nginx, Apache or WordPress change.
-- **Built for CI.** JSON, JSONL, [SARIF](docs/ci.md) for GitHub code scanning, Markdown, `--fail-on` and baselines.
-- **Extensible.** Checks are [YAML files](docs/checks.md), each with tests. Adding one takes no Go code.
+- **Built for CI.** JSON, JSONL, [SARIF](https://github.com/RhythmShahriar/rhythm/wiki/Tuner-CI) for GitHub code scanning, Markdown, `--fail-on` and baselines.
+- **Extensible.** Checks are [YAML files](https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Writing-Checks), each with tests. Adding one takes no Go code.
 - **Polite by default.** Rate limited, slows down on `429`/`503`, honest user agent.
 
 ## CI
@@ -132,15 +132,21 @@ Show findings in your repository's **Security** tab:
     sarif_file: tuner.sarif
 ```
 
-More in the [CI guide](docs/ci.md).
+More in the [CI guide](https://github.com/RhythmShahriar/rhythm/wiki/Tuner-CI).
 
 ## Docs
 
 | | |
 |---|---|
-| [Usage](docs/usage.md) | every flag, profiles, the Tune score, exit codes |
-| [CI](docs/ci.md) | GitHub code scanning, `--fail-on`, baselines |
-| [Writing checks](docs/checks.md) | the YAML format and fixtures |
+| [Your first scan](https://github.com/RhythmShahriar/rhythm/wiki/Tuner-First-Scan) | a ten-minute walkthrough |
+| [Reading results](https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Reading-Results) | severities, "likely" findings, the Tune score |
+| [Local scans](https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Local-Scans) | scanning a site's files on the server |
+| [PHP advisories](https://github.com/RhythmShahriar/rhythm/wiki/Tuner-PHP-Advisories) | PHP2Shell, CVE-2026-115560 and what to do |
+| [CI](https://github.com/RhythmShahriar/rhythm/wiki/Tuner-CI) | GitHub code scanning, `--fail-on`, baselines |
+| [Writing checks](https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Writing-Checks) | the YAML format and fixtures |
+| [CLI reference](https://github.com/RhythmShahriar/rhythm/wiki/Tuner-CLI-Reference) | every command, flag, exit code and environment variable |
+
+All of it lives in the **[Rhythm documentation wiki](https://github.com/RhythmShahriar/rhythm/wiki)**.
 
 ## Contributing
 

@@ -1,5 +1,5 @@
 // Package checks embeds the built-in YAML checks and their fixtures.
-// See docs/checks.md for the format.
+// See https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Writing-Checks for the format.
 package checks
 
 import "embed"
