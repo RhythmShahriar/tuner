@@ -31,8 +31,11 @@ Tuner only sends plain GET requests to public URLs. It never sends exploit paylo
 | `--exclude-id wp-readme` | skip these checks |
 | `--severity medium` | skip checks below this severity |
 | `--checks ./my-checks` | load checks from a directory |
+| `--no-check-updates` | use the built-in checks, not the latest check pack |
 
-`rhythm tuner checks` accepts the same flags, so you can preview a selection.
+`rhythm tuner checks` accepts the same flags, so you can preview a selection, and says which checks are in use.
+
+**Checks update like data.** New checks are published as a *check pack* on Tuner's GitHub releases whenever they land, and scans pick up the newest one within a day, without a new binary. Packs are checksum-verified, contain only declarative YAML checks (GET requests to the scanned site and response matching, no code), and are used only when they're newer than the checks built into your binary. Any problem with a pack falls back to the last good pack or the built-in checks, with a warning. JSON reports name the checks used in `check_set` (`built-in`, `pack` or `directory`) and `check_pack` (the pack version). Pin a run to your binary's checks with `--no-check-updates`, or to your own with `--checks`. See [Check packs](checks.md#check-packs) for details.
 
 ## Known vulnerabilities
 
@@ -64,16 +67,17 @@ Versions reported by distribution packages (e.g. `PHP/7.4.3-4ubuntu2.19`, `Apach
 
 | | |
 |---|---|
-| `rhythm tuner update` | refresh all cached data now |
-| `rhythm tuner update --clear` | delete the cache |
-| `--offline` | use cached data only; never contact the data services |
+| `rhythm tuner update` | refresh the check pack and all cached data now, and show which checks are in use |
+| `rhythm tuner update --clear` | delete the cached check pack and data |
+| `--offline` | use cached data and check pack only; never contact the data services |
 | `--no-vulns` | skip vulnerability matching |
 | `--id 'vuln-*'` | only vulnerability matching |
 | `TUNER_VULN_API`, `TUNER_WPORG_API` | use mirrors of the two APIs |
+| `TUNER_CHECKS_URL` | fetch check packs from a mirror of the `checks-latest` release assets |
 
 ## Updating Tuner
 
-`rhythm update` updates rhythm, every installed tool, and their data. Each download is checked against the release's `checksums.txt` before anything is replaced. `rhythm update --check` only reports.
+`rhythm update` updates rhythm, every installed tool, and their data, including the check pack. Each download is checked against the release's `checksums.txt` before anything is replaced. `rhythm update --check` only reports.
 
 After a scan, Tuner mentions when a newer release is out. It checks GitHub at most once a day, never in CI, and never when `RHYTHM_NO_UPDATE_CHECK=1` is set. Binaries are never replaced without you running `rhythm update`.
 
