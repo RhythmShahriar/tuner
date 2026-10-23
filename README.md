@@ -22,7 +22,6 @@ Scan only sites you own or are authorised to test.
 - [Usage](docs/usage.md): every flag, profiles, exit codes
 - [CI](docs/ci.md): GitHub code scanning, `--fail-on`, baselines
 - [Writing checks](docs/checks.md): the YAML format and fixtures
-- [Product plan](docs/PRD.md)
 
 ## Development
 
