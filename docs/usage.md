@@ -25,7 +25,7 @@ Tuner only sends plain GET requests to public URLs. It never sends exploit paylo
 |---|---|
 | `--profile quick` | the top checks, about 30 requests; skips plugin version lookups |
 | `--profile default` | every polite check (default) |
-| `--profile deep` | adds aggressive enumeration |
+| `--profile deep` | reserved for checks that send many requests; today it runs the same checks as `default` |
 | `--tags leak,wordpress` | only checks with any of these tags |
 | `--exclude-tags headers` | skip checks with these tags |
 | `--id 'leak-*'` | only these checks (globs allowed); ignores the profile |

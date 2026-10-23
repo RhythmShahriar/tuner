@@ -18,7 +18,7 @@ type Profile string
 const (
 	ProfileQuick   Profile = "quick"   // the highest-value checks, about 30 requests
 	ProfileDefault Profile = "default" // everything polite and non-intrusive
-	ProfileDeep    Profile = "deep"    // adds aggressive enumeration
+	ProfileDeep    Profile = "deep"    // for checks that send many requests (none yet)
 )
 
 var Profiles = []Profile{ProfileQuick, ProfileDefault, ProfileDeep}

@@ -59,7 +59,7 @@ Usage:
   rhythm tuner                       interactive picker
   rhythm tuner scan <url>... [flags] scan one or more sites
   rhythm tuner scan <dir> [flags]    scan a site's files on the server
-  rhythm tuner checks [flags]        list the checks
+  rhythm tuner checks [flags]        list the checks (rhythm tuner checks --help)
   rhythm tuner update [--clear]      refresh the check pack and vulnerability data now
 
 Output:
@@ -72,7 +72,8 @@ Output:
   -q, --quiet              findings only
       --plain              no color, boxes or glyphs (screen readers, logs)
       --no-color           no color
-  -v, --verbose            log every request to stderr
+  -v, --verbose            log every request to stderr (rhythm tuner -v alone
+                           prints the version)
 
 Checks:
       --profile <name>     quick, default or deep (default "default")
