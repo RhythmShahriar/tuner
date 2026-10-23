@@ -516,6 +516,11 @@ var (
 	onlyVersion = regexp.MustCompile(`^[0-9][0-9.]*$`)
 	cveID       = regexp.MustCompile(`^CVE-\d{4}-\d+$`)
 	langPrefix  = regexp.MustCompile(`^\[[a-z]{2}\]\s*`)
+	// A name that only states a range, like "PHP 8.4 < 8.4.27".
+	rangeName = regexp.MustCompile(`^[^<>=]*\s[<>]=?\s*[0-9][0-9.]*$`)
+	// "In PHP versions 8.2.* before 8.2.31, and 8.3.* before 8.3.31, " opens
+	// many PHP advisories and crowds out what the flaw is.
+	versionLead = regexp.MustCompile(`(?i)^In [A-Za-z ]*?versions?\s+(?:(?:and|from)\s+)?(?:[0-9][0-9.*x]*\s+(?:before|through|prior to)\s+[0-9][0-9.]*,?\s*(?:and\s+(?:from\s+)?)?)+`)
 )
 
 var severityLetter = map[string]string{"c": "critical", "h": "high", "m": "medium", "l": "low", "n": ""}
@@ -542,7 +547,8 @@ func (d rawData) normalize() *Record {
 			if s.Link != "" && len(v.References) < 5 {
 				v.References = append(v.References, string(s.Link))
 			}
-			if v.Description == "" && s.Description != "" {
+			// Some sources repeat the bare ID as the description.
+			if v.Description == "" && s.Description != "" && !cveID.MatchString(string(s.Description)) {
 				v.Description = langPrefix.ReplaceAllString(string(s.Description), "")
 			}
 			if d := string(s.Date); d != "" && (v.Published == "" || d < v.Published) {
@@ -557,11 +563,12 @@ func (d rawData) normalize() *Record {
 		if v.Title == "" && rv.Name != "" && !onlyVersion.MatchString(string(rv.Name)) {
 			v.Title = clean(string(rv.Name))
 		}
-		// A bare ID makes a poor title; prefer the description's opening.
-		if (v.Title == "" || cveID.MatchString(v.Title)) && v.Description != "" {
-			v.Title = truncate(clean(v.Description), 90)
+		// A bare ID or version range makes a poor title; prefer the
+		// description's opening.
+		if (v.Title == "" || cveID.MatchString(v.Title) || rangeName.MatchString(v.Title)) && v.Description != "" {
+			v.Title = summary(v.Description)
 		}
-		if v.Title == "" && len(v.CVEs) > 0 {
+		if (v.Title == "" || rangeName.MatchString(v.Title)) && len(v.CVEs) > 0 {
 			v.Title = v.CVEs[0]
 		}
 		if v.Description == "" && rv.Description != "" {
@@ -594,6 +601,17 @@ func (d rawData) normalize() *Record {
 // clean decodes HTML entities and collapses runs of whitespace, which
 // some upstream advisory titles contain.
 func clean(s string) string { return strings.Join(strings.Fields(html.UnescapeString(s)), " ") }
+
+// summary shortens a description to a title, dropping a leading list of
+// affected versions.
+func summary(desc string) string {
+	s := clean(desc)
+	if rest := versionLead.ReplaceAllString(s, ""); rest != s && rest != "" {
+		r := []rune(rest)
+		s = strings.ToUpper(string(r[0])) + string(r[1:])
+	}
+	return truncate(s, 90)
+}
 
 func truncate(s string, n int) string {
 	if r := []rune(s); len(r) > n {
