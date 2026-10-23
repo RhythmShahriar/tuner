@@ -3,6 +3,7 @@ package fingerprint
 
 import (
 	"bytes"
+	"net/http"
 	"regexp"
 	"slices"
 	"strings"
@@ -15,7 +16,8 @@ type Result struct {
 	Tech      []string `json:"tech"` // wordpress, laravel, php
 	WordPress string   `json:"wordpress_version,omitempty"`
 	PHP       string   `json:"php_version,omitempty"`
-	PHPBuild  string   `json:"php_build,omitempty"` // full build string when it carries a distro suffix, e.g. 7.4.3-4ubuntu2.19
+	PHPBuild  string   `json:"php_build,omitempty"`  // full build string when it carries a distro suffix, e.g. 7.4.3-4ubuntu2.19
+	PHPSource string   `json:"php_source,omitempty"` // header and path the PHP version came from, e.g. "x-powered-by /wp-login.php"
 	Server    string   `json:"server,omitempty"`
 
 	Components []Component `json:"components,omitempty"`
@@ -106,12 +108,9 @@ func Detect(r *matchers.Response) Result {
 		}
 	}
 
-	if m := phpPowered.FindStringSubmatch(r.Header.Get("X-Powered-By")); m != nil {
+	if v, build, header := PHPVersion(r.Header); v != "" {
 		add("php")
-		res.PHP = m[1]
-		if m[2] != "" {
-			res.PHPBuild = m[1] + m[2]
-		}
+		res.PHP, res.PHPBuild, res.PHPSource = v, build, header+" "+homePath(r)
 	}
 	if res.Has("wordpress") || res.Has("laravel") {
 		add("php")
@@ -120,6 +119,31 @@ func Detect(r *matchers.Response) Result {
 		res.Server = matchers.Snippet([]byte(s))
 	}
 	return res
+}
+
+func homePath(r *matchers.Response) string {
+	if r.URL != nil && r.URL.Path != "" {
+		return r.URL.Path
+	}
+	return "/"
+}
+
+// PHPVersion reads the PHP version from X-Powered-By, or from Server when
+// it carries a PHP/x.y.z token as some Apache builds do. build is the full
+// string when it has a distro suffix (7.4.3-4ubuntu2.19), else "". header
+// names where it was found, in lower case.
+func PHPVersion(h http.Header) (version, build, header string) {
+	for _, name := range []string{"X-Powered-By", "Server"} {
+		for _, v := range h.Values(name) {
+			if m := phpPowered.FindStringSubmatch(v); m != nil {
+				if m[2] != "" {
+					build = m[1] + m[2]
+				}
+				return m[1], build, strings.ToLower(name)
+			}
+		}
+	}
+	return "", "", ""
 }
 
 // components lists plugins and themes referenced by asset URLs. An asset's
