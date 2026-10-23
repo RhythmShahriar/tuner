@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -52,6 +53,13 @@ func cleanSite(t *testing.T) *httptest.Server {
 func tuner(t *testing.T, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // keep the first-run marker out of the real config
+	if os.Getenv("XDG_CACHE_HOME") == "" {
+		t.Setenv("XDG_CACHE_HOME", t.TempDir()) // and the vulnerability cache
+	}
+	if os.Getenv("TUNER_VULN_API") == "" {
+		t.Setenv("TUNER_VULN_API", "http://127.0.0.1:1") // never reach the real APIs from tests
+		t.Setenv("TUNER_WPORG_API", "http://127.0.0.1:1")
+	}
 	var out, errb bytes.Buffer
 	if len(args) > 0 && args[0] == "scan" {
 		args = append(args, "--rate", "0")
@@ -197,5 +205,95 @@ func TestChecksCommand(t *testing.T) {
 	code, out, _ := tuner(t, "checks", "--tags", "tls")
 	if code != exitOK || !strings.Contains(out, "tls-cert-expired") || strings.Contains(out, "leak-dotenv") {
 		t.Errorf("exit %d:\n%s", code, out)
+	}
+}
+
+func TestVulnScan(t *testing.T) {
+	var apiHits atomic.Int32
+	var apiDown atomic.Bool
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		apiHits.Add(1)
+		if apiDown.Load() {
+			http.Error(w, "down", http.StatusBadGateway)
+			return
+		}
+		switch r.URL.Path {
+		case "/plugin/contact-form-7/":
+			w.Write([]byte(`{"error":0,"data":{"name":"Contact Form 7","closed":0,"vulnerability":[{"uuid":"u1",
+				"operator":{"max_version":"5.3.2","max_operator":"lt","unfixed":"0"},
+				"source":[{"id":"CVE-2020-35489","name":"CVE-2020-35489","link":"https://www.cve.org/x"}],
+				"impact":{"cvss3":{"score":"10.0","severity":"critical"},"kev":false}}]}}`))
+		case "/plugins/info/1.2/":
+			w.Write([]byte(`{"version":"6.2.3","last_updated":"2026-10-21 8:43am GMT"}`))
+		default:
+			w.Write([]byte(`{"error":0,"data":{"vulnerability":[]}}`))
+		}
+	}))
+	defer api.Close()
+	t.Setenv("TUNER_VULN_API", api.URL)
+	t.Setenv("TUNER_WPORG_API", api.URL)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/":
+			w.Write([]byte(`<link href="/wp-content/plugins/contact-form-7/s.css?ver=5.3.1">`))
+		case "/wp-content/plugins/contact-form-7/readme.txt":
+			w.Write([]byte("Stable tag: 5.3.1\n"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer site.Close()
+
+	code, out, errs := tuner(t, "scan", site.URL, "--md")
+	if code != exitOK || !strings.Contains(out, "contact-form-7 5.3.1: 1 known vulnerability") ||
+		!strings.Contains(out, "CVE-2020-35489") || !strings.Contains(out, "WPVulnerability") {
+		t.Fatalf("exit %d, stderr %s\n%s", code, errs, out)
+	}
+
+	// Cached now: offline works with the API down, and makes no requests.
+	apiDown.Store(true)
+	hits := apiHits.Load()
+	code, out, _ = tuner(t, "scan", site.URL, "--json", "--offline", "--id", "vuln-*")
+	if code != exitOK || !strings.Contains(out, "vuln-plugin-contact-form-7") || strings.Contains(out, "hdr-") {
+		t.Errorf("offline --id vuln-*: exit %d\n%s", code, out)
+	}
+	if apiHits.Load() != hits {
+		t.Error("--offline made requests")
+	}
+
+	// update keeps cached copies when the API fails, and says so.
+	if code, out, _ := tuner(t, "update"); code != exitError || !strings.Contains(out, "failed; cached copies kept") {
+		t.Errorf("update with API down: exit %d\n%s", code, out)
+	}
+	apiDown.Store(false)
+	if code, out, _ := tuner(t, "update"); code != exitOK || !strings.Contains(out, "Refreshed 2 vulnerability records") {
+		t.Errorf("update: exit %d\n%s", code, out)
+	}
+	if code, _, _ := tuner(t, "scan", site.URL, "--json", "--no-vulns", "--id", "vuln-*"); code != exitUsage {
+		t.Errorf("--no-vulns with only vuln ids should be a usage error, got %d", code)
+	}
+}
+
+func TestUpdateNotice(t *testing.T) {
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"tag_name":"v9.0.0","assets":[]}`))
+	}))
+	defer gh.Close()
+	t.Setenv("RHYTHM_GITHUB_API", gh.URL)
+	t.Setenv("CI", "")
+	t.Setenv("RHYTHM_NO_UPDATE_CHECK", "")
+	old := version
+	version = "0.1.0"
+	defer func() { version = old }()
+
+	_, _, errs := tuner(t, "scan", cleanSite(t).URL, "--plain")
+	if !strings.Contains(errs, "0.1.0 → 9.0.0") || !strings.Contains(errs, "rhythm update") {
+		t.Errorf("no update notice in stderr:\n%s", errs)
+	}
+	t.Setenv("RHYTHM_NO_UPDATE_CHECK", "1")
+	if _, _, errs := tuner(t, "scan", cleanSite(t).URL, "--plain"); strings.Contains(errs, "new release") {
+		t.Error("RHYTHM_NO_UPDATE_CHECK ignored")
 	}
 }

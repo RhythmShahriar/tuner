@@ -43,6 +43,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return scan(args[1:], stdout, stderr)
 	case "checks", "ls":
 		return listChecks(args[1:], stdout, stderr)
+	case "update":
+		return cmdUpdate(args[1:], stdout, stderr)
 	}
 	fmt.Fprintf(stderr, "rhythm tuner: unknown command %q\n\n", args[0])
 	usage(stderr)
@@ -57,6 +59,7 @@ Usage:
   rhythm tuner                       interactive picker
   rhythm tuner scan <url>... [flags] scan one or more sites
   rhythm tuner checks [flags]        list the checks
+  rhythm tuner update [--clear]      refresh vulnerability data now
 
 Output:
       --json               JSON report (an array when scanning several targets)
@@ -78,6 +81,8 @@ Checks:
       --exclude-id <list>
       --severity <level>   skip checks below this severity
       --checks <dir>       load checks from a directory
+      --no-vulns           skip known-vulnerability matching
+      --offline            use cached vulnerability data only
 
 Requests:
       --rate <n>           max requests per second per site (default 5)
@@ -97,6 +102,10 @@ Batch and CI:
       --parallel <n>       sites scanned at once (default 4)
       --fail-on <level>    exit 1 if a finding is at or above this severity
       --baseline <file>    hide findings already in this JSON report
+
+Vulnerability data comes from WPVulnerability (CC0) and api.wordpress.org.
+It's cached under your user cache directory and refreshed automatically once
+a day; TUNER_VULN_API and TUNER_WPORG_API point Tuner at mirrors.
 
 Exit codes: 0 ok · 1 findings at --fail-on · 2 usage error · 3 scan error · 130 interrupted
 

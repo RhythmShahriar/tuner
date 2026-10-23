@@ -25,9 +25,11 @@ import (
 	"github.com/muesli/termenv"
 
 	"github.com/RhythmShahriar/rhythm/kit/config"
+	"github.com/RhythmShahriar/rhythm/kit/update"
 	"github.com/RhythmShahriar/tuner/checks"
 	"github.com/RhythmShahriar/tuner/engine"
 	"github.com/RhythmShahriar/tuner/report"
+	"github.com/RhythmShahriar/tuner/vulns"
 )
 
 // listFlag collects comma-separated values across repeated flags.
@@ -66,6 +68,8 @@ type scanOptions struct {
 	headers          repeatFlag
 	cookie, proxy    string
 	insecure         bool
+
+	offline, noVulns bool
 
 	list     string
 	stdin    bool
@@ -108,6 +112,9 @@ func scanFlagSet(o *scanOptions, stderr io.Writer) *flag.FlagSet {
 	fs.StringVar(&o.cookie, "cookie", "", "")
 	fs.StringVar(&o.proxy, "proxy", "", "")
 	both("k", "insecure", func(n string) { fs.BoolVar(&o.insecure, n, false, "") })
+
+	fs.BoolVar(&o.offline, "offline", false, "")
+	fs.BoolVar(&o.noVulns, "no-vulns", false, "")
 
 	both("l", "list", func(n string) { fs.StringVar(&o.list, n, "", "") })
 	fs.BoolVar(&o.stdin, "stdin", false, "")
@@ -232,15 +239,17 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 	if err != nil {
 		return nil, fmt.Errorf("loading checks: %w", err)
 	}
-	p.checks, err = engine.Select(all, engine.Selector{
+	sel := engine.Selector{
 		Profile:     engine.Profile(o.profile),
 		Tags:        o.tags,
 		ExcludeTags: o.excludeTags,
 		IDs:         o.ids,
 		ExcludeIDs:  o.excludeIDs,
 		MinSeverity: engine.Severity(o.severity),
-	})
-	if err != nil {
+	}
+	vulnsOn := !o.noVulns && wantsVulns(sel)
+	p.checks, err = engine.Select(all, sel)
+	if err != nil && (!errors.Is(err, engine.ErrNoChecks) || !vulnsOn) {
 		return nil, usageError{err.Error()}
 	}
 
@@ -292,6 +301,9 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 		}
 		p.engine.Proxy = u
 	}
+	if vulnsOn {
+		p.engine.Advisor = engine.Filtered(&vulns.Advisor{Client: vulnClient(ua, p.engine.Proxy, o.offline)}, sel)
+	}
 	return p, nil
 }
 
@@ -332,6 +344,19 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 		ctx, cancel = context.WithTimeout(ctx, o.maxTime)
 		defer cancel()
 	}
+
+	// Look for a newer release while the scan runs; at most once a day.
+	notice := make(chan string, 1)
+	go func() {
+		u := &update.Updater{Repo: "RhythmShahriar/tuner", Binary: "rhythm-tuner", Current: version,
+			UserAgent: p.engine.UserAgent, API: os.Getenv("RHYTHM_GITHUB_API")}
+		cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		if latest, newer := u.Check(cctx); newer {
+			notice <- fmt.Sprintf("A new release of rhythm-tuner is available: %s → %s\n  run: rhythm update", version, latest)
+		}
+		close(notice)
+	}()
 
 	scanner := engine.New(p.checks, p.engine)
 	single := len(p.targets) == 1
@@ -431,6 +456,16 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "Report written to %s\n", o.output)
 	}
 
+	if live && !o.quiet {
+		select {
+		case msg, ok := <-notice:
+			if ok {
+				fmt.Fprintln(stderr, msg)
+			}
+		case <-time.After(200 * time.Millisecond): // don't hold up the exit for it
+		}
+	}
+
 	if errors.Is(ctx.Err(), context.Canceled) {
 		fmt.Fprintln(stderr, "rhythm tuner: scan canceled; results are partial")
 		return exitCanceled
@@ -470,6 +505,40 @@ func formatFromExt(path string) string {
 		return "md"
 	}
 	return ""
+}
+
+// wantsVulns reports whether a selection includes vulnerability matching:
+// always, unless tags or IDs were given that leave it out.
+func wantsVulns(s engine.Selector) bool {
+	if slices.Contains(s.ExcludeTags, "vuln") {
+		return false
+	}
+	advisorTags := []string{"vuln", "wordpress", "php", "outdated", "abandoned", "nginx", "apache", "core", "plugin", "theme"}
+	if len(s.Tags) > 0 && !hasAny(s.Tags, advisorTags) {
+		return false
+	}
+	return len(s.IDs) == 0 || slices.ContainsFunc(s.IDs, engine.IsAdvisorID)
+}
+
+func hasAny(have, want []string) bool {
+	return slices.ContainsFunc(want, func(t string) bool { return slices.Contains(have, t) })
+}
+
+// vulnClient builds the vulnerability data client. It goes through the
+// same proxy as the scan.
+func vulnClient(ua string, proxy *url.URL, offline bool) *vulns.Client {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	if proxy != nil {
+		tr.Proxy = http.ProxyURL(proxy)
+	}
+	return &vulns.Client{
+		HTTP:      &http.Client{Transport: tr, Timeout: 20 * time.Second},
+		UserAgent: ua,
+		CacheDir:  vulns.DefaultCacheDir(),
+		Offline:   offline,
+		VulnBase:  os.Getenv("TUNER_VULN_API"),  // a mirror; default wpvulnerability.net
+		WPOrgBase: os.Getenv("TUNER_WPORG_API"), // default api.wordpress.org
+	}
 }
 
 // readTargets reads one target per line, skipping blanks and # comments.

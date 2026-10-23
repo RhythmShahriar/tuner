@@ -83,6 +83,7 @@ func listChecks(args []string, stdout, stderr io.Writer) int {
 	if err := tw.Flush(); err != nil {
 		return exitError
 	}
-	fmt.Fprintf(stdout, "\n%d checks\n", len(sel))
+	fmt.Fprintf(stdout, "\n%d checks, plus vulnerability matching for core, plugins, themes, PHP and\n"+
+		"nginx/Apache (vuln-*, wp-components-*, *-eol); skip it with --no-vulns.\n", len(sel))
 	return exitOK
 }
