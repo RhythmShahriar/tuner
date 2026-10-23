@@ -303,3 +303,23 @@ func TestUpdateNotice(t *testing.T) {
 		t.Error("RHYTHM_NO_UPDATE_CHECK ignored")
 	}
 }
+
+func TestChecksHelpAndFooter(t *testing.T) {
+	code, out, _ := tuner(t, "checks", "--help")
+	if code != exitOK || !strings.Contains(out, `--profile <name>     quick, default or deep (default "deep")`) {
+		t.Errorf("checks --help: exit %d\n%s", code, out)
+	}
+	if code, _, errs := tuner(t, "checks", "--bogus"); code != exitUsage || !strings.Contains(errs, "Usage:") {
+		t.Errorf("checks --bogus: exit %d\n%s", code, errs)
+	}
+	_, out, _ = tuner(t, "checks", "--id", "leak-dotenv", "--no-check-updates")
+	if !strings.Contains(out, "1 check, plus") || !strings.Contains(out, "which scans skip with --no-vulns") {
+		t.Errorf("footer:\n%s", out)
+	}
+}
+
+func TestKnownExploitedTagSelectsVulnMatching(t *testing.T) {
+	if code, _, errs := tuner(t, "scan", cleanSite(t).URL, "--tags", "known-exploited", "--json"); code != exitOK {
+		t.Errorf("--tags known-exploited: exit %d: %s", code, errs)
+	}
+}

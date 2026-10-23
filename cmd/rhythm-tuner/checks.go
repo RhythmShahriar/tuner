@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -19,7 +20,7 @@ func listChecks(args []string, stdout, stderr io.Writer) int {
 		asJSON, offline, noUpdates         bool
 	)
 	flags := flag.NewFlagSet("checks", flag.ContinueOnError)
-	flags.SetOutput(stderr)
+	flags.SetOutput(io.Discard)
 	flags.StringVar(&profile, "profile", string(engine.ProfileDeep), "")
 	flags.StringVar(&severity, "severity", "", "")
 	flags.StringVar(&dir, "checks", "", "")
@@ -31,6 +32,11 @@ func listChecks(args []string, stdout, stderr io.Writer) int {
 	flags.BoolVar(&offline, "offline", false, "")
 	flags.BoolVar(&noUpdates, "no-check-updates", false, "")
 	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			fmt.Fprint(stdout, checksUsage)
+			return exitOK
+		}
+		fmt.Fprintf(stderr, "rhythm tuner: %v\n\n%s", err, checksUsage)
 		return exitUsage
 	}
 
@@ -83,7 +89,30 @@ func listChecks(args []string, stdout, stderr io.Writer) int {
 		return exitError
 	}
 	fmt.Fprintf(stdout, "\nUsing %s.\n", set.describe(dir))
-	fmt.Fprintf(stdout, "%d checks, plus vulnerability matching for core, plugins, themes, PHP and\n"+
-		"nginx/Apache (vuln-*, wp-components-*, *-eol); skip it with --no-vulns.\n", len(sel))
+	noun := "checks"
+	if len(sel) == 1 {
+		noun = "check"
+	}
+	fmt.Fprintf(stdout, "%d %s, plus vulnerability matching for core, plugins, themes, PHP and\n"+
+		"nginx/Apache (vuln-*, wp-components-*, *-eol), which scans skip with --no-vulns.\n", len(sel), noun)
 	return exitOK
 }
+
+const checksUsage = `Usage:
+  rhythm tuner checks [flags]
+
+Lists the checks a scan with the same flags would run. Unlike scan, the
+profile defaults to deep, so every check is listed.
+
+Flags:
+      --profile <name>     quick, default or deep (default "deep")
+      --tags <list>        only checks with these tags
+      --exclude-tags <list>
+      --id <list>          only these checks; globs allowed
+      --exclude-id <list>
+      --severity <level>   skip checks below this severity
+      --checks <dir>       list checks from a directory
+      --json               machine-readable output
+      --offline            use only a cached check pack
+      --no-check-updates   ignore check packs; list the built-in checks
+`
