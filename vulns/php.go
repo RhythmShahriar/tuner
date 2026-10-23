@@ -300,7 +300,7 @@ func hiddenPHPFinding(base *url.URL, flaws []*recentFlaw, branches []string) (en
 		plural = "flaw was"
 	}
 	impact := fmt.Sprintf("The site runs PHP but doesn't reveal its version (hiding it is good practice), so Tuner can't tell whether it's patched. "+
-		"%d critical PHP %s disclosed in the last %d days; every release before the fixed ones is affected.",
+		"%d critical or actively exploited PHP %s disclosed in the last %d days; every release before the fixed ones is affected.",
 		len(flaws), plural, int(recentPHPWindow.Hours()/24))
 	if kev > 0 {
 		impact += fmt.Sprintf(" %d of them are in CISA's Known Exploited Vulnerabilities catalog: attackers use them in the wild.", kev)
