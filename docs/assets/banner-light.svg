@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img" aria-label="rhythm tuner: find what's out of tune in your WordPress and PHP sites">
+  <rect width="1280" height="360" rx="24" fill="#FFFFFF"/>
+  <!-- staff lines: the "tuning" motif, kept faint -->
+  <g stroke="#EEECE8" stroke-width="1.5">
+    <line x1="96" y1="214" x2="1184" y2="214"/><line x1="96" y1="234" x2="1184" y2="234"/>
+    <line x1="96" y1="254" x2="1184" y2="254"/><line x1="96" y1="274" x2="1184" y2="274"/>
+  </g>
+  <!-- the dot: one note, sitting on the staff, in tune -->
+  <circle cx="1100" cy="244" r="22" fill="#E8603A"/>
+  <text x="96" y="104" font-family="'JetBrains Mono', 'SF Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="26" letter-spacing="3" fill="#5F5B55">RHYTHM</text>
+  <text x="90" y="196" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="104" font-weight="800" letter-spacing="-4" fill="#100F0D">tuner<tspan fill="#E8603A">.</tspan></text>
+  <text x="96" y="330" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="28" font-weight="500" fill="#5F5B55">Find what&#8217;s out of tune in your WordPress &amp; PHP sites.</text>
+</svg>
