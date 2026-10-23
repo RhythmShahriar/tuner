@@ -211,7 +211,7 @@ func TestResolveVersions(t *testing.T) {
 
 func TestIsAdvisorID(t *testing.T) {
 	for id, want := range map[string]bool{
-		"vuln-*": true, "vuln-plugin-contact-form-7": true, "wp-components-outdated": true, "php-eol": true,
+		"vuln-*": true, "vuln-plugin-contact-form-7": true, "wp-components-outdated": true, "php-eol": true, "php-version-hidden": true,
 		"wp-*": true, "leak-*": false, "*": false, "wp-xmlrpc": false, "hdr-csp-missing": false,
 	} {
 		if got := IsAdvisorID(id); got != want {

@@ -3,12 +3,15 @@ package vulns
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -46,17 +49,50 @@ var wporg = map[string]string{
 
 type fakeAPI struct {
 	*httptest.Server
-	hits atomic.Int32
-	down atomic.Bool
+	hits   atomic.Int32
+	down   atomic.Bool
+	mu     sync.Mutex
+	paths  []string          // every path requested
+	routes map[string]string // per-test responses, checked first
 }
 
-func newFakeAPI(t *testing.T) *fakeAPI {
-	f := &fakeAPI{}
+// requested reports whether any request's path starts with prefix.
+func (f *fakeAPI) requested(prefix string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.ContainsFunc(f.paths, func(p string) bool { return strings.HasPrefix(p, prefix) })
+}
+
+// newFakeAPI fakes WPVulnerability, api.wordpress.org and php.net. Paths
+// not in api or routes fall back to the real responses in testdata: PHP
+// branch records (/php/8.4.0/) and php.net's release states.
+func newFakeAPI(t *testing.T, routes ...map[string]string) *fakeAPI {
+	f := &fakeAPI{routes: map[string]string{}}
+	for _, r := range routes {
+		maps.Copy(f.routes, r)
+	}
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.hits.Add(1)
+		f.mu.Lock()
+		f.paths = append(f.paths, r.URL.Path)
+		f.mu.Unlock()
 		if f.down.Load() {
 			http.Error(w, "down", http.StatusBadGateway)
 			return
+		}
+		if body, ok := f.routes[r.URL.Path]; ok {
+			w.Write([]byte(body))
+			return
+		}
+		if r.URL.Path == "/releases/states.php" {
+			http.ServeFile(w, r, "testdata/phpnet-states.json")
+			return
+		}
+		if _, ok := api[r.URL.Path]; !ok && strings.HasPrefix(r.URL.Path, "/php/") {
+			if body, err := gunzip("testdata/php_" + strings.Trim(strings.TrimPrefix(r.URL.Path, "/php/"), "/") + ".json.gz"); err == nil {
+				w.Write(body)
+				return
+			}
 		}
 		if r.URL.Path == "/plugins/info/1.2/" || r.URL.Path == "/themes/info/1.2/" {
 			body, ok := wporg[r.URL.Query().Get("slug")]
@@ -77,7 +113,7 @@ func newFakeAPI(t *testing.T) *fakeAPI {
 }
 
 func newAdvisor(f *fakeAPI, cache string) *Advisor {
-	c := &Client{HTTP: f.Client(), CacheDir: cache, VulnBase: f.URL, WPOrgBase: f.URL, UserAgent: "test", Pace: -1}
+	c := &Client{HTTP: f.Client(), CacheDir: cache, VulnBase: f.URL, WPOrgBase: f.URL, PHPNetBase: f.URL, UserAgent: "test", Pace: -1}
 	return &Advisor{Client: c, Now: func() time.Time { return time.Date(2026, 10, 23, 0, 0, 0, 0, time.UTC) }}
 }
 
@@ -97,7 +133,7 @@ func TestAdvise(t *testing.T) {
 	fp := fingerprint.Result{
 		Tech:      []string{"wordpress", "php"},
 		WordPress: "6.4.1",
-		PHP:       "7.4.3", PHPBuild: "7.4.3-4ubuntu2.19",
+		PHP:       "7.4.3", PHPBuild: "7.4.3-4ubuntu2.19", PHPSource: "x-powered-by /wp-login.php",
 		Server: "nginx/1.25.3",
 		Components: []fingerprint.Component{
 			{Type: "plugin", Slug: "contact-form-7", Version: "5.3.1"},
@@ -146,11 +182,17 @@ func TestAdvise(t *testing.T) {
 		t.Errorf("abandoned = %+v", ab)
 	}
 	php := got["vuln-php"]
-	if php.Confidence != "low" || !strings.Contains(php.Impact, "backported") {
+	if php.Confidence != "low" || !strings.Contains(php.Impact, "backported") || !strings.Contains(php.Caveat, "distro build") {
 		t.Errorf("php on an Ubuntu build should be low confidence: %+v", php)
+	}
+	if ev := php.Evidence.Matched; ev[len(ev)-1] != "version from x-powered-by /wp-login.php" {
+		t.Errorf("php evidence doesn't say where the version came from: %v", ev)
 	}
 	if _, ok := got["php-eol"]; !ok {
 		t.Error("no php-eol finding for PHP 7.4")
+	}
+	if _, ok := got["php-version-hidden"]; ok {
+		t.Error("php-version-hidden with a known PHP version")
 	}
 	if _, ok := got["nginx-eol"]; ok {
 		t.Error("nginx 1.25 is supported until 2099 in the fixture")

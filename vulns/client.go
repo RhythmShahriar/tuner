@@ -3,7 +3,8 @@
 //
 // Vulnerability data comes from WPVulnerability (wpvulnerability.com),
 // public domain under CC0 1.0, which aggregates CVE, Wordfence, WPScan and
-// Patchstack. Latest-release data comes from the wordpress.org API. Every
+// Patchstack. Latest-release data comes from the wordpress.org API, and
+// PHP's supported branches from php.net. Every
 // lookup is cached on disk and refreshed automatically once it is older
 // than the TTL; when the network is unavailable, stale data is used.
 package vulns
@@ -29,9 +30,10 @@ import (
 )
 
 const (
-	DefaultVulnBase  = "https://www.wpvulnerability.net"
-	DefaultWPOrgBase = "https://api.wordpress.org"
-	DefaultTTL       = 24 * time.Hour
+	DefaultVulnBase   = "https://www.wpvulnerability.net"
+	DefaultWPOrgBase  = "https://api.wordpress.org"
+	DefaultPHPNetBase = "https://www.php.net"
+	DefaultTTL        = 24 * time.Hour
 
 	// Attribution shown with every vulnerability finding.
 	Source = "WPVulnerability (wpvulnerability.com, CC0)"
@@ -41,15 +43,16 @@ const (
 var ErrOffline = errors.New("not cached, and offline mode is on")
 
 type Client struct {
-	HTTP      *http.Client
-	UserAgent string
-	CacheDir  string        // "" disables the disk cache
-	TTL       time.Duration // refresh records older than this; 0 means DefaultTTL
-	Offline   bool          // never fetch; use cached data however old
-	Force     bool          // always fetch, ignoring the TTL (rhythm tuner update)
-	Pace      time.Duration // gap between requests to the data services; 0 means 200ms, <0 none
-	VulnBase  string
-	WPOrgBase string
+	HTTP       *http.Client
+	UserAgent  string
+	CacheDir   string        // "" disables the disk cache
+	TTL        time.Duration // refresh records older than this; 0 means DefaultTTL
+	Offline    bool          // never fetch; use cached data however old
+	Force      bool          // always fetch, ignoring the TTL (rhythm tuner update)
+	Pace       time.Duration // gap between requests to the data services; 0 means 200ms, <0 none
+	VulnBase   string
+	WPOrgBase  string
+	PHPNetBase string
 
 	lim  *pacer
 	mu   sync.Mutex
@@ -86,6 +89,9 @@ func (c *Client) init() {
 		}
 		if c.WPOrgBase == "" {
 			c.WPOrgBase = DefaultWPOrgBase
+		}
+		if c.PHPNetBase == "" {
+			c.PHPNetBase = DefaultPHPNetBase
 		}
 		switch {
 		case c.Pace == 0:
@@ -219,7 +225,7 @@ func (c *Client) Refresh(ctx context.Context) (ok, failed int, err error) {
 	}
 	force := &Client{
 		HTTP: c.HTTP, UserAgent: c.UserAgent, CacheDir: c.CacheDir, TTL: c.TTL,
-		VulnBase: c.VulnBase, WPOrgBase: c.WPOrgBase, Pace: c.Pace, Force: true,
+		VulnBase: c.VulnBase, WPOrgBase: c.WPOrgBase, PHPNetBase: c.PHPNetBase, Pace: c.Pace, Force: true,
 	}
 	err = filepath.WalkDir(c.CacheDir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || filepath.Ext(p) != ".json" {
@@ -237,6 +243,8 @@ func (c *Client) Refresh(ctx context.Context) (ok, failed int, err error) {
 			_, _, ferr = force.Advisories(ctx, parts[1], key)
 		case "wordpress.org":
 			_, _, ferr = force.Latest(ctx, parts[1], key)
+		case "php.net":
+			_, _, ferr = force.PHPBranches(ctx)
 		default:
 			return nil
 		}

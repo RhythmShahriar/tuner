@@ -59,6 +59,7 @@ func tuner(t *testing.T, args ...string) (code int, stdout, stderr string) {
 	if os.Getenv("TUNER_VULN_API") == "" {
 		t.Setenv("TUNER_VULN_API", "http://127.0.0.1:1") // never reach the real APIs from tests
 		t.Setenv("TUNER_WPORG_API", "http://127.0.0.1:1")
+		t.Setenv("TUNER_PHPNET_API", "http://127.0.0.1:1")
 	}
 	var out, errb bytes.Buffer
 	if len(args) > 0 && args[0] == "scan" {
@@ -232,6 +233,7 @@ func TestVulnScan(t *testing.T) {
 	defer api.Close()
 	t.Setenv("TUNER_VULN_API", api.URL)
 	t.Setenv("TUNER_WPORG_API", api.URL)
+	t.Setenv("TUNER_PHPNET_API", api.URL)
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
 	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

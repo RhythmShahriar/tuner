@@ -39,6 +39,7 @@ type component struct {
 	version string
 	path    string
 	build   string // raw version string, to spot distro builds
+	source  string // where the version was read, e.g. "x-powered-by /wp-login.php"
 }
 
 type lookup struct {
@@ -64,7 +65,7 @@ func (a *Advisor) Advise(ctx context.Context, base *url.URL, fp fingerprint.Resu
 			path: "/wp-content/" + c.Type + "s/" + c.Slug + "/"})
 	}
 	if fp.PHP != "" {
-		comps = append(comps, component{kind: "php", key: fp.PHP, slug: "PHP", version: fp.PHP, path: "/", build: fp.PHPBuild})
+		comps = append(comps, component{kind: "php", key: fp.PHP, slug: "PHP", version: fp.PHP, path: "/", build: fp.PHPBuild, source: fp.PHPSource})
 	}
 	if m := serverVersion.FindStringSubmatch(fp.Server); m != nil {
 		kind := strings.ToLower(m[1])
@@ -73,6 +74,15 @@ func (a *Advisor) Advise(ctx context.Context, base *url.URL, fp fingerprint.Resu
 
 	lookups := make([]*lookup, len(comps))
 	var wg sync.WaitGroup
+	var hidden struct {
+		flaws    []*recentFlaw
+		branches []string
+		stale    bool
+		err      error
+	}
+	if fp.Has("php") && fp.PHP == "" {
+		wg.Go(func() { hidden.flaws, hidden.branches, hidden.stale, hidden.err = a.recentPHPFlaws(ctx, now()) })
+	}
 	for i, c := range comps {
 		l := &lookup{component: c}
 		lookups[i] = l
@@ -99,13 +109,24 @@ func (a *Advisor) Advise(ctx context.Context, base *url.URL, fp fingerprint.Resu
 	var failed, stale int
 	var offline bool
 	var firstErr string
+	fail := func(what string, err error) {
+		failed++
+		offline = offline || errors.Is(err, ErrOffline)
+		if firstErr == "" {
+			firstErr = fmt.Sprintf("%s: %v", what, err)
+		}
+	}
+	if hidden.err != nil {
+		fail("recent PHP advisories", hidden.err)
+	} else if f, ok := hiddenPHPFinding(base, hidden.flaws, hidden.branches); ok {
+		findings = append(findings, f)
+	}
+	if hidden.stale {
+		stale++
+	}
 	for _, l := range lookups {
 		if l.err != nil {
-			failed++
-			offline = offline || errors.Is(l.err, ErrOffline)
-			if firstErr == "" {
-				firstErr = fmt.Sprintf("%s %s: %v", l.kind, l.slug, l.err)
-			}
+			fail(l.kind+" "+l.slug, l.err)
 			continue
 		}
 		if l.stale {
@@ -159,6 +180,9 @@ func (a *Advisor) Advise(ctx context.Context, base *url.URL, fp fingerprint.Resu
 					[]string{fmt.Sprintf("%s %s, support ended %s", l.slug, l.version, l.rec.EndOfLife)},
 					"No more security fixes are released for this branch.",
 					fmt.Sprintf("Upgrade to a supported %s release.", l.slug), l.kind, "outdated")
+				if l.source != "" {
+					f.Evidence.Matched = append(f.Evidence.Matched, "version from "+l.source)
+				}
 				a.distroCaveat(&f, l.build)
 				findings = append(findings, f)
 			}
@@ -335,6 +359,9 @@ func (a *Advisor) vulnFinding(base *url.URL, l *lookup) (engine.Finding, bool) {
 	if len(advisories) > 0 {
 		f.References = advisories[0].References
 	}
+	if l.source != "" {
+		f.Evidence.Matched = append(f.Evidence.Matched, "version from "+l.source)
+	}
 	if l.kind != "plugin" && l.kind != "theme" && l.kind != "core" {
 		a.distroCaveat(&f, l.build)
 	}
@@ -349,6 +376,17 @@ func (a *Advisor) distroCaveat(f *engine.Finding, build string) {
 		f.Caveat = "a distro build may already include the fix"
 		f.Impact += " The server reports a distribution build (" + build + "), which may include backported fixes; check the package's security status before acting."
 	}
+}
+
+// cmpBool orders true before false.
+func cmpBool(x, y bool) int {
+	switch {
+	case x == y:
+		return 0
+	case x:
+		return -1
+	}
+	return 1
 }
 
 func rankOr(s engine.Severity) int {

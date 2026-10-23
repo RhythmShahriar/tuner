@@ -538,6 +538,9 @@ func vulnClient(ua string, proxy *url.URL, offline bool) *vulns.Client {
 		Offline:   offline,
 		VulnBase:  os.Getenv("TUNER_VULN_API"),  // a mirror; default wpvulnerability.net
 		WPOrgBase: os.Getenv("TUNER_WPORG_API"), // default api.wordpress.org
+
+		// PHP's supported branches, for hidden and end-of-life PHP versions.
+		PHPNetBase: os.Getenv("TUNER_PHPNET_API"), // default www.php.net
 	}
 }
 
