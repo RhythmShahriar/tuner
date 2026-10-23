@@ -8,5 +8,3 @@ jobs:
     permissions:
       contents: write
       id-token: write
-    with:
-      rhythm-kit: true
