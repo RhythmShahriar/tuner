@@ -76,7 +76,7 @@ That's it. Tuner fingerprints the site, learns how it answers "not found", runs 
 Every flag is in the [usage guide](docs/usage.md).
 
 > [!IMPORTANT]
-> Scan only sites you own or have permission to test. Tuner is non-intrusive (plain GET requests, no exploit payloads, 5 requests a second by default), but a scan of someone else's site without permission may still be illegal.
+> Scan only sites you own or have permission to test. Tuner is non-intrusive (plain GET requests, no exploit payloads, 5 requests a second by default), but a scan of someone else's site without permission may still be illegal. See [Responsible use](#responsible-use--disclaimer).
 
 ## What it finds
 
@@ -151,6 +151,17 @@ make check   # lint + tests; every check runs against its own fixtures
 ```
 
 New checks are the most welcome contribution. See [CONTRIBUTING](https://github.com/RhythmShahriar/.github/blob/master/CONTRIBUTING.md).
+
+## Responsible use & disclaimer
+
+Tuner is built to help people **find and fix weaknesses in their own websites** before someone else does.
+
+- **Use it only on sites you own, or have explicit written permission to test.** Scanning systems without authorization may be illegal where you or the target are, for example under the U.S. Computer Fraud and Abuse Act, the UK Computer Misuse Act, or similar laws elsewhere.
+- **You are responsible for how you use it.** By using Tuner you agree to comply with all applicable laws and the terms of any service you test. The authors and contributors are not responsible for misuse, or for any damage, legal consequences or loss arising from its use.
+- **No warranty.** Tuner is provided "as is", without warranty of any kind, as set out in sections 15 and 16 of the [license](LICENSE). Findings may include false positives or miss real issues; verify before acting.
+- **Detection only.** Tuner sends ordinary, rate-limited GET requests and never sends exploit payloads.
+
+Found a vulnerability in Tuner itself? Please [report it privately](https://github.com/RhythmShahriar/tuner/security/advisories/new).
 
 ## License
 
