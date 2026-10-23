@@ -40,6 +40,25 @@ type Options struct {
 	Insecure    bool         // skip TLS certificate verification
 	Profile     Profile      // quick skips plugin and theme version lookups
 	HTTPClient  *http.Client // optional base client, e.g. one that trusts a test server
+	Advisor     Advisor      // optional: known-vulnerability matching
+}
+
+// Advisor turns what the fingerprint found into findings, e.g. by matching
+// versions against a vulnerability database. It runs alongside the checks.
+type Advisor interface {
+	Advise(ctx context.Context, base *url.URL, fp fingerprint.Result) (findings []Finding, warnings []string)
+}
+
+// Advisory is one known vulnerability behind an advisor finding.
+type Advisory struct {
+	ID         string   `json:"id"`
+	Title      string   `json:"title"`
+	CVEs       []string `json:"cves,omitempty"`
+	Severity   Severity `json:"severity,omitempty"` // empty when unrated
+	CVSS       float64  `json:"cvss,omitempty"`
+	KEV        bool     `json:"kev,omitempty"` // known exploited (CISA KEV)
+	FixedIn    string   `json:"fixed_in,omitempty"`
+	References []string `json:"references,omitempty"`
 }
 
 // Hooks stream progress while a scan runs. Calls are never concurrent.
@@ -62,18 +81,20 @@ type RequestLog struct {
 }
 
 type Finding struct {
-	ID         string   `json:"id"`
-	Title      string   `json:"title"`
-	Severity   Severity `json:"severity"`
-	Confidence string   `json:"confidence"`
-	Target     string   `json:"target"`
-	URL        string   `json:"url"`
-	Path       string   `json:"path"`
-	Evidence   Evidence `json:"evidence"`
-	Impact     string   `json:"impact,omitempty"`
-	Fix        string   `json:"fix,omitempty"`
-	References []string `json:"references,omitempty"`
-	Tags       []string `json:"tags,omitempty"`
+	ID         string     `json:"id"`
+	Title      string     `json:"title"`
+	Severity   Severity   `json:"severity"`
+	Confidence string     `json:"confidence"`
+	Target     string     `json:"target"`
+	URL        string     `json:"url"`
+	Path       string     `json:"path"`
+	Evidence   Evidence   `json:"evidence"`
+	Impact     string     `json:"impact,omitempty"`
+	Fix        string     `json:"fix,omitempty"`
+	References []string   `json:"references,omitempty"`
+	Tags       []string   `json:"tags,omitempty"`
+	Advisories []Advisory `json:"advisories,omitempty"`
+	Source     string     `json:"source,omitempty"` // data provider, for attribution
 }
 
 // Evidence shows why a finding fired. Secrets in it are always masked.
@@ -96,6 +117,7 @@ type Result struct {
 	Throttled   int64              `json:"throttled"` // 429/503 replies that made Tuner slow down
 	Duration    time.Duration      `json:"-"`
 	Findings    []Finding          `json:"findings"`
+	Warnings    []string           `json:"warnings,omitempty"`
 }
 
 // Counts returns the number of findings per severity.
@@ -176,6 +198,21 @@ func (s *Scanner) Scan(ctx context.Context, target string, h Hooks) (*Result, er
 
 	var done atomic.Int64
 	var wg sync.WaitGroup
+	if s.opts.Advisor != nil {
+		wg.Go(func() {
+			findings, warnings := s.opts.Advisor.Advise(ctx, ss.base, res.Fingerprint)
+			ss.emit(func() {
+				res.Warnings = append(res.Warnings, warnings...)
+				for _, f := range findings {
+					f.Target = res.Target
+					res.Findings = append(res.Findings, f)
+					if h.Finding != nil {
+						h.Finding(f)
+					}
+				}
+			})
+		})
+	}
 	ch := make(chan job)
 	for range s.opts.Concurrency {
 		wg.Go(func() {

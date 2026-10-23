@@ -15,6 +15,7 @@ type Result struct {
 	Tech      []string `json:"tech"` // wordpress, laravel, php
 	WordPress string   `json:"wordpress_version,omitempty"`
 	PHP       string   `json:"php_version,omitempty"`
+	PHPBuild  string   `json:"php_build,omitempty"` // full build string when it carries a distro suffix, e.g. 7.4.3-4ubuntu2.19
 	Server    string   `json:"server,omitempty"`
 
 	Components []Component `json:"components,omitempty"`
@@ -66,7 +67,7 @@ func (r Result) String() string {
 var (
 	wpGenerator = regexp.MustCompile(`<meta name="generator" content="WordPress ([0-9.]+)"`)
 	wpBlockCSS  = regexp.MustCompile(`wp-includes/css/dist/block-library/[^"'?]*\?ver=([0-9]+\.[0-9]+(?:\.[0-9]+)?)`)
-	phpPowered  = regexp.MustCompile(`PHP/([0-9][0-9.]*)`)
+	phpPowered  = regexp.MustCompile(`PHP/([0-9][0-9.]*)([^\s,;]*)`)
 	wpAsset     = regexp.MustCompile(`/wp-content/(plugins|themes)/([A-Za-z0-9_-]+)/[^"'\s<>]*`)
 	assetVer    = regexp.MustCompile(`(?:\?|&|&amp;|&#038;)ver=([0-9][0-9A-Za-z.-]*)`)
 )
@@ -108,6 +109,9 @@ func Detect(r *matchers.Response) Result {
 	if m := phpPowered.FindStringSubmatch(r.Header.Get("X-Powered-By")); m != nil {
 		add("php")
 		res.PHP = m[1]
+		if m[2] != "" {
+			res.PHPBuild = m[1] + m[2]
+		}
 	}
 	if res.Has("wordpress") || res.Has("laravel") {
 		add("php")

@@ -129,7 +129,8 @@ func TestSelect(t *testing.T) {
 		{"quick", Selector{Profile: ProfileQuick}, []string{"leak-a"}},
 		{"deep", Selector{Profile: ProfileDeep}, []string{"leak-a", "leak-b", "hdr-c"}},
 		{"tags", Selector{Profile: ProfileDeep, Tags: []string{"headers"}}, []string{"hdr-c"}},
-		{"exclude tags", Selector{ExcludeTags: []string{"leak"}}, []string{"error: no checks match the selection; list them with: rhythm tuner checks"}},
+		{"exclude tags", Selector{ExcludeTags: []string{"leak"}}, []string{"error: " + ErrNoChecks.Error()}},
+		{"advisor ids only", Selector{IDs: []string{"vuln-*"}}, []string{"error: " + ErrNoChecks.Error()}},
 		{"ids ignore profile", Selector{IDs: []string{"hdr-*"}}, []string{"hdr-c"}},
 		{"exclude ids", Selector{ExcludeIDs: []string{"leak-a"}}, []string{"leak-b"}},
 		{"min severity", Selector{MinSeverity: Medium, Profile: ProfileDeep}, []string{"leak-a", "hdr-c"}},
@@ -196,5 +197,16 @@ func TestResolveVersions(t *testing.T) {
 	}
 	if c := fp.Components[1]; c.Version != "4.6.0" || c.Source != "style.css" {
 		t.Errorf("theme = %+v", c)
+	}
+}
+
+func TestIsAdvisorID(t *testing.T) {
+	for id, want := range map[string]bool{
+		"vuln-*": true, "vuln-plugin-contact-form-7": true, "wp-components-outdated": true, "php-eol": true,
+		"wp-*": true, "leak-*": false, "*": false, "wp-xmlrpc": false, "hdr-csp-missing": false,
+	} {
+		if got := IsAdvisorID(id); got != want {
+			t.Errorf("IsAdvisorID(%q) = %v, want %v", id, got, want)
+		}
 	}
 }

@@ -1,10 +1,15 @@
 package engine
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"path"
 	"slices"
+	"strings"
+
+	"github.com/RhythmShahriar/tuner/fingerprint"
 )
 
 // Profile trades coverage for request count.
@@ -20,6 +25,21 @@ var Profiles = []Profile{ProfileQuick, ProfileDefault, ProfileDeep}
 
 // Rank orders profiles from cheapest; -1 if unknown.
 func (p Profile) Rank() int { return slices.Index(Profiles, p) }
+
+// ErrNoChecks means the selection matched no YAML checks. Advisor
+// findings (vuln-*) may still apply.
+var ErrNoChecks = errors.New("no checks match the selection; list them with: rhythm tuner checks")
+
+// IsAdvisorID reports whether an ID pattern names advisor findings
+// (vulnerability matching) rather than YAML checks.
+func IsAdvisorID(pattern string) bool {
+	for _, p := range []string{"vuln", "wp-core-", "wp-components-", "wp-plugin-closed", "wp-theme-closed", "php-eol", "nginx-eol", "apache-eol"} {
+		if strings.HasPrefix(pattern, p) || strings.HasPrefix(p, strings.TrimSuffix(pattern, "*")) && strings.HasSuffix(pattern, "*") && pattern != "*" {
+			return true
+		}
+	}
+	return false
+}
 
 // Selector narrows the checks a scan runs. Zero values select everything
 // in the default profile.
@@ -50,7 +70,7 @@ func Select(all []*Check, s Selector) ([]*Check, error) {
 		if _, err := path.Match(id, ""); err != nil {
 			return nil, fmt.Errorf("bad check pattern %q: %w", id, err)
 		}
-		if !slices.ContainsFunc(all, func(c *Check) bool { return globMatch(id, c.ID) }) {
+		if !IsAdvisorID(id) && !slices.ContainsFunc(all, func(c *Check) bool { return globMatch(id, c.ID) }) {
 			return nil, fmt.Errorf("no check matches %q; list them with: rhythm tuner checks", id)
 		}
 	}
@@ -69,7 +89,7 @@ func Select(all []*Check, s Selector) ([]*Check, error) {
 		}
 	}
 	if len(out) == 0 {
-		return nil, errors.New("no checks match the selection; list them with: rhythm tuner checks")
+		return nil, ErrNoChecks
 	}
 	return out, nil
 }
@@ -101,4 +121,30 @@ func Score(findings []Finding) int {
 		score -= penalty[sev]
 	}
 	return max(score, 0)
+}
+
+// Filtered applies the parts of a selection that make sense for findings
+// (IDs, tags, minimum severity) to an advisor's output.
+func Filtered(a Advisor, s Selector) Advisor { return filtered{a, s} }
+
+type filtered struct {
+	Advisor
+	sel Selector
+}
+
+func (f filtered) Advise(ctx context.Context, base *url.URL, fp fingerprint.Result) ([]Finding, []string) {
+	findings, warnings := f.Advisor.Advise(ctx, base, fp)
+	var kept []Finding
+	for _, x := range findings {
+		switch {
+		case f.sel.MinSeverity != "" && x.Severity.Rank() > f.sel.MinSeverity.Rank():
+		case len(f.sel.IDs) > 0 && !slices.ContainsFunc(f.sel.IDs, func(id string) bool { return globMatch(id, x.ID) }):
+		case slices.ContainsFunc(f.sel.ExcludeIDs, func(id string) bool { return globMatch(id, x.ID) }):
+		case len(f.sel.Tags) > 0 && !hasAny(x.Tags, f.sel.Tags):
+		case hasAny(x.Tags, f.sel.ExcludeTags):
+		default:
+			kept = append(kept, x)
+		}
+	}
+	return kept, warnings
 }
