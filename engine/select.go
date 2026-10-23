@@ -105,20 +105,36 @@ func hasAny(have, want []string) bool {
 
 // Penalty per distinct failing check, by severity. The Tune score is
 // 100 minus the penalties, floored at 0. A check that fires on several
-// paths counts once, at its worst severity.
+// paths counts once, at its worst severity. A check whose findings are all
+// low confidence (e.g. a version a distro may have patched) counts half.
 var penalty = map[Severity]int{Critical: 30, High: 15, Medium: 6, Low: 2, Info: 0}
 
 // Score computes the Tune score (0–100) for a set of findings.
 func Score(findings []Finding) int {
-	worst := map[string]Severity{}
+	type agg struct {
+		worst   Severity
+		lowConf bool // every finding for this check is low confidence
+	}
+	byID := map[string]*agg{}
 	for _, f := range findings {
-		if w, ok := worst[f.ID]; !ok || f.Severity.Rank() < w.Rank() {
-			worst[f.ID] = f.Severity
+		low := f.Confidence == "low"
+		a, ok := byID[f.ID]
+		if !ok {
+			byID[f.ID] = &agg{f.Severity, low}
+			continue
 		}
+		if f.Severity.Rank() < a.worst.Rank() {
+			a.worst = f.Severity
+		}
+		a.lowConf = a.lowConf && low
 	}
 	score := 100
-	for _, sev := range worst {
-		score -= penalty[sev]
+	for _, a := range byID {
+		p := penalty[a.worst]
+		if a.lowConf {
+			p = (p + 1) / 2
+		}
+		score -= p
 	}
 	return max(score, 0)
 }

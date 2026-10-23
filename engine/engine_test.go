@@ -164,6 +164,15 @@ func TestScore(t *testing.T) {
 	if got := Score(nil); got != 100 {
 		t.Errorf("clean Score = %d", got)
 	}
+	// Low-confidence findings count half (rounded up).
+	if got := Score([]Finding{{ID: "vuln-apache", Severity: Critical, Confidence: "low"}}); got != 85 {
+		t.Errorf("low-confidence Score = %d, want 85", got)
+	}
+	// A check with any confirmed finding counts in full.
+	mixed := []Finding{{ID: "x", Severity: High, Confidence: "low"}, {ID: "x", Severity: High, Confidence: "high"}}
+	if got := Score(mixed); got != 85 {
+		t.Errorf("mixed-confidence Score = %d, want 85", got)
+	}
 }
 
 func TestResolveVersions(t *testing.T) {

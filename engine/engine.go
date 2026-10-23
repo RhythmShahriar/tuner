@@ -249,6 +249,13 @@ feed:
 		if d := a.Severity.Rank() - b.Severity.Rank(); d != 0 {
 			return d
 		}
+		// Confirmed findings before "likely" ones within a severity.
+		if al, bl := a.Confidence == "low", b.Confidence == "low"; al != bl {
+			if al {
+				return 1
+			}
+			return -1
+		}
 		return strings.Compare(a.ID+a.Path, b.ID+b.Path)
 	})
 	res.Score = Score(res.Findings)

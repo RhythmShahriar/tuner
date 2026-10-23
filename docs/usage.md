@@ -125,7 +125,7 @@ List files take one target per line; blank lines and `# comments` are ignored, a
 
 ## Tune score
 
-Each scan gets a score out of 100. Every distinct failing check subtracts points by its worst severity: critical 30, high 15, medium 6, low 2, info 0. A check that fires on several paths counts once.
+Each scan gets a score out of 100. Every distinct failing check subtracts points by its worst severity: critical 30, high 15, medium 6, low 2, info 0. A check that fires on several paths counts once, and a check whose findings are all low confidence (marked "likely") counts half.
 
 ## Exit codes
 
