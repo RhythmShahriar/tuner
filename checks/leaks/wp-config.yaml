@@ -1,0 +1,31 @@
+id: leak-wp-config
+name: wp-config.php source or backup exposed
+severity: critical
+tags: [leak, secrets, wordpress]
+request:
+  path:
+    - /wp-config.php
+    - /wp-config.php.bak
+    - /wp-config.php.old
+    - /wp-config.php.save
+    - /wp-config.php.orig
+    - /wp-config.php.txt
+    - /wp-config.php~
+    - /wp-config.bak
+    - /wp-config.old
+    - /wp-config.php.swp
+    - /.wp-config.php.swp
+match:
+  all:
+    - status: 200
+    - regex: 'define\(\s*[''"]DB_(?:NAME|USER|PASSWORD|HOST)[''"]'
+extract:
+  secrets: true
+impact: Database credentials and authentication salts are readable, which allows full site takeover.
+fix: |
+  Delete backup and editor copies of wp-config.php, then change the database
+  password and regenerate salts (https://api.wordpress.org/secret-key/1.1/salt/).
+  nginx:  location ~* wp-config { deny all; }
+  apache: <FilesMatch "wp-config"> Require all denied </FilesMatch>
+references:
+  - https://developer.wordpress.org/advanced-administration/security/hardening/

@@ -1,0 +1,7 @@
+positive:
+  - name: health check answers
+    routes:
+      /_ignition/health-check: {body: '{"can_execute_commands":true}'}
+negative:
+  - name: not found
+    routes: {}

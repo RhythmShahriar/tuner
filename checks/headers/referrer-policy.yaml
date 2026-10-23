@@ -1,0 +1,14 @@
+id: hdr-referrer-policy-missing
+name: Referrer-Policy header missing
+severity: info
+profile: quick
+tags: [headers]
+request:
+  path: ["/"]
+match:
+  all:
+    - status: 200
+    - missing_header: [Referrer-Policy]
+impact: Full URLs, including query strings, may leak to third-party sites.
+fix: |
+  nginx:  add_header Referrer-Policy strict-origin-when-cross-origin always;

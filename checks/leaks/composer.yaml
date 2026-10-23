@@ -1,0 +1,15 @@
+id: leak-composer-manifest
+name: Composer manifest exposed
+severity: low
+tags: [leak, php, disclosure]
+request:
+  path: ["/composer.json", "/composer.lock", "/vendor/composer/installed.json"]
+match:
+  all:
+    - status: 200
+    - regex: '"(?:require|packages)"\s*:'
+    - not_baseline: true
+impact: Exact package versions are visible, which makes known vulnerabilities easy to target.
+fix: |
+  Keep composer files and vendor/ outside the web root, or deny them.
+  nginx:  location ~ ^/(composer\.(json|lock)|vendor/) { deny all; }

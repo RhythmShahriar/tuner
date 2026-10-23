@@ -1,0 +1,22 @@
+id: wp-admin-ajax
+name: admin-ajax.php reachable
+severity: info
+tags: [wordpress, attack-surface]
+requires: [wordpress]
+request:
+  path: ["/wp-admin/admin-ajax.php"]
+match:
+  all:
+    - status: [200, 400]
+    - regex: '\A0\s*\z'
+impact: |
+  admin-ajax.php is public on every WordPress site and serves plugin actions,
+  including ones for logged-out visitors (wp_ajax_nopriv_*). Many plugin
+  vulnerabilities live in these handlers. Tuner doesn't call them; known
+  plugin CVEs are reported by the vulnerability checks.
+fix: |
+  Don't block it (themes and plugins rely on it). Instead keep plugins updated,
+  remove unused ones, and rate-limit POSTs to it at the edge if it's abused:
+  nginx:  limit_req zone=ajax burst=20 nodelay;  (inside location = /wp-admin/admin-ajax.php)
+references:
+  - https://developer.wordpress.org/plugins/javascript/ajax/

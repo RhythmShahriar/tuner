@@ -1,0 +1,8 @@
+positive:
+  - name: nginx version shown
+    routes:
+      /: {headers: {Server: nginx/1.18.0}, body: home}
+negative:
+  - name: product only
+    routes:
+      /: {headers: {Server: nginx}, body: home}

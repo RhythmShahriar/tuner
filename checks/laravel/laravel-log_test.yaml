@@ -1,0 +1,11 @@
+positive:
+  - name: log readable
+    expect_secrets: true
+    routes:
+      /storage/logs/laravel.log:
+        body: "[2026-10-23 10:00:00] production.ERROR: SQLSTATE[HY000] [2002] Connection refused mysql://forge:s3cretpass@10.0.0.5/app\n"
+negative:
+  - name: not found
+    routes: {}
+  - name: soft-404 catch-all
+    default: {status: 200, body: "<html>Not found</html>"}

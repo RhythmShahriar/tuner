@@ -1,0 +1,18 @@
+id: leak-svn
+name: .svn directory exposed
+severity: high
+tags: [leak, source]
+request:
+  path: ["/.svn/entries", "/.svn/wc.db"]
+match:
+  all:
+    - status: 200
+    - not_baseline: true
+  any:
+    - regex: '\A\d+\s*\n'
+    - regex: '\ASQLite format 3'
+impact: Subversion metadata exposes file names and can allow source code download.
+fix: |
+  Deny access to .svn, or deploy without it.
+  nginx:  location ~ /\.svn { deny all; }
+  apache: RedirectMatch 404 /\.svn

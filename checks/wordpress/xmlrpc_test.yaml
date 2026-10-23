@@ -1,0 +1,13 @@
+positive:
+  - name: xmlrpc answers
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
+      /xmlrpc.php: {status: 405, body: "XML-RPC server accepts POST requests only."}
+negative:
+  - name: blocked
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
+      /xmlrpc.php: {status: 403}
+  - name: not wordpress
+    routes:
+      /xmlrpc.php: {status: 405, body: "XML-RPC server accepts POST requests only."}

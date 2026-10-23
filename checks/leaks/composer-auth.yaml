@@ -1,0 +1,15 @@
+id: leak-composer-auth
+name: Composer auth.json exposed
+severity: critical
+tags: [leak, secrets, php]
+request:
+  path: ["/auth.json"]
+match:
+  all:
+    - status: 200
+    - regex: '"(?:http-basic|github-oauth|gitlab-token|bitbucket-oauth|bearer)"\s*:'
+    - not_baseline: true
+extract:
+  secrets: true
+impact: Private package registry tokens are readable.
+fix: Remove auth.json from the web root and revoke the tokens in it.

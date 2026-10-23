@@ -1,0 +1,17 @@
+id: leak-error-log
+name: PHP error log exposed
+severity: medium
+tags: [leak, php]
+request:
+  path: ["/error_log", "/error.log", "/php_errors.log", "/php_error.log"]
+match:
+  all:
+    - status: 200
+    - regex: 'PHP (?:Fatal error|Warning|Notice|Parse error|Deprecated):'
+    - not_baseline: true
+extract:
+  secrets: true
+impact: Error logs reveal server paths, plugin names and sometimes credentials.
+fix: |
+  Write logs outside the web root (php.ini: error_log = /var/log/php/error.log)
+  and delete the exposed file.

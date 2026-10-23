@@ -1,0 +1,15 @@
+id: php-display-errors
+name: PHP errors shown to visitors
+severity: medium
+profile: quick
+tags: [php, wordpress, disclosure]
+request:
+  path: ["/", "/wp-admin/admin-ajax.php"]
+match:
+  all:
+    - regex: '<b>(?:Fatal error|Warning|Notice|Deprecated|Parse error)</b>:\s'
+impact: display_errors is on, so error messages reveal server paths and code details to anyone.
+fix: |
+  Turn display_errors off in production.
+  php.ini:      display_errors = Off
+  wp-config:    define( 'WP_DEBUG_DISPLAY', false ); @ini_set( 'display_errors', 0 );

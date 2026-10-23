@@ -1,0 +1,14 @@
+positive:
+  - name: expires in 5 days
+    cert: {expires_in_days: 5}
+    routes:
+      /: {body: home}
+negative:
+  - name: valid for 60 days
+    cert: {expires_in_days: 60}
+    routes:
+      /: {body: home}
+  - name: already expired
+    cert: {expires_in_days: -1}
+    routes:
+      /: {body: home}

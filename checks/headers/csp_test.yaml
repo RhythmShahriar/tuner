@@ -1,0 +1,8 @@
+positive:
+  - name: header absent
+    routes:
+      /: {body: home}
+negative:
+  - name: header set
+    routes:
+      /: {headers: {Content-Security-Policy: "x"}, body: home}

@@ -1,0 +1,9 @@
+positive:
+  - name: wc.db readable
+    routes:
+      /.svn/wc.db: {body: "SQLite format 3\u0000\u0010\u0000"}
+negative:
+  - name: not found
+    routes: {}
+  - name: soft-404 catch-all
+    default: {status: 200, body: "<html>Nothing here</html>"}

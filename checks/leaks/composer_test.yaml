@@ -1,0 +1,9 @@
+positive:
+  - name: composer.lock readable
+    routes:
+      /composer.lock: {body: '{"packages": [{"name": "guzzlehttp/guzzle", "version": "7.5.0"}]}'}
+negative:
+  - name: not found
+    routes: {}
+  - name: soft-404 catch-all
+    default: {status: 200, body: "<html>Not found</html>"}

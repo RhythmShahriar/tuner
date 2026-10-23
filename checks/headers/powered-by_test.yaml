@@ -1,0 +1,8 @@
+positive:
+  - name: php version shown
+    routes:
+      /: {headers: {X-Powered-By: PHP/7.4.3}, body: home}
+negative:
+  - name: hidden
+    routes:
+      /: {body: home}

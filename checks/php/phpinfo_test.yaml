@@ -1,0 +1,9 @@
+positive:
+  - name: info.php left behind
+    routes:
+      /info.php: {body: "<html><head><title>PHP 8.1.2 - phpinfo()</title></head></html>"}
+negative:
+  - name: not found
+    routes: {}
+  - name: soft-404 catch-all
+    default: {status: 200, body: "<html><title>Not found</title></html>"}

@@ -1,0 +1,13 @@
+id: wp-readme
+name: WordPress readme.html present
+severity: info
+tags: [wordpress, disclosure]
+requires: [wordpress]
+request:
+  path: ["/readme.html"]
+match:
+  all:
+    - status: 200
+    - regex: '(?i)<title>WordPress[^<]*ReadMe'
+impact: Confirms WordPress and can hint at the installed version.
+fix: Delete readme.html after each core update, or deny it in the web server.

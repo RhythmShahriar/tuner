@@ -1,0 +1,7 @@
+positive:
+  - name: DS_Store readable
+    routes:
+      /.DS_Store: {body_hex: "00000001427564310000100000000800"}
+negative:
+  - name: soft-404 catch-all
+    default: {status: 200, body: "<html>Not found</html>"}

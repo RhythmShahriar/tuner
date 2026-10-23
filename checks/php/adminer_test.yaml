@@ -1,0 +1,9 @@
+positive:
+  - name: adminer login
+    routes:
+      /adminer.php: {body: "<html><head><title>Login - Adminer</title></head></html>"}
+negative:
+  - name: not found
+    routes: {}
+  - name: soft-404 catch-all
+    default: {status: 200, body: "<html><title>Not found</title></html>"}

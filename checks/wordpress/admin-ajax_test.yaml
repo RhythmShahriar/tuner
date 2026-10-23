@@ -1,0 +1,13 @@
+positive:
+  - name: default response to an empty request
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
+      /wp-admin/admin-ajax.php: {status: 400, body: "0"}
+negative:
+  - name: blocked at the edge
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
+      /wp-admin/admin-ajax.php: {status: 403, body: "Forbidden"}
+  - name: not wordpress
+    routes:
+      /wp-admin/admin-ajax.php: {status: 400, body: "0"}

@@ -1,0 +1,15 @@
+id: hdr-cookie-no-httponly
+name: Session cookie readable by JavaScript
+severity: medium
+profile: quick
+tags: [headers, cookies]
+request:
+  path: ["/"]
+match:
+  all:
+    - cookie: {name: '(?i)(sess|^wordpress_|^wp-settings|laravel_session|PHPSESSID)', missing_flag: httponly}
+impact: Any XSS bug can steal the session cookie and take over the account.
+fix: |
+  Mark session cookies HttpOnly.
+  php.ini: session.cookie_httponly = 1
+  laravel: 'http_only' => true in config/session.php

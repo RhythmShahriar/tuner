@@ -1,0 +1,16 @@
+id: wp-xmlrpc
+name: XML-RPC enabled
+severity: low
+profile: quick
+tags: [wordpress, bruteforce]
+requires: [wordpress]
+request:
+  path: ["/xmlrpc.php"]
+match:
+  all:
+    - regex: 'XML-RPC server accepts POST requests only'
+impact: XML-RPC allows many password guesses in a single request and is often used for pingback abuse.
+fix: |
+  Disable it unless Jetpack or a mobile app needs it.
+  nginx:  location = /xmlrpc.php { deny all; }
+  wp:     add_filter( 'xmlrpc_enabled', '__return_false' );

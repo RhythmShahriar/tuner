@@ -1,0 +1,13 @@
+positive:
+  - name: session cookie without Secure
+    tls: true
+    routes:
+      /: {headers: {Set-Cookie: "PHPSESSID=abc123; path=/; HttpOnly"}, body: home}
+negative:
+  - name: Secure set
+    tls: true
+    routes:
+      /: {headers: {Set-Cookie: "PHPSESSID=abc123; path=/; Secure; HttpOnly"}, body: home}
+  - name: plain http site
+    routes:
+      /: {headers: {Set-Cookie: "PHPSESSID=abc123; path=/"}, body: home}

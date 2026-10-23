@@ -1,0 +1,10 @@
+positive:
+  - name: zip in web root
+    routes:
+      /backup.zip: {body_hex: "504b030414000000080000000000"}
+negative:
+  - name: not found
+    routes: {}
+  - name: html page with zip name
+    routes:
+      /backup.zip: {status: 200, body: "<html>Download page</html>"}

@@ -1,0 +1,18 @@
+id: laravel-log
+name: Laravel log file exposed
+severity: high
+profile: quick
+tags: [laravel, leak, secrets]
+request:
+  path: ["/storage/logs/laravel.log"]
+match:
+  all:
+    - status: 200
+    - regex: '(?m)^\[\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}[^\]]*\] \w+\.(?:EMERGENCY|ALERT|CRITICAL|ERROR|WARNING|NOTICE|INFO|DEBUG):'
+    - not_baseline: true
+extract:
+  secrets: true
+impact: Stack traces reveal source paths, queries and often credentials from exception context.
+fix: |
+  Point the web server at public/, not the project root, so storage/ is never served.
+  nginx:  root /var/www/app/public;

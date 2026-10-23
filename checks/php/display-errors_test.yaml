@@ -1,0 +1,8 @@
+positive:
+  - name: warning on the home page
+    routes:
+      /: {body: "<br />\n<b>Warning</b>:  Undefined array key \"x\" in <b>/var/www/html/wp-content/themes/acme/header.php</b> on line <b>12</b><br />"}
+negative:
+  - name: clean page
+    routes:
+      /: {body: "<html>home</html>"}

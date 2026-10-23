@@ -1,0 +1,11 @@
+positive:
+  - name: PHP session without HttpOnly
+    routes:
+      /: {headers: {Set-Cookie: "PHPSESSID=abc123; path=/"}, body: home}
+negative:
+  - name: HttpOnly set
+    routes:
+      /: {headers: {Set-Cookie: "PHPSESSID=abc123; path=/; HttpOnly"}, body: home}
+  - name: CSRF token cookie is meant to be readable
+    routes:
+      /: {headers: {Set-Cookie: "XSRF-TOKEN=abc; path=/"}, body: home}

@@ -1,0 +1,18 @@
+id: leak-sql-dump
+name: SQL database dump exposed
+severity: critical
+tags: [leak, secrets, database]
+request:
+  path: ["/backup.sql", "/dump.sql", "/database.sql", "/db.sql", "/data.sql", "/mysql.sql", "/wordpress.sql", "/wp.sql", "/{{host}}.sql"]
+match:
+  all:
+    - status: 200
+    - regex: '(?m)^(?:-- MySQL dump|-- MariaDB dump|-- phpMyAdmin SQL Dump|CREATE TABLE|INSERT INTO)'
+    - not_baseline: true
+extract:
+  secrets: true
+impact: The whole database can be downloaded, including user emails and password hashes.
+fix: |
+  Delete the dump from the web root and keep backups outside it.
+  nginx:  location ~* \.sql$ { deny all; }
+  apache: <FilesMatch "\.sql$"> Require all denied </FilesMatch>

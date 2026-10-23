@@ -1,0 +1,14 @@
+id: tls-no-https
+name: Site served over plain HTTP
+severity: medium
+profile: quick
+tags: [tls, transport]
+request:
+  path: ["/"]
+match:
+  all:
+    - scheme: http
+impact: Logins and cookies travel unencrypted, and the site doesn't redirect to HTTPS.
+fix: |
+  Get a free certificate (e.g. certbot) and redirect all HTTP traffic.
+  nginx:  return 301 https://$host$request_uri;

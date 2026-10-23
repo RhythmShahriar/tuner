@@ -1,0 +1,14 @@
+id: hdr-server-version
+name: Server header leaks version
+severity: low
+profile: quick
+tags: [headers, disclosure]
+request:
+  path: ["/"]
+match:
+  all:
+    - header: {Server: '/\d'}
+impact: Reveals the exact web server version, making known vulnerabilities easy to target.
+fix: |
+  nginx:  server_tokens off;
+  apache: ServerTokens Prod

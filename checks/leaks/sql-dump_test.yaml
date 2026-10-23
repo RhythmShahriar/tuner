@@ -1,0 +1,12 @@
+positive:
+  - name: mysqldump in web root
+    routes:
+      /backup.sql:
+        body: |
+          -- MySQL dump 10.13  Distrib 8.0.36
+          CREATE TABLE `wp_users` (`ID` bigint unsigned NOT NULL);
+negative:
+  - name: not found
+    routes: {}
+  - name: soft-404 catch-all
+    default: {status: 200, body: "<html>Not found</html>"}

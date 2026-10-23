@@ -1,0 +1,16 @@
+positive:
+  - name: editor backup readable
+    expect_secrets: true
+    routes:
+      /wp-config.php.bak:
+        body: |
+          <?php
+          define( 'DB_NAME', 'wordpress' );
+          define( 'DB_PASSWORD', 'correct-horse-battery' );
+          define( 'AUTH_KEY', 'q8#Lk2@pZ!v' );
+negative:
+  - name: php executes, empty output
+    routes:
+      /wp-config.php: {status: 200, body: ""}
+  - name: soft-404 catch-all
+    default: {status: 200, body: "<html>Not found</html>"}

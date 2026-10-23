@@ -1,0 +1,16 @@
+id: hdr-cookie-no-secure
+name: Cookie set without Secure flag
+severity: low
+profile: quick
+tags: [headers, cookies]
+request:
+  path: ["/"]
+match:
+  all:
+    - scheme: https
+    - cookie: {missing_flag: secure}
+impact: The cookie is also sent over plain HTTP, where it can be intercepted.
+fix: |
+  Mark cookies Secure on HTTPS sites.
+  php.ini: session.cookie_secure = 1
+  laravel: SESSION_SECURE_COOKIE=true

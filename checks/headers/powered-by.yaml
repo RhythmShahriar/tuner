@@ -1,0 +1,14 @@
+id: hdr-powered-by-version
+name: X-Powered-By leaks version
+severity: low
+profile: quick
+tags: [headers, disclosure]
+request:
+  path: ["/"]
+match:
+  all:
+    - header: {X-Powered-By: '\d'}
+impact: Reveals the exact PHP version, making known vulnerabilities easy to target.
+fix: |
+  php.ini: expose_php = Off
+  nginx:   fastcgi_hide_header X-Powered-By;

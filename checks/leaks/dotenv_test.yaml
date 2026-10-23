@@ -1,0 +1,17 @@
+positive:
+  - name: laravel env readable
+    expect_secrets: true
+    routes:
+      /.env:
+        body: |
+          APP_NAME=Laravel
+          DB_PASSWORD=supersecret
+          STRIPE_SECRET=sk_live_abcdefghijklmnop1234
+negative:
+  - name: blocked
+    routes:
+      /.env: {status: 403, body: Forbidden}
+  - name: soft-404 catch-all
+    default: {status: 200, body: "<html><title>Not found</title><p>{{path}} does not exist</p></html>"}
+  - name: catch-all that echoes env-like text
+    default: {status: 200, body: "APP_ENV=prod served {{path}}"}

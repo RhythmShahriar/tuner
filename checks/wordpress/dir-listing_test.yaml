@@ -1,0 +1,11 @@
+positive:
+  - name: uploads listed
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
+      /wp-content/uploads/: {body: "<html><head><title>Index of /wp-content/uploads</title></head></html>"}
+negative:
+  - name: listing off
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
+      /wp-content/uploads/: {status: 403}
+      /wp-content/plugins/: {status: 200, body: ""}

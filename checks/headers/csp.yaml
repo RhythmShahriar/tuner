@@ -1,0 +1,15 @@
+id: hdr-csp-missing
+name: Content-Security-Policy header missing
+severity: low
+profile: quick
+tags: [headers]
+request:
+  path: ["/"]
+match:
+  all:
+    - status: 200
+    - missing_header: [Content-Security-Policy]
+impact: Without a CSP, an XSS bug can load scripts from anywhere.
+fix: |
+  Start with a report-only policy and tighten it:
+  nginx:  add_header Content-Security-Policy-Report-Only "default-src 'self'" always;

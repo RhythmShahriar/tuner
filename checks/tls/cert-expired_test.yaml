@@ -1,0 +1,10 @@
+positive:
+  - name: expired yesterday
+    cert: {expires_in_days: -1}
+    routes:
+      /: {body: home}
+negative:
+  - name: valid for a year
+    cert: {expires_in_days: 365}
+    routes:
+      /: {body: home}

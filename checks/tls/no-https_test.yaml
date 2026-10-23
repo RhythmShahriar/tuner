@@ -1,0 +1,9 @@
+positive:
+  - name: plain http
+    routes:
+      /: {body: home}
+negative:
+  - name: https
+    tls: true
+    routes:
+      /: {body: home}

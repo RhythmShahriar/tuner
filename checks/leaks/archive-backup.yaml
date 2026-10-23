@@ -1,0 +1,29 @@
+id: leak-archive-backup
+name: Site backup archive exposed
+severity: critical
+tags: [leak, backup]
+request:
+  path:
+    - /backup.zip
+    - /backup.tar.gz
+    - /backup.tgz
+    - /backup.sql.gz
+    - /site.zip
+    - /www.zip
+    - /html.zip
+    - /public_html.zip
+    - /wordpress.zip
+    - /wp-content.zip
+    - /{{host}}.zip
+    - /{{host}}.tar.gz
+match:
+  all:
+    - status: 200
+    - not_baseline: true
+  any:
+    - magic: "504b0304"     # zip
+    - magic: "1f8b08"       # gzip
+    - magic: "377abcaf271c" # 7z
+    - magic: "526172211a07" # rar
+impact: A full copy of the site, usually including configuration and secrets, can be downloaded.
+fix: Move backups out of the web root and store them somewhere private.

@@ -1,0 +1,14 @@
+id: leak-ds-store
+name: .DS_Store file exposed
+severity: low
+tags: [leak, disclosure]
+request:
+  path: ["/.DS_Store"]
+match:
+  all:
+    - status: 200
+    - magic: "0000000142756431"
+impact: macOS folder metadata lists file names in the directory, including hidden backups.
+fix: |
+  Delete .DS_Store files from the server and deny dotfiles.
+  nginx:  location ~ /\.(?!well-known) { deny all; }

@@ -1,0 +1,10 @@
+positive:
+  - name: accepts TLS 1.0
+    tls_min: "1.0"
+    routes:
+      /: {body: home}
+negative:
+  - name: modern only
+    tls: true
+    routes:
+      /: {body: home}

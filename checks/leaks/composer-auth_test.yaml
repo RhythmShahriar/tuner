@@ -1,0 +1,11 @@
+positive:
+  - name: github token readable
+    expect_secrets: true
+    routes:
+      /auth.json: {body: '{"github-oauth": {"github.com": "ghp_abcdefghijklmnopqrstuvwxyz0123456789"}}'}
+negative:
+  - name: unrelated json
+    routes:
+      /auth.json: {body: '{"status": "ok"}'}
+  - name: soft-404 catch-all
+    default: {status: 200, body: "<html>Not found</html>"}

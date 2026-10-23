@@ -1,0 +1,15 @@
+id: laravel-ignition
+name: Laravel Ignition debug endpoints exposed
+severity: high
+profile: quick
+tags: [laravel, debug]
+request:
+  path: ["/_ignition/health-check"]
+match:
+  all:
+    - status: 200
+    - regex: '"can_execute_commands"\s*:'
+impact: Debug mode is on in production. Older Ignition versions allow remote code execution (CVE-2021-3129).
+fix: Set APP_DEBUG=false in .env and update facade/ignition or spatie/laravel-ignition.
+references:
+  - https://nvd.nist.gov/vuln/detail/CVE-2021-3129

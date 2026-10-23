@@ -1,0 +1,13 @@
+positive:
+  - name: header absent
+    tls: true
+    routes:
+      /: {body: home}
+negative:
+  - name: header set
+    tls: true
+    routes:
+      /: {headers: {Strict-Transport-Security: "x"}, body: home}
+  - name: plain http
+    routes:
+      /: {body: home}

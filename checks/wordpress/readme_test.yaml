@@ -1,0 +1,9 @@
+positive:
+  - name: readme present
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
+      /readme.html: {body: "<html><head><title>WordPress &rsaquo; ReadMe</title></head></html>"}
+negative:
+  - name: removed
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}

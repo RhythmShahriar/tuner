@@ -1,0 +1,16 @@
+id: wp-dir-listing
+name: Directory listing enabled
+severity: medium
+tags: [wordpress, disclosure]
+requires: [wordpress]
+request:
+  path: ["/wp-content/uploads/", "/wp-content/plugins/", "/wp-content/themes/", "/wp-includes/"]
+match:
+  all:
+    - status: 200
+    - regex: '<title>Index of /'
+impact: Anyone can browse every uploaded file and the exact plugins and themes installed.
+fix: |
+  Turn off auto-indexing.
+  nginx:  autoindex off;
+  apache: Options -Indexes

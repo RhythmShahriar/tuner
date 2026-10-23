@@ -1,0 +1,20 @@
+positive:
+  - name: HEAD readable
+    routes:
+      /.git/HEAD: {body: "ref: refs/heads/main\n"}
+  - name: config with credentials
+    expect_secrets: true
+    routes:
+      /.git/config:
+        body: |
+          [core]
+          	repositoryformatversion = 0
+          [remote "origin"]
+          	url = https://deploy:ghp_abcdefghijklmnopqrstuvwxyz0123456789@github.com/acme/site.git
+negative:
+  - name: forbidden
+    routes:
+      /.git/HEAD: {status: 403}
+      /.git/config: {status: 403}
+  - name: soft-404 catch-all
+    default: {status: 200, body: "<html>Page not found</html>"}

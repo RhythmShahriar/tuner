@@ -1,0 +1,12 @@
+id: php-phpinfo
+name: phpinfo() page exposed
+severity: medium
+tags: [php, disclosure]
+request:
+  path: ["/phpinfo.php", "/info.php", "/php_info.php", "/php.php", "/test.php", "/i.php"]
+match:
+  all:
+    - status: 200
+    - regex: '<title>(?:PHP [0-9.]+ - )?phpinfo\(\)</title>'
+impact: Shows the PHP version, loaded modules, server paths and environment variables, which may include secrets.
+fix: Delete the file. phpinfo() pages should never be left on a live server.

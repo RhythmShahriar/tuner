@@ -1,0 +1,10 @@
+positive:
+  - name: self-signed
+    cert: {expires_in_days: 365, untrusted: true}
+    routes:
+      /: {body: home}
+negative:
+  - name: trusted
+    cert: {expires_in_days: 365}
+    routes:
+      /: {body: home}
