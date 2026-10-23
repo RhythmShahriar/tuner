@@ -1,0 +1,12 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  go:
+    uses: RhythmShahriar/.github/.github/workflows/ci-go.yml@main
+    with:
+      rhythm-kit: true
+  commitlint:
+    uses: RhythmShahriar/.github/.github/workflows/commitlint.yml@main
