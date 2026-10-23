@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/huh"
 
 	"github.com/RhythmShahriar/tuner/engine"
+	"github.com/RhythmShahriar/tuner/local"
 )
 
 // pick asks for a target, profile and report format, then scans.
@@ -17,15 +18,20 @@ func pick(stdout, stderr io.Writer) int {
 	profile, output := string(engine.ProfileDefault), "terminal"
 	form := huh.NewForm(huh.NewGroup(
 		huh.NewInput().
-			Title("Which site should Tuner scan?").
+			Title("Which site should Tuner scan? (a URL, or a folder on this server)").
 			Description("Only scan sites you own or are authorised to test.").
 			Placeholder("example.com").
 			Value(&target).
 			Validate(func(s string) error {
-				if strings.TrimSpace(s) == "" {
-					return errors.New("enter a URL or hostname")
+				s = strings.TrimSpace(s)
+				if s == "" {
+					return errors.New("enter a URL, a hostname, or a site folder")
 				}
-				_, _, err := engine.ParseTarget(strings.TrimSpace(s))
+				if isLocalPath(s) {
+					_, err := local.Root(s)
+					return err
+				}
+				_, _, err := engine.ParseTarget(s)
 				return err
 			}),
 		huh.NewSelect[string]().
@@ -33,7 +39,7 @@ func pick(stdout, stderr io.Writer) int {
 			Options(
 				huh.NewOption("Quick: top checks, about 30 requests", string(engine.ProfileQuick)),
 				huh.NewOption("Default: every polite check", string(engine.ProfileDefault)),
-				huh.NewOption("Deep: adds enumeration", string(engine.ProfileDeep)),
+				huh.NewOption("Deep: same as default today; future checks that send many requests", string(engine.ProfileDeep)),
 			).
 			Value(&profile),
 		huh.NewSelect[string]().
