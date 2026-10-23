@@ -3,7 +3,8 @@
 //
 // Vulnerability data comes from WPVulnerability (wpvulnerability.com),
 // public domain under CC0 1.0, which aggregates CVE, Wordfence, WPScan and
-// Patchstack. Latest-release data comes from the wordpress.org API. Every
+// Patchstack. Latest-release data comes from the wordpress.org API, and
+// PHP's supported branches from php.net. Every
 // lookup is cached on disk and refreshed automatically once it is older
 // than the TTL; when the network is unavailable, stale data is used.
 package vulns
@@ -29,9 +30,10 @@ import (
 )
 
 const (
-	DefaultVulnBase  = "https://www.wpvulnerability.net"
-	DefaultWPOrgBase = "https://api.wordpress.org"
-	DefaultTTL       = 24 * time.Hour
+	DefaultVulnBase   = "https://www.wpvulnerability.net"
+	DefaultWPOrgBase  = "https://api.wordpress.org"
+	DefaultPHPNetBase = "https://www.php.net"
+	DefaultTTL        = 24 * time.Hour
 
 	// Attribution shown with every vulnerability finding.
 	Source = "WPVulnerability (wpvulnerability.com, CC0)"
@@ -41,15 +43,16 @@ const (
 var ErrOffline = errors.New("not cached, and offline mode is on")
 
 type Client struct {
-	HTTP      *http.Client
-	UserAgent string
-	CacheDir  string        // "" disables the disk cache
-	TTL       time.Duration // refresh records older than this; 0 means DefaultTTL
-	Offline   bool          // never fetch; use cached data however old
-	Force     bool          // always fetch, ignoring the TTL (rhythm tuner update)
-	Pace      time.Duration // gap between requests to the data services; 0 means 200ms, <0 none
-	VulnBase  string
-	WPOrgBase string
+	HTTP       *http.Client
+	UserAgent  string
+	CacheDir   string        // "" disables the disk cache
+	TTL        time.Duration // refresh records older than this; 0 means DefaultTTL
+	Offline    bool          // never fetch; use cached data however old
+	Force      bool          // always fetch, ignoring the TTL (rhythm tuner update)
+	Pace       time.Duration // gap between requests to the data services; 0 means 200ms, <0 none
+	VulnBase   string
+	WPOrgBase  string
+	PHPNetBase string
 
 	lim  *pacer
 	mu   sync.Mutex
@@ -86,6 +89,9 @@ func (c *Client) init() {
 		}
 		if c.WPOrgBase == "" {
 			c.WPOrgBase = DefaultWPOrgBase
+		}
+		if c.PHPNetBase == "" {
+			c.PHPNetBase = DefaultPHPNetBase
 		}
 		switch {
 		case c.Pace == 0:
@@ -219,7 +225,7 @@ func (c *Client) Refresh(ctx context.Context) (ok, failed int, err error) {
 	}
 	force := &Client{
 		HTTP: c.HTTP, UserAgent: c.UserAgent, CacheDir: c.CacheDir, TTL: c.TTL,
-		VulnBase: c.VulnBase, WPOrgBase: c.WPOrgBase, Pace: c.Pace, Force: true,
+		VulnBase: c.VulnBase, WPOrgBase: c.WPOrgBase, PHPNetBase: c.PHPNetBase, Pace: c.Pace, Force: true,
 	}
 	err = filepath.WalkDir(c.CacheDir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || filepath.Ext(p) != ".json" {
@@ -237,6 +243,8 @@ func (c *Client) Refresh(ctx context.Context) (ok, failed int, err error) {
 			_, _, ferr = force.Advisories(ctx, parts[1], key)
 		case "wordpress.org":
 			_, _, ferr = force.Latest(ctx, parts[1], key)
+		case "php.net":
+			_, _, ferr = force.PHPBranches(ctx)
 		default:
 			return nil
 		}
@@ -516,6 +524,11 @@ var (
 	onlyVersion = regexp.MustCompile(`^[0-9][0-9.]*$`)
 	cveID       = regexp.MustCompile(`^CVE-\d{4}-\d+$`)
 	langPrefix  = regexp.MustCompile(`^\[[a-z]{2}\]\s*`)
+	// A name that only states a range, like "PHP 8.4 < 8.4.27".
+	rangeName = regexp.MustCompile(`^[^<>=]*\s[<>]=?\s*[0-9][0-9.]*$`)
+	// "In PHP versions 8.2.* before 8.2.31, and 8.3.* before 8.3.31, " opens
+	// many PHP advisories and crowds out what the flaw is.
+	versionLead = regexp.MustCompile(`(?i)^In [A-Za-z ]*?versions?\s+(?:(?:and|from)\s+)?(?:[0-9][0-9.*x]*\s+(?:before|through|prior to)\s+[0-9][0-9.]*,?\s*(?:and\s+(?:from\s+)?)?)+`)
 )
 
 var severityLetter = map[string]string{"c": "critical", "h": "high", "m": "medium", "l": "low", "n": ""}
@@ -542,7 +555,8 @@ func (d rawData) normalize() *Record {
 			if s.Link != "" && len(v.References) < 5 {
 				v.References = append(v.References, string(s.Link))
 			}
-			if v.Description == "" && s.Description != "" {
+			// Some sources repeat the bare ID as the description.
+			if v.Description == "" && s.Description != "" && !cveID.MatchString(string(s.Description)) {
 				v.Description = langPrefix.ReplaceAllString(string(s.Description), "")
 			}
 			if d := string(s.Date); d != "" && (v.Published == "" || d < v.Published) {
@@ -557,11 +571,12 @@ func (d rawData) normalize() *Record {
 		if v.Title == "" && rv.Name != "" && !onlyVersion.MatchString(string(rv.Name)) {
 			v.Title = clean(string(rv.Name))
 		}
-		// A bare ID makes a poor title; prefer the description's opening.
-		if (v.Title == "" || cveID.MatchString(v.Title)) && v.Description != "" {
-			v.Title = truncate(clean(v.Description), 90)
+		// A bare ID or version range makes a poor title; prefer the
+		// description's opening.
+		if (v.Title == "" || cveID.MatchString(v.Title) || rangeName.MatchString(v.Title)) && v.Description != "" {
+			v.Title = summary(v.Description)
 		}
-		if v.Title == "" && len(v.CVEs) > 0 {
+		if (v.Title == "" || rangeName.MatchString(v.Title)) && len(v.CVEs) > 0 {
 			v.Title = v.CVEs[0]
 		}
 		if v.Description == "" && rv.Description != "" {
@@ -594,6 +609,17 @@ func (d rawData) normalize() *Record {
 // clean decodes HTML entities and collapses runs of whitespace, which
 // some upstream advisory titles contain.
 func clean(s string) string { return strings.Join(strings.Fields(html.UnescapeString(s)), " ") }
+
+// summary shortens a description to a title, dropping a leading list of
+// affected versions.
+func summary(desc string) string {
+	s := clean(desc)
+	if rest := versionLead.ReplaceAllString(s, ""); rest != s && rest != "" {
+		r := []rune(rest)
+		s = strings.ToUpper(string(r[0])) + string(r[1:])
+	}
+	return truncate(s, 90)
+}
 
 func truncate(s string, n int) string {
 	if r := []rune(s); len(r) > n {

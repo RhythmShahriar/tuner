@@ -103,9 +103,10 @@ Batch and CI:
       --fail-on <level>    exit 1 if a finding is at or above this severity
       --baseline <file>    hide findings already in this JSON report
 
-Vulnerability data comes from WPVulnerability (CC0) and api.wordpress.org.
-It's cached under your user cache directory and refreshed automatically once
-a day; TUNER_VULN_API and TUNER_WPORG_API point Tuner at mirrors.
+Vulnerability data comes from WPVulnerability (CC0), api.wordpress.org and
+php.net. It's cached under your user cache directory and refreshed
+automatically once a day; TUNER_VULN_API, TUNER_WPORG_API and
+TUNER_PHPNET_API point Tuner at mirrors.
 
 Exit codes: 0 ok · 1 findings at --fail-on · 2 usage error · 3 scan error · 130 interrupted
 

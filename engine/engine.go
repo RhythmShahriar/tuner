@@ -38,7 +38,7 @@ type Options struct {
 	Retries     int // extra attempts after a network error or a 429/503
 	Proxy       *url.URL
 	Insecure    bool         // skip TLS certificate verification
-	Profile     Profile      // quick skips plugin and theme version lookups
+	Profile     Profile      // quick skips plugin and theme version lookups (not the PHP probe)
 	HTTPClient  *http.Client // optional base client, e.g. one that trusts a test server
 	Advisor     Advisor      // optional: known-vulnerability matching
 }
@@ -85,6 +85,7 @@ type Finding struct {
 	Title      string     `json:"title"`
 	Severity   Severity   `json:"severity"`
 	Confidence string     `json:"confidence"`
+	Caveat     string     `json:"caveat,omitempty"` // why confidence is low, e.g. "a distro build may already include the fix"
 	Target     string     `json:"target"`
 	URL        string     `json:"url"`
 	Path       string     `json:"path"`
@@ -166,8 +167,18 @@ func (s *Scanner) Scan(ctx context.Context, target string, h Hooks) (*Result, er
 
 	home.TLS = ss.tlsInfo(ctx, home)
 	res := &Result{Target: ss.base.String(), Fingerprint: fingerprint.Detect(home), TLS: home.TLS}
+	// The PHP probe runs in every profile: it costs at most three requests,
+	// and without it quick scans would report the version as hidden behind
+	// a page cache.
+	var php, phpBuild, phpSource string
+	var vwg sync.WaitGroup
+	vwg.Go(func() { php, phpBuild, phpSource = ss.probePHP(ctx, &res.Fingerprint) })
 	if s.opts.Profile != ProfileQuick {
-		ss.resolveVersions(ctx, &res.Fingerprint)
+		vwg.Go(func() { ss.resolveVersions(ctx, &res.Fingerprint) })
+	}
+	vwg.Wait()
+	if php != "" {
+		res.Fingerprint.PHP, res.Fingerprint.PHPBuild, res.Fingerprint.PHPSource = php, phpBuild, phpSource
 	}
 	ss.emit(func() {
 		if h.Fingerprint != nil {

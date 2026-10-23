@@ -10,7 +10,7 @@ rhythm tuner checks                  # list checks
 
 ## What a scan does
 
-1. **Fingerprint.** Fetches the home page, following redirects, and detects WordPress (with version), Laravel, PHP, the server, and the plugins and themes it loads. Plugin versions come from `readme.txt` and theme versions from `style.css`.
+1. **Fingerprint.** Fetches the home page, following redirects, and detects WordPress (with version), Laravel, PHP, the server, and the plugins and themes it loads. Plugin versions come from `readme.txt` and theme versions from `style.css`. The PHP version comes from `X-Powered-By`, or a `PHP/x.y.z` token in `Server`; when a page cache strips both from the home page, Tuner asks a few uncacheable PHP endpoints instead (`/xmlrpc.php`, `/wp-admin/admin-ajax.php`, `/wp-login.php` on WordPress, `/index.php` elsewhere), stopping at the first that answers. That's at most three extra requests, in every profile, and the checks reuse the responses. The JSON report's `php_source` says where the version was found.
 2. **TLS.** For https sites, reads the certificate's expiry and trust and tests whether TLS 1.0/1.1 are still accepted.
 3. **Baseline.** Requests random paths to learn how the server answers "not found", so sites that return 200 for everything don't produce false findings.
 4. **Checks.** Runs each check's requests, without following redirects, and streams findings as they're found.
@@ -50,15 +50,20 @@ It also reports:
 |---|---|
 | `vuln-core`, `vuln-plugin-<slug>`, `vuln-theme-<slug>` | published vulnerabilities affect the installed version |
 | `vuln-php`, `vuln-nginx`, `vuln-apache` | the server software version has known vulnerabilities |
-| `php-eol`, `nginx-eol`, `apache-eol` | the branch no longer gets security fixes |
+| `php-eol`, `nginx-eol`, `apache-eol` | the branch no longer gets security fixes (`php-eol` is high: see below) |
+| `php-version-hidden` | the site runs PHP but its version couldn't be read, and recent critical PHP flaws exist (see below) |
 | `wp-core-outdated`, `wp-components-outdated` | a newer release exists |
 | `wp-plugin-closed`, `wp-theme-closed` | removed from wordpress.org, often for an unfixed security issue |
 | `wp-components-abandoned` | no release in over two years |
 | `wp-components-unverified` | known vulnerabilities exist but the installed version couldn't be read |
 
+**Hidden PHP versions.** Hiding the PHP version is good practice, but then Tuner can't tell whether the site is patched. `php-version-hidden` lists the critical or actively exploited PHP advisories published in the last 180 days for every supported branch, with the release that fixes each one, and tells you how to check the version yourself (`php -v`, your hosting panel, or WordPress Site Health). It's medium severity with low confidence, so it counts half in the score, and it isn't reported at all when no such advisories exist. The supported branches come from [php.net](https://www.php.net/releases/states.php), so the next big PHP flaw shows up without a Tuner update.
+
+**End-of-life PHP.** Branches past end of life (e.g. 8.1, 7.4) never get fixes, so vulnerability databases stop listing new flaws for them. Tuner infers them: an advisory for the oldest supported branch with no lower version bound reaches every older release too. Those disclosed after the branch's end of life are added to `vuln-php` with no fixed version ("no fix for this branch"), and `php-eol` is raised to high.
+
 Versions reported by distribution packages (e.g. `PHP/7.4.3-4ubuntu2.19`, `Apache/2.4.41 (Ubuntu)`) get low confidence: distributions backport security fixes without changing the version number.
 
-**Data.** Advisories come from [WPVulnerability](https://www.wpvulnerability.com/), which aggregates CVE, Wordfence, WPScan and Patchstack and publishes them as public domain (CC0). Latest-release information comes from the wordpress.org API. No API key is needed.
+**Data.** Advisories come from [WPVulnerability](https://www.wpvulnerability.com/), which aggregates CVE, Wordfence, WPScan and Patchstack and publishes them as public domain (CC0). Latest-release information comes from the wordpress.org API, and PHP's supported branches from php.net. No API key is needed.
 
 **Updates are automatic.** Each component's data is cached under your user cache directory (`~/.cache/rhythm/tuner/vulns` on Linux) and refreshed during a scan once it's a day old. If the data services can't be reached, Tuner uses the cached copy and says so.
 
@@ -69,7 +74,7 @@ Versions reported by distribution packages (e.g. `PHP/7.4.3-4ubuntu2.19`, `Apach
 | `--offline` | use cached data only; never contact the data services |
 | `--no-vulns` | skip vulnerability matching |
 | `--id 'vuln-*'` | only vulnerability matching |
-| `TUNER_VULN_API`, `TUNER_WPORG_API` | use mirrors of the two APIs |
+| `TUNER_VULN_API`, `TUNER_WPORG_API`, `TUNER_PHPNET_API` | use mirrors of WPVulnerability, api.wordpress.org and php.net |
 
 ## Updating Tuner
 

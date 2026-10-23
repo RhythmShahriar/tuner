@@ -17,6 +17,41 @@ var (
 	feedVersion = regexp.MustCompile(`<generator>https?://wordpress\.org/\?v=([0-9.]+)</generator>`)
 )
 
+// Uncacheable PHP endpoints. They still send X-Powered-By when a page cache
+// (Cloudflare, LiteSpeed, Varnish) strips it from the home page. Paths that
+// checks fetch anyway come first, so the probe usually costs nothing extra.
+var (
+	wpPHPProbes = []string{"/xmlrpc.php", "/wp-admin/admin-ajax.php", "/wp-login.php"}
+	phpProbes   = []string{"/index.php"}
+)
+
+// probePHP looks for the PHP version on uncacheable endpoints when the home
+// page didn't state it, stopping at the first that does. Responses go
+// through the scan cache, so checks reuse them. It only reads fp, so it can
+// run alongside resolveVersions; the caller stores what it finds.
+func (ss *session) probePHP(ctx context.Context, fp *fingerprint.Result) (version, build, source string) {
+	if fp.PHP != "" || !fp.Has("php") {
+		return "", "", ""
+	}
+	paths := phpProbes
+	if fp.Has("wordpress") {
+		paths = wpPHPProbes
+	}
+	for _, p := range paths {
+		r, err := ss.get(ctx, "GET", p)
+		if ctx.Err() != nil {
+			break
+		}
+		if err != nil {
+			continue
+		}
+		if v, b, header := fingerprint.PHPVersion(r.Header); v != "" {
+			return v, b, header + " " + p
+		}
+	}
+	return "", "", ""
+}
+
 // resolveVersions fills in WordPress, plugin and theme versions from the
 // files that state them: /feed/ for core, readme.txt for plugins and
 // style.css for themes. These beat ?ver= hints, which they replace.

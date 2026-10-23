@@ -39,6 +39,7 @@ type component struct {
 	version string
 	path    string
 	build   string // raw version string, to spot distro builds
+	source  string // where the version was read, e.g. "x-powered-by /wp-login.php"
 }
 
 type lookup struct {
@@ -47,6 +48,12 @@ type lookup struct {
 	rel   *Release
 	stale bool
 	err   error
+
+	// PHP on an end-of-life branch: advisories inferred from the oldest
+	// supported branch (newerFrom), which will never be fixed on this one.
+	newer     []Vuln
+	newerFrom string
+	newerErr  error
 }
 
 func (a *Advisor) Advise(ctx context.Context, base *url.URL, fp fingerprint.Result) ([]engine.Finding, []string) {
@@ -64,7 +71,7 @@ func (a *Advisor) Advise(ctx context.Context, base *url.URL, fp fingerprint.Resu
 			path: "/wp-content/" + c.Type + "s/" + c.Slug + "/"})
 	}
 	if fp.PHP != "" {
-		comps = append(comps, component{kind: "php", key: fp.PHP, slug: "PHP", version: fp.PHP, path: "/", build: fp.PHPBuild})
+		comps = append(comps, component{kind: "php", key: fp.PHP, slug: "PHP", version: fp.PHP, path: "/", build: fp.PHPBuild, source: fp.PHPSource})
 	}
 	if m := serverVersion.FindStringSubmatch(fp.Server); m != nil {
 		kind := strings.ToLower(m[1])
@@ -73,6 +80,15 @@ func (a *Advisor) Advise(ctx context.Context, base *url.URL, fp fingerprint.Resu
 
 	lookups := make([]*lookup, len(comps))
 	var wg sync.WaitGroup
+	var hidden struct {
+		flaws    []*recentFlaw
+		branches []string
+		stale    bool
+		err      error
+	}
+	if fp.Has("php") && fp.PHP == "" {
+		wg.Go(func() { hidden.flaws, hidden.branches, hidden.stale, hidden.err = a.recentPHPFlaws(ctx, now()) })
+	}
 	for i, c := range comps {
 		l := &lookup{component: c}
 		lookups[i] = l
@@ -90,6 +106,11 @@ func (a *Advisor) Advise(ctx context.Context, base *url.URL, fp fingerprint.Resu
 					l.stale = l.stale || stale
 				}
 			}
+			if c.kind == "php" && l.err == nil {
+				var stale bool
+				l.newer, l.newerFrom, stale, l.newerErr = a.newerPHPFlaws(ctx, l.rec, c.version, now())
+				l.stale = l.stale || stale
+			}
 		})
 	}
 	wg.Wait()
@@ -99,14 +120,28 @@ func (a *Advisor) Advise(ctx context.Context, base *url.URL, fp fingerprint.Resu
 	var failed, stale int
 	var offline bool
 	var firstErr string
+	fail := func(what string, err error) {
+		failed++
+		offline = offline || errors.Is(err, ErrOffline)
+		if firstErr == "" {
+			firstErr = fmt.Sprintf("%s: %v", what, err)
+		}
+	}
+	if hidden.err != nil {
+		fail("recent PHP advisories", hidden.err)
+	} else if f, ok := hiddenPHPFinding(base, hidden.flaws, hidden.branches); ok {
+		findings = append(findings, f)
+	}
+	if hidden.stale {
+		stale++
+	}
 	for _, l := range lookups {
 		if l.err != nil {
-			failed++
-			offline = offline || errors.Is(l.err, ErrOffline)
-			if firstErr == "" {
-				firstErr = fmt.Sprintf("%s %s: %v", l.kind, l.slug, l.err)
-			}
+			fail(l.kind+" "+l.slug, l.err)
 			continue
+		}
+		if l.newerErr != nil {
+			fail("newer PHP advisories", l.newerErr)
 		}
 		if l.stale {
 			stale++
@@ -154,11 +189,27 @@ func (a *Advisor) Advise(ctx context.Context, base *url.URL, fp fingerprint.Resu
 		case "php", "nginx", "apache":
 			if eol, err := time.Parse("2006-01-02", l.rec.EndOfLife); err == nil && now().After(eol) {
 				name := cmp.Or(l.rec.Name, l.slug+" "+l.version)
-				f := finding(base, l.kind+"-eol", engine.Medium, "/",
+				sev, impact := engine.Medium, "No more security fixes are released for this branch."
+				fix := fmt.Sprintf("Upgrade to a supported %s release.", l.slug)
+				if l.kind == "php" {
+					// PHP is what every request runs through, and its EOL
+					// branches quietly collect new, never-fixed flaws.
+					sev = engine.High
+					impact = "No more security fixes are released for this branch: newly disclosed PHP flaws are never fixed on it, and vulnerability databases stop listing them for it."
+					if n := len(l.newer); n > 0 {
+						impact += fmt.Sprintf(" %d flaws disclosed since support ended likely affect it (see vuln-php).", n)
+					}
+					if l.newerFrom != "" {
+						fix = fmt.Sprintf("Upgrade to a supported PHP branch (%s or later).", l.newerFrom)
+					}
+				}
+				f := finding(base, l.kind+"-eol", sev, "/",
 					fmt.Sprintf("%s is past end of life", name),
 					[]string{fmt.Sprintf("%s %s, support ended %s", l.slug, l.version, l.rec.EndOfLife)},
-					"No more security fixes are released for this branch.",
-					fmt.Sprintf("Upgrade to a supported %s release.", l.slug), l.kind, "outdated")
+					impact, fix, l.kind, "outdated")
+				if l.source != "" {
+					f.Evidence.Matched = append(f.Evidence.Matched, "version from "+l.source)
+				}
 				a.distroCaveat(&f, l.build)
 				findings = append(findings, f)
 			}
@@ -213,6 +264,11 @@ func (a *Advisor) vulnFinding(base *url.URL, l *lookup) (engine.Finding, bool) {
 			affected = append(affected, v)
 		}
 	}
+	affected = append(affected, l.newer...)
+	inferred := map[string]bool{}
+	for _, v := range l.newer {
+		inferred[v.ID] = true
+	}
 	if len(affected) == 0 {
 		return engine.Finding{}, false
 	}
@@ -248,7 +304,8 @@ func (a *Advisor) vulnFinding(base *url.URL, l *lookup) (engine.Finding, bool) {
 			}
 			return 1
 		}
-		return cmp.Or(cmp.Compare(rankOr(x.Severity), rankOr(y.Severity)), cmp.Compare(y.CVSS, x.CVSS))
+		// Within a severity, flaws that will never be fixed on this branch first.
+		return cmp.Or(cmp.Compare(rankOr(x.Severity), rankOr(y.Severity)), cmpBool(inferred[x.ID], inferred[y.ID]), cmp.Compare(y.CVSS, x.CVSS))
 	})
 
 	name := l.slug
@@ -274,6 +331,9 @@ func (a *Advisor) vulnFinding(base *url.URL, l *lookup) (engine.Finding, bool) {
 		if ad.FixedIn != "" {
 			line += " (fixed in " + ad.FixedIn + ")"
 		}
+		if inferred[ad.ID] {
+			line += " (no fix for this branch)"
+		}
 		if ad.KEV {
 			line += " [actively exploited]"
 		}
@@ -286,6 +346,10 @@ func (a *Advisor) vulnFinding(base *url.URL, l *lookup) (engine.Finding, bool) {
 	impact := fmt.Sprintf("%d published vulnerabilities affect %s %s; the worst is rated %s.", len(affected), name, l.version, worst)
 	if kev > 0 {
 		impact += fmt.Sprintf(" %d of them are in CISA's Known Exploited Vulnerabilities catalog: attackers use them in the wild.", kev)
+	}
+	if n := len(l.newer); n > 0 {
+		impact += fmt.Sprintf(" %d were disclosed after PHP %s reached end of life: they're listed for PHP %s with no lower version bound, so they reach older branches too, and will never be fixed on this one.",
+			n, branchOf(l.version), l.newerFrom)
 	}
 
 	latest := ""
@@ -300,6 +364,9 @@ func (a *Advisor) vulnFinding(base *url.URL, l *lookup) (engine.Finding, bool) {
 			fix += " (" + latest + ")"
 		}
 		fix += ": Dashboard → Updates, or: wp core update"
+	case l.kind == "php" && len(l.newer) > 0:
+		fix = fmt.Sprintf("Upgrade to a supported PHP branch (%s or later). PHP %s is end of life, so %d of these issues will never be fixed on it.",
+			l.newerFrom, branchOf(l.version), len(l.newer))
 	case fixedIn == "" && unfixed > 0:
 		fix = fmt.Sprintf("No fixed version is known. Remove or replace %s.", name)
 	case l.kind == "plugin" || l.kind == "theme":
@@ -335,6 +402,14 @@ func (a *Advisor) vulnFinding(base *url.URL, l *lookup) (engine.Finding, bool) {
 	if len(advisories) > 0 {
 		f.References = advisories[0].References
 	}
+	if l.source != "" {
+		f.Evidence.Matched = append(f.Evidence.Matched, "version from "+l.source)
+	}
+	// Only inferred advisories: likely, not confirmed.
+	if len(l.newer) == len(affected) {
+		f.Confidence = "low"
+		f.Caveat = "inferred from a supported branch's advisories"
+	}
 	if l.kind != "plugin" && l.kind != "theme" && l.kind != "core" {
 		a.distroCaveat(&f, l.build)
 	}
@@ -346,8 +421,20 @@ func (a *Advisor) vulnFinding(base *url.URL, l *lookup) (engine.Finding, bool) {
 func (a *Advisor) distroCaveat(f *engine.Finding, build string) {
 	if backported.MatchString(build) {
 		f.Confidence = "low"
+		f.Caveat = "a distro build may already include the fix"
 		f.Impact += " The server reports a distribution build (" + build + "), which may include backported fixes; check the package's security status before acting."
 	}
+}
+
+// cmpBool orders true before false.
+func cmpBool(x, y bool) int {
+	switch {
+	case x == y:
+		return 0
+	case x:
+		return -1
+	}
+	return 1
 }
 
 func rankOr(s engine.Severity) int {
