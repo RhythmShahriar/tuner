@@ -18,6 +18,8 @@ type Report struct {
 	Version    string                  `json:"version"`
 	DurationMS int64                   `json:"duration_ms"`
 	Summary    map[engine.Severity]int `json:"summary"`
+	CheckSet   string                  `json:"check_set,omitempty"`  // built-in, pack or directory
+	CheckPack  string                  `json:"check_pack,omitempty"` // the pack's version, when check_set is pack
 	*engine.Result
 }
 

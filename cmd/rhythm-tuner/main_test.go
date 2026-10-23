@@ -60,6 +60,9 @@ func tuner(t *testing.T, args ...string) (code int, stdout, stderr string) {
 		t.Setenv("TUNER_VULN_API", "http://127.0.0.1:1") // never reach the real APIs from tests
 		t.Setenv("TUNER_WPORG_API", "http://127.0.0.1:1")
 	}
+	if os.Getenv("TUNER_CHECKS_URL") == "" {
+		t.Setenv("TUNER_CHECKS_URL", "http://127.0.0.1:1") // nor the check pack release
+	}
 	var out, errb bytes.Buffer
 	if len(args) > 0 && args[0] == "scan" {
 		args = append(args, "--rate", "0")
@@ -233,6 +236,7 @@ func TestVulnScan(t *testing.T) {
 	t.Setenv("TUNER_VULN_API", api.URL)
 	t.Setenv("TUNER_WPORG_API", api.URL)
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	packRelease(t, packCheck, "0.2.0") // so update's check pack refresh succeeds
 
 	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

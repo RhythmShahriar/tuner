@@ -8,7 +8,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -26,7 +25,6 @@ import (
 
 	"github.com/RhythmShahriar/rhythm/kit/config"
 	"github.com/RhythmShahriar/rhythm/kit/update"
-	"github.com/RhythmShahriar/tuner/checks"
 	"github.com/RhythmShahriar/tuner/engine"
 	"github.com/RhythmShahriar/tuner/report"
 	"github.com/RhythmShahriar/tuner/vulns"
@@ -69,7 +67,7 @@ type scanOptions struct {
 	cookie, proxy    string
 	insecure         bool
 
-	offline, noVulns bool
+	offline, noVulns, noCheckUpdates bool
 
 	list     string
 	stdin    bool
@@ -115,6 +113,7 @@ func scanFlagSet(o *scanOptions, stderr io.Writer) *flag.FlagSet {
 
 	fs.BoolVar(&o.offline, "offline", false, "")
 	fs.BoolVar(&o.noVulns, "no-vulns", false, "")
+	fs.BoolVar(&o.noCheckUpdates, "no-check-updates", false, "")
 
 	both("l", "list", func(n string) { fs.StringVar(&o.list, n, "", "") })
 	fs.BoolVar(&o.stdin, "stdin", false, "")
@@ -150,6 +149,7 @@ type scanPlan struct {
 	o        scanOptions
 	targets  []string
 	checks   []*engine.Check
+	checkSet *checkSet
 	engine   engine.Options
 	format   string // json, jsonl, sarif, md, or "" for the terminal view only
 	failOn   engine.Severity
@@ -230,15 +230,26 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 		}
 	}
 
-	// Checks.
-	var fsys fs.FS = checks.FS
-	if o.checksDir != "" {
-		fsys = os.DirFS(o.checksDir)
+	// Proxy first: check pack downloads go through it too.
+	var proxy *url.URL
+	if o.proxy != "" {
+		u, err := url.Parse(o.proxy)
+		if err != nil || u.Host == "" || !slices.Contains([]string{"http", "https", "socks5", "socks5h"}, u.Scheme) {
+			return nil, usagef("bad --proxy %q, use e.g. http://127.0.0.1:8080 or socks5://127.0.0.1:1080", o.proxy)
+		}
+		proxy = u
 	}
-	all, err := engine.LoadChecks(fsys)
+	ua := o.userAgent
+	if ua == "" {
+		ua = fmt.Sprintf("rhythm-tuner/%s (+https://rythm.sh/tuner)", version)
+	}
+
+	// Checks.
+	p.checkSet, err = loadCheckSet(o.checksDir, !o.noCheckUpdates, o.offline, ua, proxy)
 	if err != nil {
 		return nil, fmt.Errorf("loading checks: %w", err)
 	}
+	all := p.checkSet.checks
 	sel := engine.Selector{
 		Profile:     engine.Profile(o.profile),
 		Tags:        o.tags,
@@ -280,10 +291,6 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 	if o.cookie != "" {
 		h.Add("Cookie", o.cookie)
 	}
-	ua := o.userAgent
-	if ua == "" {
-		ua = fmt.Sprintf("rhythm-tuner/%s (+https://rythm.sh/tuner)", version)
-	}
 	p.engine = engine.Options{
 		UserAgent:   ua,
 		Headers:     h,
@@ -293,13 +300,7 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 		Retries:     o.retries,
 		Insecure:    o.insecure,
 		Profile:     engine.Profile(o.profile),
-	}
-	if o.proxy != "" {
-		u, err := url.Parse(o.proxy)
-		if err != nil || u.Host == "" || !slices.Contains([]string{"http", "https", "socks5", "socks5h"}, u.Scheme) {
-			return nil, usagef("bad --proxy %q, use e.g. http://127.0.0.1:8080 or socks5://127.0.0.1:1080", o.proxy)
-		}
-		p.engine.Proxy = u
+		Proxy:       proxy,
 	}
 	if vulnsOn {
 		p.engine.Advisor = engine.Filtered(&vulns.Advisor{Client: vulnClient(ua, p.engine.Proxy, o.offline)}, sel)
@@ -331,6 +332,12 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 		}
 	}
 	live := p.format == "" || o.output != ""
+
+	if !o.quiet {
+		for _, w := range p.checkSet.warnings {
+			fmt.Fprintln(stderr, "rhythm tuner:", w)
+		}
+	}
 
 	if config.FirstRun("tuner-authorised-use") {
 		fmt.Fprint(stderr, "Note: scan only sites you own or are authorised to test.\n"+
@@ -433,7 +440,12 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 	var reports []report.Report
 	for _, res := range results {
 		if res != nil {
-			reports = append(reports, report.New(res, version))
+			r := report.New(res, version)
+			r.CheckSet = p.checkSet.source
+			if p.checkSet.pack != nil {
+				r.CheckPack = p.checkSet.pack.Version
+			}
+			reports = append(reports, r)
 		}
 	}
 	var werr error
