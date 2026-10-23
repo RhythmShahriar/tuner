@@ -186,7 +186,7 @@ func TestUsageErrors(t *testing.T) {
 		{"scan"},
 		{"scan", "example.com", "--json", "--sarif"},
 		{"scan", "example.com", "-H", "no colon"},
-		{"scan", "./"},
+		{"scan", "./no-such-dir"},
 		{"scan", "example.com", "--profile", "turbo"},
 		{"scan", "example.com", "--fail-on", "urgent"},
 		{"scan", "example.com", "--proxy", "ftp://x"},

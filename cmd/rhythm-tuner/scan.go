@@ -28,6 +28,7 @@ import (
 	"github.com/RhythmShahriar/rhythm/kit/update"
 	"github.com/RhythmShahriar/tuner/checks"
 	"github.com/RhythmShahriar/tuner/engine"
+	"github.com/RhythmShahriar/tuner/local"
 	"github.com/RhythmShahriar/tuner/report"
 	"github.com/RhythmShahriar/tuner/vulns"
 )
@@ -70,6 +71,7 @@ type scanOptions struct {
 	insecure         bool
 
 	offline, noVulns bool
+	php              string // local scans: the php binary to ask for its version
 
 	list     string
 	stdin    bool
@@ -115,6 +117,7 @@ func scanFlagSet(o *scanOptions, stderr io.Writer) *flag.FlagSet {
 
 	fs.BoolVar(&o.offline, "offline", false, "")
 	fs.BoolVar(&o.noVulns, "no-vulns", false, "")
+	fs.StringVar(&o.php, "php", "", "")
 
 	both("l", "list", func(n string) { fs.StringVar(&o.list, n, "", "") })
 	fs.BoolVar(&o.stdin, "stdin", false, "")
@@ -151,6 +154,8 @@ type scanPlan struct {
 	targets  []string
 	checks   []*engine.Check
 	engine   engine.Options
+	sel      engine.Selector
+	osv      *local.OSV
 	format   string // json, jsonl, sarif, md, or "" for the terminal view only
 	failOn   engine.Severity
 	baseline report.Baseline
@@ -202,10 +207,15 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 	if len(p.targets) == 0 {
 		return nil, usagef("scan needs a target\n  try: rhythm tuner scan example.com")
 	}
+	allLocal := true
 	for _, t := range p.targets {
 		if isLocalPath(t) {
-			return nil, usagef("%s: local scan mode arrives in v0.3; for now scan a live URL", t)
+			if _, err := local.Root(t); err != nil {
+				return nil, usageError{err.Error()}
+			}
+			continue
 		}
+		allLocal = false
 		if _, _, err := engine.ParseTarget(t); err != nil {
 			return nil, usageError{err.Error()}
 		}
@@ -249,7 +259,7 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 	}
 	vulnsOn := !o.noVulns && wantsVulns(sel)
 	p.checks, err = engine.Select(all, sel)
-	if err != nil && (!errors.Is(err, engine.ErrNoChecks) || !vulnsOn) {
+	if err != nil && (!errors.Is(err, engine.ErrNoChecks) || !vulnsOn && !allLocal) {
 		return nil, usageError{err.Error()}
 	}
 
@@ -303,6 +313,10 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 	}
 	if vulnsOn {
 		p.engine.Advisor = engine.Filtered(&vulns.Advisor{Client: vulnClient(ua, p.engine.Proxy, o.offline)}, sel)
+	}
+	p.sel = sel
+	if vulnsOn {
+		p.osv = osvClient(ua, p.engine.Proxy, o.offline)
 	}
 	return p, nil
 }
@@ -409,7 +423,7 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 				h.Request = view.Request
 			}
 
-			res, err := scanner.Scan(ctx, target, h)
+			res, err := p.scanTarget(ctx, scanner, target, h)
 			if res != nil {
 				suppressed := p.baseline.Filter(res)
 				if live {
@@ -513,7 +527,7 @@ func wantsVulns(s engine.Selector) bool {
 	if slices.Contains(s.ExcludeTags, "vuln") {
 		return false
 	}
-	advisorTags := []string{"vuln", "wordpress", "php", "outdated", "abandoned", "nginx", "apache", "core", "plugin", "theme"}
+	advisorTags := []string{"vuln", "wordpress", "php", "outdated", "abandoned", "nginx", "apache", "core", "plugin", "theme", "composer"}
 	if len(s.Tags) > 0 && !hasAny(s.Tags, advisorTags) {
 		return false
 	}
