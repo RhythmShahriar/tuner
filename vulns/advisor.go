@@ -1,0 +1,375 @@
+package vulns
+
+import (
+	"cmp"
+	"context"
+	"errors"
+	"fmt"
+	"net/url"
+	"regexp"
+	"slices"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/RhythmShahriar/tuner/engine"
+	"github.com/RhythmShahriar/tuner/fingerprint"
+)
+
+// A plugin or theme with no release for this long counts as abandoned.
+const abandonedAfter = 2 * 365 * 24 * time.Hour
+
+// Advisor implements engine.Advisor with Client's data.
+type Advisor struct {
+	Client *Client
+	Now    func() time.Time
+}
+
+var (
+	serverVersion = regexp.MustCompile(`(?i)^(nginx|apache)/([0-9]+(?:\.[0-9]+)+)`)
+	// Distro builds backport security fixes without changing the version.
+	backported = regexp.MustCompile(`(?i)ubuntu|debian|deb[0-9]|\bel[0-9]|centos|red ?hat|rhel|fedora|amazon|rocky|alma|suse`)
+)
+
+// component is one thing to look up.
+type component struct {
+	kind    string // core, plugin, theme, php, nginx, apache
+	key     string // slug, or version for core and software
+	slug    string // display name / slug
+	version string
+	path    string
+	build   string // raw version string, to spot distro builds
+}
+
+type lookup struct {
+	component
+	rec   *Record
+	rel   *Release
+	stale bool
+	err   error
+}
+
+func (a *Advisor) Advise(ctx context.Context, base *url.URL, fp fingerprint.Result) ([]engine.Finding, []string) {
+	now := time.Now
+	if a.Now != nil {
+		now = a.Now
+	}
+
+	var comps []component
+	if fp.Has("wordpress") && fp.WordPress != "" {
+		comps = append(comps, component{kind: "core", key: fp.WordPress, slug: "wordpress", version: fp.WordPress, path: "/"})
+	}
+	for _, c := range fp.Components {
+		comps = append(comps, component{kind: c.Type, key: c.Slug, slug: c.Slug, version: c.Version,
+			path: "/wp-content/" + c.Type + "s/" + c.Slug + "/"})
+	}
+	if fp.PHP != "" {
+		comps = append(comps, component{kind: "php", key: fp.PHP, slug: "PHP", version: fp.PHP, path: "/", build: fp.PHPBuild})
+	}
+	if m := serverVersion.FindStringSubmatch(fp.Server); m != nil {
+		kind := strings.ToLower(m[1])
+		comps = append(comps, component{kind: kind, key: m[2], slug: m[1], version: m[2], path: "/", build: fp.Server})
+	}
+
+	lookups := make([]*lookup, len(comps))
+	var wg sync.WaitGroup
+	for i, c := range comps {
+		l := &lookup{component: c}
+		lookups[i] = l
+		wg.Go(func() {
+			l.rec, l.stale, l.err = a.Client.Advisories(ctx, c.kind, c.key)
+			if c.kind == "core" || c.kind == "plugin" || c.kind == "theme" {
+				key := c.slug
+				if c.kind == "core" {
+					key = "wordpress"
+				}
+				// Release data is a nice-to-have; a failed lookup isn't reported.
+				rel, stale, err := a.Client.Latest(ctx, c.kind, key)
+				if err == nil {
+					l.rel = rel
+					l.stale = l.stale || stale
+				}
+			}
+		})
+	}
+	wg.Wait()
+
+	var findings []engine.Finding
+	var outdated, abandoned, unverified []string
+	var failed, stale int
+	var offline bool
+	var firstErr string
+	for _, l := range lookups {
+		if l.err != nil {
+			failed++
+			offline = offline || errors.Is(l.err, ErrOffline)
+			if firstErr == "" {
+				firstErr = fmt.Sprintf("%s %s: %v", l.kind, l.slug, l.err)
+			}
+			continue
+		}
+		if l.stale {
+			stale++
+		}
+		f, hasVulns := a.vulnFinding(base, l)
+		if hasVulns {
+			findings = append(findings, f)
+		}
+
+		switch l.kind {
+		case "core":
+			if !hasVulns && l.rel != nil && l.rel.Latest != "" && Compare(l.version, l.rel.Latest) < 0 {
+				findings = append(findings, finding(base, "wp-core-outdated", engine.Low, "/",
+					fmt.Sprintf("WordPress %s is out of date", l.version),
+					[]string{fmt.Sprintf("installed %s, latest %s", l.version, l.rel.Latest)},
+					"Older releases miss security hardening and fixes.",
+					fmt.Sprintf("Update WordPress to %s (Dashboard → Updates, or: wp core update).", l.rel.Latest),
+					"wordpress", "outdated"))
+			}
+		case "plugin", "theme":
+			if l.rec.Closed {
+				ev := []string{"closed on wordpress.org"}
+				if l.rec.ClosedDate != "" {
+					ev[0] += " on " + l.rec.ClosedDate
+				}
+				if l.rec.ClosedReason != "" {
+					ev = append(ev, "reason: "+l.rec.ClosedReason)
+				}
+				f := finding(base, "wp-"+l.kind+"-closed", engine.Medium, l.path,
+					fmt.Sprintf("%s %s was closed on wordpress.org", strings.ToUpper(l.kind[:1])+l.kind[1:], l.slug), ev,
+					"Closed "+l.kind+"s get no updates, and are often closed because of an unfixed security issue.",
+					"Remove it, or replace it with a maintained alternative.", "wordpress", "abandoned")
+				f.Source = Source
+				findings = append(findings, f)
+			}
+			switch {
+			case l.version == "" && len(l.rec.Vulns) > 0:
+				unverified = append(unverified, fmt.Sprintf("%s (%d known in some versions)", l.slug, len(l.rec.Vulns)))
+			case l.version != "" && !hasVulns && l.rel != nil && l.rel.Latest != "" && Compare(l.version, l.rel.Latest) < 0:
+				outdated = append(outdated, fmt.Sprintf("%s %s → %s", l.slug, l.version, l.rel.Latest))
+			}
+			if l.rel != nil && !l.rel.LastUpdated.IsZero() && now().Sub(l.rel.LastUpdated) > abandonedAfter {
+				abandoned = append(abandoned, fmt.Sprintf("%s (last release %s)", l.slug, l.rel.LastUpdated.Format("2006-01-02")))
+			}
+		case "php", "nginx", "apache":
+			if eol, err := time.Parse("2006-01-02", l.rec.EndOfLife); err == nil && now().After(eol) {
+				name := cmp.Or(l.rec.Name, l.slug+" "+l.version)
+				f := finding(base, l.kind+"-eol", engine.Medium, "/",
+					fmt.Sprintf("%s is past end of life", name),
+					[]string{fmt.Sprintf("%s %s, support ended %s", l.slug, l.version, l.rec.EndOfLife)},
+					"No more security fixes are released for this branch.",
+					fmt.Sprintf("Upgrade to a supported %s release.", l.slug), l.kind, "outdated")
+				a.distroCaveat(&f, l.build)
+				findings = append(findings, f)
+			}
+		}
+	}
+
+	if len(outdated) > 0 {
+		findings = append(findings, finding(base, "wp-components-outdated", engine.Low, "/wp-content/",
+			fmt.Sprintf("%d plugins or themes out of date", len(outdated)), outdated,
+			"Outdated plugins and themes are the most common way WordPress sites get compromised.",
+			"Update them (Dashboard → Updates, or: wp plugin update --all && wp theme update --all).",
+			"wordpress", "outdated"))
+	}
+	if len(abandoned) > 0 {
+		findings = append(findings, finding(base, "wp-components-abandoned", engine.Low, "/wp-content/",
+			fmt.Sprintf("%d plugins or themes look abandoned", len(abandoned)), abandoned,
+			"No release in over two years. Future security issues are unlikely to be fixed.",
+			"Replace them with maintained alternatives.", "wordpress", "abandoned"))
+	}
+	if len(unverified) > 0 {
+		f := finding(base, "wp-components-unverified", engine.Info, "/wp-content/",
+			fmt.Sprintf("Versions unknown for %d plugins or themes with known vulnerabilities", len(unverified)), unverified,
+			"Tuner couldn't read their versions, so it can't tell whether the site is affected.",
+			"Check the installed versions in the dashboard, or rerun with the default profile so readme.txt and style.css are read.",
+			"wordpress", "vuln")
+		f.Confidence = "low"
+		findings = append(findings, f)
+	}
+
+	var warnings []string
+	switch {
+	case failed > 0 && offline:
+		warnings = append(warnings, fmt.Sprintf("vulnerability data not cached for %d components; run once online to cache it", failed))
+	case failed > 0:
+		warnings = append(warnings, fmt.Sprintf("couldn't fetch vulnerability data for %d components (%s)", failed, firstErr))
+	}
+	if stale > 0 {
+		warnings = append(warnings, fmt.Sprintf("used cached vulnerability data older than %s for %d components", a.Client.TTL, stale))
+	}
+	return findings, warnings
+}
+
+// vulnFinding builds the one finding that lists every advisory affecting a
+// component. It returns false if none apply.
+func (a *Advisor) vulnFinding(base *url.URL, l *lookup) (engine.Finding, bool) {
+	if l.version == "" {
+		return engine.Finding{}, false
+	}
+	var affected []Vuln
+	for _, v := range l.rec.Vulns {
+		if v.Affects(l.version) {
+			affected = append(affected, v)
+		}
+	}
+	if len(affected) == 0 {
+		return engine.Finding{}, false
+	}
+
+	worst, kev, unfixed := engine.Info, 0, 0
+	fixedIn := ""
+	var advisories []engine.Advisory
+	for _, v := range affected {
+		sev := engine.Severity(v.Severity)
+		if sev.Rank() < 0 {
+			sev = "" // unrated
+		}
+		if r := cmp.Or(sev, engine.Medium); r.Rank() < worst.Rank() {
+			worst = r
+		}
+		if v.KEV {
+			kev++
+		}
+		if fx := v.FixedIn(); fx != "" && (fixedIn == "" || Compare(fx, fixedIn) > 0) {
+			fixedIn = fx
+		} else if fx == "" && l.kind != "core" {
+			unfixed++
+		}
+		advisories = append(advisories, engine.Advisory{
+			ID: v.ID, Title: v.Title, CVEs: v.CVEs, Severity: sev, CVSS: v.CVSS, KEV: v.KEV,
+			FixedIn: v.FixedIn(), References: v.References,
+		})
+	}
+	slices.SortStableFunc(advisories, func(x, y engine.Advisory) int {
+		if x.KEV != y.KEV {
+			if x.KEV {
+				return -1
+			}
+			return 1
+		}
+		return cmp.Or(cmp.Compare(rankOr(x.Severity), rankOr(y.Severity)), cmp.Compare(y.CVSS, x.CVSS))
+	})
+
+	name := l.slug
+	switch l.kind {
+	case "core":
+		name = "WordPress"
+	case "theme":
+		name = "theme " + l.slug
+	}
+	plural := "ies"
+	if len(affected) == 1 {
+		plural = "y"
+	}
+	title := fmt.Sprintf("%s %s: %d known vulnerabilit%s", name, l.version, len(affected), plural)
+
+	var ev []string
+	for _, ad := range advisories[:min(len(advisories), 5)] {
+		line := strings.ToUpper(string(cmp.Or(ad.Severity, "unrated")))
+		if len(ad.CVEs) > 0 && ad.Title != ad.CVEs[0] {
+			line += " " + ad.CVEs[0]
+		}
+		line += " " + ad.Title
+		if ad.FixedIn != "" {
+			line += " (fixed in " + ad.FixedIn + ")"
+		}
+		if ad.KEV {
+			line += " [actively exploited]"
+		}
+		ev = append(ev, line)
+	}
+	if n := len(advisories) - 5; n > 0 {
+		ev = append(ev, fmt.Sprintf("…and %d more", n))
+	}
+
+	impact := fmt.Sprintf("%d published vulnerabilities affect %s %s; the worst is rated %s.", len(affected), name, l.version, worst)
+	if kev > 0 {
+		impact += fmt.Sprintf(" %d of them are in CISA's Known Exploited Vulnerabilities catalog: attackers use them in the wild.", kev)
+	}
+
+	latest := ""
+	if l.rel != nil {
+		latest = l.rel.Latest
+	}
+	var fix string
+	switch {
+	case l.kind == "core":
+		fix = "Update WordPress to the latest release"
+		if latest != "" {
+			fix += " (" + latest + ")"
+		}
+		fix += ": Dashboard → Updates, or: wp core update"
+	case fixedIn == "" && unfixed > 0:
+		fix = fmt.Sprintf("No fixed version is known. Remove or replace %s.", name)
+	case l.kind == "plugin" || l.kind == "theme":
+		fix = fmt.Sprintf("Update %s to %s or later", name, fixedIn)
+		if latest != "" && latest != fixedIn {
+			fix += " (latest is " + latest + ")"
+		}
+		fix += fmt.Sprintf(": wp %s update %s", l.kind, l.slug)
+		if unfixed > 0 {
+			fix += fmt.Sprintf(". %d of the issues have no known fixed version; consider replacing it.", unfixed)
+		}
+	default:
+		fix = fmt.Sprintf("Update %s", l.slug)
+		if fixedIn != "" {
+			fix += " to " + fixedIn + " or later"
+		}
+		fix += " from your OS or vendor packages."
+	}
+
+	tags := []string{"vuln", l.kind}
+	if l.kind == "plugin" || l.kind == "theme" || l.kind == "core" {
+		tags = append(tags, "wordpress")
+	}
+	if kev > 0 {
+		tags = append(tags, "known-exploited")
+	}
+	f := finding(base, "vuln-"+l.kind+"-"+strings.ToLower(l.slug), worst, l.path, title, ev, impact, fix, tags...)
+	if l.kind == "core" || l.kind == "php" || l.kind == "nginx" || l.kind == "apache" {
+		f.ID = "vuln-" + l.kind
+	}
+	f.Advisories = advisories
+	f.Source = Source
+	if len(advisories) > 0 {
+		f.References = advisories[0].References
+	}
+	if l.kind != "plugin" && l.kind != "theme" && l.kind != "core" {
+		a.distroCaveat(&f, l.build)
+	}
+	return f, true
+}
+
+// distroCaveat lowers confidence for versions reported by distro packages,
+// which backport fixes without changing the upstream version number.
+func (a *Advisor) distroCaveat(f *engine.Finding, build string) {
+	if backported.MatchString(build) {
+		f.Confidence = "low"
+		f.Impact += " The server reports a distribution build (" + build + "), which may include backported fixes; check the package's security status before acting."
+	}
+}
+
+func rankOr(s engine.Severity) int {
+	if r := s.Rank(); r >= 0 {
+		return r
+	}
+	return engine.Medium.Rank()
+}
+
+func finding(base *url.URL, id string, sev engine.Severity, path, title string, ev []string, impact, fix string, tags ...string) engine.Finding {
+	u := *base
+	u.Path = strings.TrimSuffix(base.Path, "/") + path
+	return engine.Finding{
+		ID:         id,
+		Title:      title,
+		Severity:   sev,
+		Confidence: "high",
+		URL:        u.String(),
+		Path:       path,
+		Evidence:   engine.Evidence{Request: "version match", Matched: ev},
+		Impact:     impact,
+		Fix:        fix,
+		Tags:       tags,
+	}
+}
