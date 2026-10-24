@@ -18,7 +18,9 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -59,16 +61,32 @@ func (r Result) String() string {
 	return fmt.Sprintf("%s %q", kind, r.Case)
 }
 
-// Run loads every check in fsys and runs it against its fixtures. A
-// check that fails to load comes back as a single Result with the error.
+// Run loads every check in fsys and runs it against its fixtures, several
+// checks at a time; results keep the checks' order. A check set that
+// fails to load comes back as a single Result with the error.
 func Run(fsys fs.FS) []Result {
 	all, err := engine.LoadChecks(fsys)
 	if err != nil {
 		return []Result{{Problems: []string{err.Error()}}}
 	}
+	// Each case is a local server and a short scan, mostly waiting, so
+	// a few per CPU keeps the machine busy without exhausting ports.
+	per := make([][]Result, len(all))
+	sem := make(chan struct{}, 4*runtime.GOMAXPROCS(0))
+	var wg sync.WaitGroup
+	for i, c := range all {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			per[i] = RunCheck(fsys, c)
+			<-sem
+		}()
+	}
+	wg.Wait()
 	var out []Result
-	for _, c := range all {
-		out = append(out, RunCheck(fsys, c)...)
+	for _, rs := range per {
+		out = append(out, rs...)
 	}
 	return out
 }
