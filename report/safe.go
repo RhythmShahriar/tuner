@@ -7,7 +7,8 @@ import (
 	"net/url"
 	"reflect"
 	"strings"
-	"unicode/utf8"
+
+	"github.com/RhythmShahriar/rhythm/kit/term"
 )
 
 // Everything a scanned site or a scanned folder can write ends up in a
@@ -18,37 +19,14 @@ import (
 // functions here make such strings inert for each output.
 
 // SafeText replaces control characters (C0 except tab, DEL and C1) and
-// invalid UTF-8 with U+FFFD, so a string prints as text on any terminal.
-func SafeText(s string) string { return clean(s, false) }
+// invalid UTF-8 with U+FFFD and drops bidirectional overrides, so a
+// string prints as text on any terminal. It is kit/term.SafeText.
+func SafeText(s string) string { return term.SafeText(s) }
 
 // safeBlock is SafeText for multi-line text such as a fix: it keeps line
 // breaks (as \n) and replaces every other control character.
 func safeBlock(s string) string {
-	return clean(strings.ReplaceAll(s, "\r\n", "\n"), true)
-}
-
-func clean(s string, keepNewline bool) string {
-	unsafe := func(r rune) bool {
-		switch {
-		case r == '\t', keepNewline && r == '\n':
-			return false
-		case r < 0x20, r == 0x7f, r >= 0x80 && r < 0xa0:
-			return true
-		}
-		return false
-	}
-	if utf8.ValidString(s) && strings.IndexFunc(s, unsafe) < 0 {
-		return s
-	}
-	var b strings.Builder
-	b.Grow(len(s))
-	for _, r := range s { // invalid bytes arrive as utf8.RuneError
-		if unsafe(r) {
-			r = utf8.RuneError
-		}
-		b.WriteRune(r)
-	}
-	return b.String()
+	return term.SafeLines(strings.ReplaceAll(s, "\r\n", "\n"))
 }
 
 var mdReplacer = func() *strings.Replacer {
@@ -70,6 +48,11 @@ var mdReplacer = func() *strings.Replacer {
 // replaced, Markdown and HTML punctuation is escaped, line breaks become
 // spaces and @mentions are broken, so s can't open an image, link,
 // heading or table cell or ping anyone.
+//
+// It is not kit/term.EscapeMarkdown, whose contract differs: the kit
+// escapes '@' with a backslash, which GitHub ignores when it looks for
+// mentions. It also escapes "://", "www." and a leading list marker,
+// which would change every report's Markdown text.
 func MDText(s string) string { return mdReplacer.Replace(SafeText(oneLine(s))) }
 
 // MDCode renders s as an inline code span. The fence is one backtick

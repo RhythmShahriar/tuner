@@ -245,3 +245,18 @@ func TestEveryFormatIsInert(t *testing.T) {
 		}
 	}
 }
+
+// With kit/term underneath, bidirectional overrides (Trojan Source) are
+// dropped from every output, single-line and multi-line alike.
+func TestSafeTextDropsBidiOverrides(t *testing.T) {
+	in := "admin\u202e3pm.php\u2066x\u2069"
+	if got, want := SafeText(in), "admin3pm.phpx"; got != want {
+		t.Errorf("SafeText(%q) = %q, want %q", in, got, want)
+	}
+	if got, want := safeBlock("line one\r\n\u202dline two\x1b"), "line one\nline two\uFFFD"; got != want {
+		t.Errorf("safeBlock = %q, want %q", got, want)
+	}
+	if got := MDText(in); strings.ContainsAny(got, "\u202e\u2066\u2069") {
+		t.Errorf("MDText kept a bidi override: %q", got)
+	}
+}
