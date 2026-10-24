@@ -86,6 +86,7 @@ func cmdFix(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "rhythm tuner:", err)
 		return exitUsage
 	}
+	b.Command = cmdName()
 	if dryRun {
 		err = b.WritePlan(stdout)
 	} else {

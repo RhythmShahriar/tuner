@@ -126,7 +126,7 @@ func (e *localExtension) expand(targets []string, w io.Writer) ([]string, error)
 		}
 	}
 	if folders == 0 {
-		return nil, usagef("--discover needs a folder target, such as rhythm tuner scan --discover /var/www")
+		return nil, usagef("%s", named("--discover needs a folder target, such as rhythm tuner scan --discover /var/www"))
 	}
 	return dedupe(out), nil
 }

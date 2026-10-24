@@ -11,6 +11,7 @@ package fixgen
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -82,6 +83,9 @@ type Bundle struct {
 	Blocks   []Block
 	Findings int      // findings the blocks cover
 	Without  []string // check IDs found with no snippet for this server, sorted
+	// Command is how the user runs Tuner, for the explain hint; ""
+	// means "rhythm tuner".
+	Command string
 }
 
 // Build collects the snippets for server from findings. For an ID that a
@@ -188,7 +192,7 @@ func (b *Bundle) Write(w io.Writer, version string) error {
 	if len(b.Without) > 0 {
 		buf.WriteString("\n")
 		buf.WriteString(comment("No " + b.Server + " snippet for: " + strings.Join(b.Without, ", ")))
-		buf.WriteString(comment("See: rhythm tuner explain <id>"))
+		buf.WriteString(comment("See: " + cmp.Or(b.Command, "rhythm tuner") + " explain <id>"))
 	}
 	_, err := w.Write(buf.Bytes())
 	return err

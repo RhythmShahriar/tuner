@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -139,6 +140,21 @@ func TestSubcommandsUseTheirName(t *testing.T) {
 	out.Reset()
 	if code := run([]string{"watch", "--help"}, &out, &errs); code != exitOK || !strings.Contains(out.String(), "rhythm-tuner watch -l <file>") || strings.Contains(out.String(), "rhythm tuner") {
 		t.Errorf("watch help: %d\n%s", code, out.String())
+	}
+
+	// Hints inside messages and output name it too.
+	errs.Reset()
+	if code := run([]string{"scan", "--discover", "https://example.com", "--no-config"}, &out, &errs); code != exitUsage ||
+		!strings.Contains(errs.String(), "such as rhythm-tuner scan --discover /var/www") || strings.Contains(errs.String(), "rhythm tuner") {
+		t.Errorf("--discover error: %d %q", code, errs.String())
+	}
+	data, err := os.ReadFile("../../fixgen/testdata/batch.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, fixOut, fixErr := fix(t, string(data), "-", "--server", "nginx")
+	if code != exitOK || !strings.Contains(fixOut, "# See: rhythm-tuner explain <id>\n") || strings.Contains(fixOut, "rhythm tuner") {
+		t.Errorf("fix bundle: %d %s\n%s", code, fixErr, fixOut)
 	}
 
 	out.Reset()
