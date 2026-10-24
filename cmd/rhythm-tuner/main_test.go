@@ -535,7 +535,7 @@ func TestReportKeptOnCancel(t *testing.T) {
 	path := writeOld(t)
 	go func() {
 		<-started
-		syscall.Kill(os.Getpid(), syscall.SIGINT) // execute catches it as a cancel
+		interruptSelf() // execute catches it as a cancel
 	}()
 	code, _, errs := tuner(t, "scan", srv.URL, "-o", path, "--jsonl")
 	if code != exitCanceled || !strings.Contains(errs, "no report written: scan canceled; "+path+" keeps the previous report") {
@@ -557,7 +557,7 @@ func TestPartialReportOnCancel(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "report.json")
 	go func() {
 		<-started
-		syscall.Kill(os.Getpid(), syscall.SIGINT)
+		interruptSelf()
 	}()
 	code, _, errs := tuner(t, "scan", srv.URL, "-o", path, "--no-vulns")
 	if code != exitCanceled {
@@ -1035,7 +1035,7 @@ func TestInterruptedReportSaysSo(t *testing.T) {
 	srv, started := hangingSite(t)
 	go func() {
 		<-started
-		syscall.Kill(os.Getpid(), syscall.SIGINT)
+		interruptSelf()
 	}()
 	code, out, errs := tuner(t, "scan", srv.URL, "--json", "--no-vulns")
 	var rep statusReport
