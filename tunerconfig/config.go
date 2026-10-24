@@ -60,7 +60,7 @@ type Config struct {
 	Path string
 
 	Targets       []string
-	Profile       string // quick, default or deep, lower-cased
+	Profile       string // quick or default (deep still works), lower-cased
 	Rate          *float64
 	Concurrency   *int
 	FailOn        string // a severity, lower-cased
@@ -150,7 +150,10 @@ func Parse(data []byte, name string, env func(string) (string, bool)) (*Config, 
 	}
 
 	var err error
-	if c.Profile, err = oneOf(f.Profile, engine.Profiles); err != nil {
+	// deep is accepted but left out of the message: no check uses it yet.
+	if strings.EqualFold(strings.TrimSpace(f.Profile), string(engine.ProfileDeep)) {
+		c.Profile = string(engine.ProfileDeep)
+	} else if c.Profile, err = oneOf(f.Profile, []engine.Profile{engine.ProfileQuick, engine.ProfileDefault}); err != nil {
 		return nil, bad("profile", "%v", err)
 	}
 	if c.FailOn, err = oneOf(f.FailOn, engine.Severities); err != nil {

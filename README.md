@@ -79,7 +79,7 @@ That's it. Tuner fingerprints the site, learns how it answers "not found", runs 
 | Save a report for a client or an issue | `rhythm tuner scan yoursite.com -o report.md` |
 | A quick look (about 30 requests) | `rhythm tuner scan yoursite.com --profile quick` |
 | Scan a site folder on the server | `rhythm tuner scan /var/www/yoursite` |
-| Scan your own dev server fast | `rhythm tuner scan localhost:8080 --rate 0` |
+| Scan your own dev server fast (localhost and private addresses get 50 requests a second; `--rate 0` lifts the limit) | `rhythm tuner scan localhost:8080 --rate 0` |
 | Scan a staging site behind basic auth | `rhythm tuner scan staging.yoursite.com -H "Authorization: Basic …"` |
 | Go gentle on a fragile host or firewall | `rhythm tuner scan yoursite.com --rate 2` |
 | Scan all your clients' sites | `rhythm tuner scan -l sites.txt -o all.md` |
@@ -89,7 +89,7 @@ That's it. Tuner fingerprints the site, learns how it answers "not found", runs 
 Every flag is in the [CLI reference](https://github.com/RhythmShahriar/rhythm/wiki/Tuner-CLI-Reference), and the [documentation wiki](https://github.com/RhythmShahriar/rhythm/wiki) covers everything else.
 
 > [!IMPORTANT]
-> Scan only sites you own or have permission to test. Tuner is non-intrusive (its checks send plain GET requests with no exploit payloads, 5 requests a second by default). Even so, a scan of someone else's site without permission may be illegal. See [Responsible use](#responsible-use--disclaimer).
+> Scan only sites you own or have permission to test. Tuner is non-intrusive (its checks send plain GET requests with no exploit payloads, 5 requests a second by default, 50 for localhost and private addresses). Even so, a scan of someone else's site without permission may be illegal. See [Responsible use](#responsible-use--disclaimer).
 
 ## What it finds
 

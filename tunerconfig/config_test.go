@@ -64,7 +64,7 @@ func TestParseErrors(t *testing.T) {
 	for _, c := range []struct{ data, want string }{
 		{"fail_on: high\nfial_on: low\n", `.tuner.yml line 2: unknown key "fial_on"`},
 		{"ignore:\n  - id: x\n    reson: typo\n", `.tuner.yml line 3: unknown key "reson"`},
-		{"profile: turbo", `.tuner.yml: profile: "turbo": want quick, default or deep`},
+		{"profile: turbo", `.tuner.yml: profile: "turbo": want quick or default`},
 		{"fail_on: urgent", `fail_on: "urgent": want critical, high, medium, low or info`},
 		{"min_confidence: sure", `min_confidence: "sure": want confirmed or likely`},
 		{"rate: -1", "rate: want 0 or more"},
@@ -191,5 +191,17 @@ func TestFindAndLoad(t *testing.T) {
 	os.Mkdir(sub, 0o755)
 	if _, err := Find(filepath.Dir(sub)); err == nil {
 		t.Error("a folder named .tuner.yml is a config")
+	}
+}
+
+// deep is still accepted although the message leaves it out.
+func TestProfileDeepAccepted(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".tuner.yml")
+	if err := os.WriteFile(path, []byte("profile: Deep\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(path)
+	if err != nil || c.Profile != "deep" {
+		t.Errorf("profile deep: %+v, %v", c, err)
 	}
 }

@@ -43,7 +43,6 @@ func pick(stdout, stderr io.Writer) int {
 			Options(
 				huh.NewOption("Quick: top checks, about 30 requests", string(engine.ProfileQuick)),
 				huh.NewOption("Default: every polite check", string(engine.ProfileDefault)),
-				huh.NewOption("Deep: same as default today; future checks that send many requests", string(engine.ProfileDeep)),
 			).
 			Value(&profile),
 		huh.NewSelect[string]().

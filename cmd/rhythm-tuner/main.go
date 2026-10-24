@@ -161,7 +161,7 @@ Output:
                            prints the version)
 
 Checks:
-      --profile <name>     quick, default or deep (default "default")
+      --profile <name>     quick or default (default "default")
       --tags <list>        only checks with these tags, e.g. leak,wordpress
       --exclude-tags <list>
       --id <list>          only these checks; globs allowed, e.g. leak-*
@@ -174,7 +174,8 @@ Checks:
                            no update check either (RHYTHM_OFFLINE=1 skips it too)
 
 Requests:
-      --rate <n>           max requests per second per site (default 5)
+      --rate <n>           max requests per second per site (default 5, or 50
+                           for localhost and private or link-local addresses)
   -c, --concurrency <n>    requests in flight per site (default 10)
       --timeout <d>        per-request timeout (default 10s)
       --retries <n>        retries after network errors or 429/503 (default 2)

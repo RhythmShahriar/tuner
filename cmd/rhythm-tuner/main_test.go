@@ -8,8 +8,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -1108,6 +1110,8 @@ func TestMain(m *testing.M) {
 	if os.Getenv(invokedAsEnv) == "" {
 		os.Setenv(invokedAsEnv, "rhythm tuner")
 	}
+	// No test sends a DNS query; TestOwnNetworkRate fakes the names it needs.
+	lookupIP = func(context.Context, string) ([]net.IPAddr, error) { return nil, errors.New("no DNS in tests") }
 	os.Exit(m.Run())
 }
 
@@ -1177,7 +1181,7 @@ func TestFriendlyUsageErrors(t *testing.T) {
 		{[]string{"scan", "./wp", "--no-check-updates", "--id", "leak-dotnev"}, "rhythm tuner scan: --id leak-dotnev: no check has this ID; did you mean leak-dotenv?\n  list them with: rhythm tuner checks\n"},
 		{[]string{"scan", "./wp", "--fail-on", "urgent"}, "rhythm tuner scan: --fail-on urgent: want critical, high, medium, low or info\n"},
 		{[]string{"scan", "./wp", "--fail-on", "hihg"}, "rhythm tuner scan: --fail-on hihg: want critical, high, medium, low or info; did you mean high?\n"},
-		{[]string{"scan", "./wp", "--profile", "turbo"}, "rhythm tuner scan: --profile turbo: want quick, default or deep\n"},
+		{[]string{"scan", "./wp", "--profile", "turbo"}, "rhythm tuner scan: --profile turbo: want quick or default\n"},
 		{[]string{"scan", "./wp", "--timeout", "5"}, "rhythm tuner scan: --timeout 5: use a unit, for example 5s\n"},
 		{[]string{"scan", "./wp", "--max-time", "soon"}, "rhythm tuner scan: --max-time soon: want a duration, for example 10s or 2m\n"},
 		{[]string{"scan", "./wp", "--parallel", "0"}, "rhythm tuner scan: --parallel 0: want 1 or more\n"},
@@ -1374,5 +1378,106 @@ func TestConfigHeadersAndErrors(t *testing.T) {
 	code, out, errs = tuner(t, "scan", "--config", "ci/tuner.yml", "--plain", "--no-vulns")
 	if code != exitFindings || !strings.Contains(out, "(config: ci/tuner.yml)") || !strings.Contains(out, ".env file in the web root") {
 		t.Errorf("--config: exit %d, stderr %s\n%s", code, errs, out)
+	}
+}
+
+// U12: targets on the user's own machine or network get 50 requests a
+// second unless --rate or the config sets one; public sites keep 5.
+func TestOwnNetworkRate(t *testing.T) {
+	old := lookupIP
+	defer func() { lookupIP = old }()
+	lookupIP = func(_ context.Context, host string) ([]net.IPAddr, error) {
+		ips := map[string][]string{
+			"staging.internal": {"192.168.1.20", "fd00::20"},
+			"example.com":      {"93.184.215.14"},
+			"split.example":    {"10.0.0.9", "93.184.215.14"},
+		}[host]
+		if ips == nil {
+			return nil, errors.New("no such host")
+		}
+		var out []net.IPAddr
+		for _, ip := range ips {
+			out = append(out, net.IPAddr{IP: net.ParseIP(ip)})
+		}
+		return out, nil
+	}
+	t.Chdir(t.TempDir())
+	t.Setenv("HTTPS_PROXY", "")
+	t.Setenv("HTTP_PROXY", "")
+	for _, c := range []struct {
+		target string
+		extra  []string
+		want   float64
+	}{
+		{"127.0.0.1", nil, 50},
+		{"http://127.0.0.1:8080", nil, 50},
+		{"10.0.0.5", nil, 50},
+		{"[::1]", nil, 50},
+		{"http://[fe80::1%25eth0]:8080", nil, 50},
+		{"169.254.10.1", nil, 50},
+		{"localhost:8080", nil, 50},
+		{"app.localhost", nil, 50},
+		{"staging.internal", nil, 50},
+		{"example.com", nil, 5},
+		{"split.example", nil, 5}, // one public address is enough to stay polite
+		{"unresolvable.example", nil, 5},
+		{"8.8.8.8", nil, 5},
+		{"127.0.0.1", []string{"--rate", "5"}, 5},
+		{"127.0.0.1", []string{"--rate", "0"}, 0},
+		{"staging.internal", []string{"--proxy", "http://127.0.0.1:20221"}, 5}, // the proxy resolves it
+		{"127.0.0.1", []string{"--proxy", "http://127.0.0.1:20221"}, 50},
+	} {
+		args := append([]string{c.target, "--no-vulns", "--no-check-updates", "--no-config"}, c.extra...)
+		p, err := planScan(args, nil)
+		if err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		if got := p.rateFor(c.target); got != c.want {
+			t.Errorf("%v: rate %g, want %g", args, got, c.want)
+		}
+	}
+
+	// A rate in .tuner.yml counts as given.
+	writeConfig(t, "rate: 3\n")
+	p, err := planScan([]string{"127.0.0.1", "--no-vulns", "--no-check-updates"}, nil)
+	if err != nil || p.rateFor("127.0.0.1") != 3 {
+		t.Errorf("config rate: %v", err)
+	}
+}
+
+// The header says when the automatic rate applies, and a scan of a local
+// test server without --rate is fast.
+func TestOwnNetworkRateHeader(t *testing.T) {
+	srv := leakySite(t)
+	t.Chdir(t.TempDir())
+	code, out, errs := tunerExact(t, "scan", srv.URL, "--plain", "--no-config")
+	if code != exitOK || !strings.Contains(out, "scanning "+srv.URL+" (local address: 50 req/s)") {
+		t.Errorf("exit %d, stderr %s\n%s", code, errs, out)
+	}
+	_, out, _ = tunerExact(t, "scan", srv.URL, "--plain", "--no-config", "--rate", "100")
+	if strings.Contains(out, "req/s") {
+		t.Errorf("--rate given, header still names the automatic rate:\n%s", out)
+	}
+}
+
+// U12: deep is hidden from help and the picker but still accepted, with a
+// note that it matches default.
+func TestDeepProfileHidden(t *testing.T) {
+	var help bytes.Buffer
+	usage(&help)
+	scanUsage(&help)
+	if strings.Contains(help.String(), "deep") {
+		t.Error("help still offers --profile deep")
+	}
+	srv := leakySite(t)
+	code, _, errs := tuner(t, "scan", srv.URL, "--json", "--profile", "Deep")
+	if code != exitOK || !strings.Contains(errs, "rhythm tuner scan: --profile deep: no check uses it yet, so it runs the same checks as default\n") {
+		t.Errorf("--profile deep: exit %d\n%s", code, errs)
+	}
+	if _, _, errs := tuner(t, "scan", srv.URL, "--json", "--profile", "default"); strings.Contains(errs, "deep") {
+		t.Errorf("--profile default mentions deep:\n%s", errs)
+	}
+	if _, _, errs := tuner(t, "scan", srv.URL, "--json", "--profile", "deep", "-q"); strings.Contains(errs, "deep") {
+		t.Errorf("-q still prints the deep note:\n%s", errs)
 	}
 }

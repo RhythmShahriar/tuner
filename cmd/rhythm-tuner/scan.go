@@ -14,6 +14,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"os/signal"
@@ -113,7 +114,7 @@ func scanFlagSet(o *scanOptions, stderr io.Writer) *flag.FlagSet {
 	fs.StringVar(&o.severity, "severity", "", "")
 	fs.StringVar(&o.checksDir, "checks", "", "")
 
-	fs.Float64Var(&o.rate, "rate", 5, "")
+	fs.Float64Var(&o.rate, "rate", defaultRate, "")
 	both("c", "concurrency", func(n string) { fs.IntVar(&o.concurrency, n, 10, "") })
 	fs.DurationVar(&o.timeout, "timeout", 10*time.Second, "")
 	fs.IntVar(&o.retries, "retries", 2, "")
@@ -164,6 +165,12 @@ type scanPlan struct {
 	config           *tunerconfig.Config
 	configTargets    []string
 	ignores, expired []tunerconfig.Ignore
+
+	// fast holds the targets on the user's own machine or network. Without
+	// --rate (or rate in the config) they are scanned at localRate.
+	fast map[string]bool
+	// notes go to stderr before the scan, unless -q.
+	notes []string
 
 	// local is the base for local scans; scanTarget copies it and fills in
 	// PHP, Advisor, OSV and Select.
@@ -370,7 +377,103 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 			return nil, err
 		}
 	}
+	if !set["rate"] && (p.config == nil || p.config.Rate == nil) {
+		p.fast = ownNetworkTargets(p.targets, proxy != nil)
+	}
+	if o.profile == string(engine.ProfileDeep) && !slices.ContainsFunc(all, func(c *engine.Check) bool { return c.Profile == engine.ProfileDeep }) {
+		p.notes = append(p.notes, "--profile deep: no check uses it yet, so it runs the same checks as default")
+	}
 	return p, nil
+}
+
+// Request rates when --rate is not given. A site on the internet gets a
+// polite default. One on loopback or a private network is almost always
+// the user's own dev or staging server, where the rate limit would be
+// the whole cost of the scan (78 requests take 15 s at 5/s, 1 s at 50/s).
+const (
+	defaultRate = 5
+	localRate   = 50
+)
+
+// lookupIP resolves a host for ownNetworkTargets. Tests replace it so
+// they never send a DNS query.
+var lookupIP = net.DefaultResolver.LookupIPAddr
+
+// ownNetworkTargets returns the URL targets whose host is loopback,
+// private or link-local: a literal address, localhost, or a name that
+// resolves only to such addresses. Names are resolved in parallel with
+// a short timeout; a name that fails to resolve counts as public. Behind
+// a proxy (--proxy or HTTPS_PROXY) the scan's DNS happens elsewhere, so
+// only literal addresses and localhost count.
+func ownNetworkTargets(targets []string, proxied bool) map[string]bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	fast := map[string]bool{}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for _, t := range targets {
+		if isLocalPath(t) {
+			continue
+		}
+		u, _, err := engine.ParseTarget(t)
+		if err != nil {
+			continue
+		}
+		viaProxy := proxied
+		if pu, err := http.ProxyFromEnvironment(&http.Request{URL: u}); err == nil && pu != nil {
+			viaProxy = true
+		}
+		host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+		wg.Go(func() {
+			if ownNetworkHost(ctx, host, viaProxy) {
+				mu.Lock()
+				fast[t] = true
+				mu.Unlock()
+			}
+		})
+	}
+	wg.Wait()
+	return fast
+}
+
+// ownNetworkHost reports whether host is on the user's own machine or
+// network. See ownNetworkTargets.
+func ownNetworkHost(ctx context.Context, host string, proxied bool) bool {
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true // RFC 6761: always loopback
+	}
+	if ip, err := netip.ParseAddr(host); err == nil {
+		return ownNetworkIP(ip)
+	}
+	if proxied {
+		return false
+	}
+	addrs, err := lookupIP(ctx, host)
+	if err != nil || len(addrs) == 0 {
+		return false
+	}
+	for _, a := range addrs {
+		ip, ok := netip.AddrFromSlice(a.IP)
+		if !ok || !ownNetworkIP(ip) {
+			return false
+		}
+	}
+	return true
+}
+
+// ownNetworkIP reports whether ip is loopback, private (RFC 1918 or an
+// IPv6 unique local address) or link-local.
+func ownNetworkIP(ip netip.Addr) bool {
+	ip = ip.Unmap().WithZone("")
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
+}
+
+// rateFor is the request rate one target is scanned at.
+func (p *scanPlan) rateFor(target string) float64 {
+	if p.fast[target] {
+		return localRate
+	}
+	return p.engine.Rate
 }
 
 // today is the date ignore entries are checked against. Tests change it.
@@ -489,9 +592,14 @@ func (p *scanPlan) filterIgnored(res *engine.Result) int {
 // profiles are accepted in any case.
 func (p *scanPlan) checkValues() error {
 	o := &p.o
-	profile, err := oneOf("profile", o.profile, engine.Profiles)
-	if err != nil {
-		return err
+	// deep is still accepted, but no check uses it yet, so help and errors
+	// leave it out.
+	profile := engine.ProfileDeep
+	if !strings.EqualFold(strings.TrimSpace(o.profile), string(engine.ProfileDeep)) {
+		var err error
+		if profile, err = oneOf("profile", o.profile, []engine.Profile{engine.ProfileQuick, engine.ProfileDefault}); err != nil {
+			return err
+		}
 	}
 	o.profile = string(profile)
 	if o.severity != "" {
@@ -501,6 +609,7 @@ func (p *scanPlan) checkValues() error {
 		}
 		o.severity = string(sev)
 	}
+	var err error
 	if o.failOn != "" {
 		if p.failOn, err = oneOf("fail-on", o.failOn, engine.Severities); err != nil {
 			return err
@@ -606,6 +715,9 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 		for _, w := range p.checkSet.warnings {
 			printErr(stderr, "scan", w)
 		}
+		for _, n := range p.notes {
+			printErr(stderr, "scan", n)
+		}
 	}
 	// Shown even with -q: an expired ignore can fail a CI run that passed
 	// yesterday. The log should say why.
@@ -653,6 +765,12 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 	notice := checkForUpdate(ctx, p.engine.UserAgent, o.offline)
 
 	scanner := engine.New(p.checks, p.engine)
+	var fastScanner *engine.Scanner // for the targets in p.fast
+	if len(p.fast) > 0 {
+		fo := p.engine
+		fo.Rate = localRate
+		fastScanner = engine.New(p.checks, fo)
+	}
 	single := len(p.targets) == 1
 	results := make([]*engine.Result, len(p.targets))
 	statuses := make([]runStatus, len(p.targets))
@@ -677,11 +795,7 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 				view = report.NewPretty(w, stderr, report.PrettyOptions{
 					Plain: plain, Quiet: o.quiet, Progress: single && tty && !o.verbose,
 				})
-				header := target
-				if p.config != nil {
-					header += " (config: " + p.config.Path + ")"
-				}
-				view.Header(version, header)
+				view.Header(version, p.header(target))
 			}
 
 			var h engine.Hooks
@@ -711,7 +825,11 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 			}
 
 			slot := &vulnSlot{}
-			res, err := p.safeScan(context.WithValue(ctx, vulnSlotKey{}, slot), scanner, target, h)
+			s := scanner
+			if p.fast[target] {
+				s = fastScanner
+			}
+			res, err := p.safeScan(context.WithValue(ctx, vulnSlotKey{}, slot), s, target, h)
 			statuses[i] = p.status(ctx, err, slot)
 			if res != nil {
 				stampFindings(res, target)
@@ -802,6 +920,22 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 		exit = max(exit, code)
 	}
 	return exit
+}
+
+// header is the live view's title for target: the target, then the
+// config file and an automatic rate in brackets when they apply.
+func (p *scanPlan) header(target string) string {
+	var notes []string
+	if p.config != nil {
+		notes = append(notes, "config: "+p.config.Path)
+	}
+	if p.fast[target] {
+		notes = append(notes, fmt.Sprintf("local address: %g req/s", p.rateFor(target)))
+	}
+	if len(notes) == 0 {
+		return target
+	}
+	return target + " (" + strings.Join(notes, "; ") + ")"
 }
 
 // scanOne scans one target. Tests swap it to make a target hang or panic.
