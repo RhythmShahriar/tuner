@@ -25,7 +25,7 @@ import (
 )
 
 // Local rules are file checks written as data in rules/*.yaml: which
-// files to look at, what to look for in them, and what to say. Malware
+// files to look at, what to look for in them and what to say. Malware
 // signatures and most stray-file checks are rules. A rule only reads
 // files; nothing it matches is ever run.
 //
@@ -57,7 +57,7 @@ import (
 //
 // Globs use forward slashes and match the path from the scope's root,
 // ignoring case. * and ? stay within one folder, ** matches any number of
-// folders (none included), and [a-z] classes work as in path.Match.
+// folders (none included); [a-z] classes work as in path.Match.
 //
 // The web scope skips what the other stray-file checks skip: dependency
 // folders, version control folders, wp-content/cache and the media
@@ -220,7 +220,7 @@ func literalHints(src string) [][][]byte {
 		parts = re.Sub
 	}
 	// Adjacent literal parts join up: the parser turns
-	// gzinflate|gzdecode into gz(?:inflate|decode), and "decode" alone
+	// gzinflate|gzdecode into gz(?:inflate|decode); "decode" alone
 	// would let every file with base64_decode through.
 	var out [][][]byte
 	var run [][]byte
@@ -383,7 +383,7 @@ func (r *Rule) prunes(rel []string) bool {
 	return slices.ContainsFunc(r.prune, func(dir glob) bool { return dir.match(rel) })
 }
 
-// match reports whether the file's content matches, and where: the
+// match reports whether the file's content matches and where: the
 // offset of the first regex or word match, or -1.
 func (r *Rule) match(f *fileData, regular bool) (bool, int) {
 	if r.MaxSize > 0 && f.size > r.MaxSize {
@@ -409,7 +409,7 @@ func (r *Rule) match(f *fileData, regular bool) (bool, int) {
 			at = loc[0]
 		}
 	}
-	// Most files hold none of a regex's literal words, and a lower-case
+	// Most files hold none of a regex's literal words; a lower-case
 	// bytes.Contains is far cheaper than running the regex to find out.
 	for _, sets := range r.hints {
 		for _, set := range sets {

@@ -214,7 +214,7 @@ func Root(target string) (string, error) {
 }
 
 // expandHome replaces a leading ~ with the home folder. Both separators
-// count after it: Windows users type ~\site, and a script written there
+// count after it: Windows users type ~\site; a script written there
 // may still be run on Linux or macOS.
 func expandHome(p string, home func() (string, error)) (string, error) {
 	if p != "~" && !strings.HasPrefix(p, "~/") && !strings.HasPrefix(p, `~\`) {

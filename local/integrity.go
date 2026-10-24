@@ -220,7 +220,7 @@ func (c *Checksums) path(kind, key string) string {
 }
 
 // Characters allowed in a cache file name; slugs and versions only need
-// these, and anything else could escape the cache folder.
+// these; anything else could escape the cache folder.
 var sumKeyChars = regexp.MustCompile(`[^A-Za-z0-9._@-]`)
 
 func readSumCache(path string, e *sumEntry) bool {

@@ -25,7 +25,7 @@ import (
 // One walk of the project feeds every check that looks at files. Each
 // check is a visitor with its own root and its own folders to skip; a
 // folder is only skipped when no visitor wants it. Files are read once,
-// by a pool of workers, and the bytes are shared by every visitor that
+// by a pool of workers. The bytes are shared by every visitor that
 // asked for them.
 
 // need says what a visitor wants from a file.
@@ -250,7 +250,7 @@ func (c *collector) add(fs ...engine.Finding) {
 }
 
 // findings returns what was found in a stable order: workers finish in
-// any order, and reports and hooks should not.
+// any order; reports and hooks should not.
 func (c *collector) findings() []engine.Finding {
 	c.mu.Lock()
 	defer c.mu.Unlock()
