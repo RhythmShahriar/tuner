@@ -20,6 +20,7 @@ import (
 	"github.com/RhythmShahriar/tuner/engine"
 	"github.com/RhythmShahriar/tuner/engine/checktest"
 	"github.com/RhythmShahriar/tuner/export"
+	"github.com/RhythmShahriar/tuner/matchers"
 )
 
 // listChecks prints the checks a scan with the same flags would run, or
@@ -118,7 +119,27 @@ func listChecks(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "%d %s, plus vulnerability matching for core, plugins, themes, PHP and\n"+
 		"nginx/Apache (vuln-*, wp-components-*, *-eol), which scans skip with --no-vulns.\n", len(sel), noun)
+	if slices.ContainsFunc(tags, func(t string) bool { return strings.EqualFold(t, "secrets") }) {
+		if err := listSecretRules(stdout); err != nil {
+			return exitError
+		}
+	}
 	return exitOK
+}
+
+// listSecretRules prints the secret catalog, for checks --tags secrets:
+// every rule that finds and masks credentials in the bodies of checks
+// that extract secrets. Values are never verified with their provider.
+func listSecretRules(w io.Writer) error {
+	rules := matchers.SecretRules()
+	fmt.Fprintf(w, "\nSecret rules (%d), applied to every check that extracts secrets.\n"+
+		"Matches are masked in every output and never sent to the provider.\n\n", len(rules))
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "RULE\tTAGS\tFINDS")
+	for _, r := range rules {
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", r.ID, strings.Join(r.Tags, ","), r.Description)
+	}
+	return tw.Flush()
 }
 
 // checksUsage is checks --help. The Usage list is laid out for the name
@@ -141,7 +162,8 @@ built-in checks when no directory is given; neither needs Go.
 
 Flags:
       --profile <name>     quick or default (default: every check)
-      --tags <list>        only checks with these tags
+      --tags <list>        only checks with these tags; secrets also lists
+                           the secret rules
       --exclude-tags <list>
       --id <list>          only these checks; globs allowed
       --exclude-id <list>

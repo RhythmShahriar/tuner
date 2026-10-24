@@ -512,6 +512,7 @@ func (ss *session) run(ctx context.Context, c *Check, p string) ([]Finding, []st
 	}
 	if c.Extract.Secrets {
 		f.Evidence.Secrets = matchers.FindSecrets(r.Body)
+		f.Title = matchers.TitleWithSecrets(f.Title, f.Evidence.Secrets)
 	}
 	found := []Finding{f}
 	var warnings []string

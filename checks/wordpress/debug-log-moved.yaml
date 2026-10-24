@@ -4,7 +4,7 @@
 id: wp-debug-log-moved
 name: WordPress debug log exposed in another folder
 severity: high
-tags: [wordpress, leak]
+tags: [wordpress, leak, secrets]
 request:
   path: ["/debug.log", "/wp-content/uploads/debug.log", "/wp-content/logs/debug.log", "/wp-admin/debug.log", "/logs/debug.log"]
 match:

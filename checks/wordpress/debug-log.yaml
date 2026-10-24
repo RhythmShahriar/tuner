@@ -5,7 +5,7 @@ id: wp-debug-log
 name: WordPress debug.log exposed
 severity: high
 profile: quick
-tags: [wordpress, leak]
+tags: [wordpress, leak, secrets]
 request:
   path: ["/wp-content/debug.log"]
 match:

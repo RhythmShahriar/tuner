@@ -123,6 +123,7 @@ func (s *scan) file(e *entry, f *fileData) *engine.Finding {
 				"Move it out of the web root (use COMPOSER_AUTH or ~/.composer/auth.json) and rotate the tokens.",
 				"leak", "secrets")
 			x.Evidence.Secrets = sec
+			x.Title = matchers.TitleWithSecrets(x.Title, sec)
 			return &x
 		}
 	}

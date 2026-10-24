@@ -496,6 +496,7 @@ func (r *Rule) finding(s *scan, e *entry, f *fileData, at int) engine.Finding {
 	out := s.finding(r.ID, sev, e.path, title, ev, r.Impact, r.Fix, r.Tags...)
 	out.Confidence, out.Caveat = r.Confidence, r.Caveat
 	out.Evidence.Secrets = sec
+	out.Title = matchers.TitleWithSecrets(out.Title, sec)
 	out.References = r.References
 	return out
 }

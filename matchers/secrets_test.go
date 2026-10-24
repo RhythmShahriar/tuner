@@ -155,3 +155,56 @@ func TestMaskCleansControlBytes(t *testing.T) {
 		t.Errorf("Mask = %q keeps an escape byte", got)
 	}
 }
+
+func TestSecretSummary(t *testing.T) {
+	openai := Secret{Kind: "openai-key", Masked: "sk-p•••••"}
+	mailgun := Secret{Kind: "mailgun-key", Masked: "key-•••••"}
+	named := Secret{Kind: "env", Name: "DB_PASSWORD", Masked: "su•••••"}
+	odd := Secret{Kind: "not-a-rule", Masked: "ab•••••"}
+	for _, c := range []struct {
+		in   []Secret
+		want string
+	}{
+		{nil, ""},
+		{[]Secret{openai}, "1 secret (OpenAI key sk-p•••••)"},
+		{[]Secret{openai, mailgun}, "2 secrets (OpenAI key sk-p•••••, Mailgun key key-•••••)"},
+		{[]Secret{named, odd}, "2 secrets (DB_PASSWORD=su•••••, ab•••••)"},
+		{[]Secret{openai, mailgun, named, odd, odd}, "5 secrets (OpenAI key sk-p•••••, Mailgun key key-•••••, DB_PASSWORD=su•••••, 2 more)"},
+	} {
+		if got := SecretSummary(c.in); got != c.want {
+			t.Errorf("SecretSummary(%v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+	if got := TitleWithSecrets(".env file exposed", []Secret{openai}); got != ".env file exposed: 1 secret (OpenAI key sk-p•••••)" {
+		t.Errorf("TitleWithSecrets = %q", got)
+	}
+	if got := TitleWithSecrets(".env file exposed", nil); got != ".env file exposed" {
+		t.Errorf("TitleWithSecrets without secrets = %q", got)
+	}
+}
+
+// Every kind FindSecrets reports has a rule in the listing and a label,
+// so checks --tags secrets and finding titles cover the whole catalog.
+func TestSecretRulesListEveryKind(t *testing.T) {
+	rules := SecretRules()
+	if len(rules) < 80 {
+		t.Errorf("%d rules, want the kit catalog of about 80 and more", len(rules))
+	}
+	ids := map[string]bool{}
+	for _, r := range rules {
+		ids[r.ID] = true
+		if r.Description == "" || len(r.Tags) == 0 {
+			t.Errorf("rule %s has no description or tags", r.ID)
+		}
+		if l := secretLabels[r.ID]; l == "" || len(l) > 40 {
+			t.Errorf("rule %s: label %q", r.ID, l)
+		}
+	}
+	for _, in := range []string{"export dbpw=lowerS3cret\n", `{"github-oauth": {"github.com": "oauthT0kenValue123"}}`, "OPENAI_API_KEY=sk-proj-FAKEfakeFAKEfake0123456789\n"} {
+		for _, s := range FindSecrets([]byte(in)) {
+			if !ids[s.Kind] {
+				t.Errorf("%q: kind %s is not in SecretRules", in, s.Kind)
+			}
+		}
+	}
+}
