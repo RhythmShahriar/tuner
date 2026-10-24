@@ -47,7 +47,7 @@ func sameAdvisory(a, b Vuln) bool {
 		}
 	}
 	if len(a.CVEs) > 0 && len(b.CVEs) > 0 {
-		return false // both have CVEs, and they differ
+		return false // both have CVEs and they differ
 	}
 	return normTitle(a.Title) == normTitle(b.Title) && a.Min == b.Min && a.Max == b.Max
 }

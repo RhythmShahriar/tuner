@@ -18,7 +18,7 @@ import (
 const abandonedAfter = 2 * 365 * 24 * time.Hour
 
 // componentAdvisor matches plugins and themes: known vulnerabilities
-// (vuln-plugin-*, vuln-theme-*), closed on wordpress.org, and one summary
+// (vuln-plugin-*, vuln-theme-*), closed on wordpress.org plus one summary
 // each for those out of date, abandoned or with an unknown version.
 type componentAdvisor struct{}
 

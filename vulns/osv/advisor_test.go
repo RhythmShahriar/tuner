@@ -93,7 +93,7 @@ func TestComposerAdvisorNegative(t *testing.T) {
 		t.Errorf("malformed lock: %+v %v", findings, warnings)
 	}
 
-	// Other findings, and composer.json (constraints, not versions), are ignored without a request.
+	// Other findings and composer.json (constraints, not versions) are ignored without a request.
 	hits := api.Hits.Load()
 	leak, body = exposedLock(t, map[string]string{"/composer.json": `{"require":{"guzzlehttp/guzzle":"^7.0"}}`}, "/composer.json")
 	if findings, warnings := a.AdviseResponse(ctx, leak, body); len(findings) != 0 || len(warnings) != 0 {

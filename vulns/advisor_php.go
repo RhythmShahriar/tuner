@@ -13,7 +13,7 @@ import (
 )
 
 // phpAdvisor matches the PHP version: known vulnerabilities (vuln-php),
-// including those inferred for an end-of-life branch, and the end of life
+// including those inferred for an end-of-life branch, plus the end of life
 // itself (php-eol). When the site runs PHP but hides the version, it
 // lists the recent flaws that can't be ruled out (php-version-hidden).
 type phpAdvisor struct{}

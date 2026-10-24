@@ -138,7 +138,7 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 }
 
 // updateFlagError rewords the flag package's parse errors in the style of
-// scan's: the flag with its two dashes, and the closest known flag.
+// scan's: the flag with its two dashes plus the closest known flag.
 func updateFlagError(err error, fs *flag.FlagSet) string {
 	msg := err.Error()
 	if name, ok := strings.CutPrefix(msg, "flag needs an argument: -"); ok {
@@ -154,7 +154,7 @@ func updateFlagError(err error, fs *flag.FlagSet) string {
 	}
 	name = strings.TrimLeft(name, "-")
 	if name == "offline" {
-		// The usual slip: scans take --offline, and update exists to go online.
+		// The usual slip: scans take --offline; update exists to go online.
 		return "unknown flag --offline; update always fetches (scan --offline uses what it cached)"
 	}
 	var known []string
@@ -214,7 +214,7 @@ func checkPrefetchTarget(t string) error {
 
 // prefetchTargets fingerprints each target without running checks and
 // caches the vulnerability data a scan of it needs: WPVulnerability,
-// wordpress.org and php.net through c, and OSV.dev for a local
+// wordpress.org and php.net through c, plus OSV.dev for a local
 // composer.lock. Lookups still fresh in the cache are not repeated.
 func prefetchTargets(ctx context.Context, targets []string, php string, c *vulns.Client, packOK bool, ua string, stdout, stderr io.Writer) int {
 	oc := osvClient(ua, nil, false)

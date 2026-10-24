@@ -290,7 +290,7 @@ func (c *Client) latest(ctx context.Context, kind, slug string) (*Release, cache
 	})
 }
 
-// Refresh re-fetches every cached record, and the Wordfence feed when one
+// Refresh re-fetches every cached record plus the Wordfence feed when one
 // is set, ignoring the TTL. It returns how many were refreshed and how
 // many failed.
 func (c *Client) Refresh(ctx context.Context) (ok, failed int, err error) {

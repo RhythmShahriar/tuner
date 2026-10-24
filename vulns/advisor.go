@@ -27,7 +27,7 @@ var errNoRecord = errors.New("no vulnerability record")
 // one advisor per kind of component (see kinds): each says what to look
 // up in a fingerprint, fetches it and turns the answers into findings.
 // Advisor runs their lookups together, counts what failed or came from a
-// stale cache, and writes the warnings and the data status.
+// stale cache, then writes the warnings and the data status.
 type Advisor struct {
 	Client *Client
 	Now    func() time.Time
@@ -104,7 +104,7 @@ type lookup struct {
 	branches []string
 }
 
-// failure is one lookup that failed: what was asked, and why.
+// failure is one lookup that failed: what was asked and why.
 type failure struct {
 	what string
 	err  error

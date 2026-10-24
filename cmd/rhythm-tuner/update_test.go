@@ -125,7 +125,7 @@ func TestUpdatePrefetchLocal(t *testing.T) {
 		t.Fatal("prefetch made no requests")
 	}
 
-	// Now offline works with the APIs down, and makes no requests.
+	// Now offline works with the APIs down and makes no requests.
 	down.Store(true)
 	osvAPI.Down.Store(true)
 	n := hits.Load() + osvAPI.Hits.Load()

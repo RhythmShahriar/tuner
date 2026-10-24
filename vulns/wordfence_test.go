@@ -128,11 +128,11 @@ func TestWordfenceMerged(t *testing.T) {
 		t.Errorf("source %q", cf7.Source)
 	}
 
-	// Core: the same CVE once, and the feed's ranges matched to the version.
+	// Core: the same CVE once, with the feed's ranges matched to the version.
 	if core := got["vuln-core"]; len(core.Advisories) != 1 || core.Advisories[0].CVEs[0] != "CVE-2024-31211" {
 		t.Errorf("core %+v", core.Advisories)
 	}
-	// A closed plugin WPVulnerability has no advisories for, and a theme.
+	// A closed plugin WPVulnerability has no advisories for; a theme.
 	if og := got["vuln-plugin-old-gallery"]; len(og.Advisories) != 1 || !strings.Contains(og.Fix, "No fixed version") {
 		t.Errorf("old-gallery %+v", og)
 	}
