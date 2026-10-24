@@ -12,7 +12,9 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"os"
 	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -317,5 +319,57 @@ func TestChecksumsCacheKey(t *testing.T) {
 	c := &Checksums{CacheDir: "/cache"}
 	if p := c.path("plugin", "../../etc@1"); path.Dir(p) != "/cache/plugin" {
 		t.Errorf("cache path %q escapes the cache", p)
+	}
+}
+
+func TestIntegrityLinks(t *testing.T) {
+	// Core and plugin files replaced by links: a link to a file inside
+	// the install is compared like the file, a link outside it is
+	// reported because its target can't be compared.
+	outside := tree(t, map[string]string{"evil.php": "<?php eval($_POST['x']);"})
+	root := integrityTree(t, map[string]string{
+		"shared/admin-index.php": pristineCore["wp-admin/index.php"],
+		"shared/login.php":       "<?php // changed login",
+	})
+	links := map[string]string{
+		"wp-includes/load.php":                         filepath.Join(outside, "evil.php"),
+		"wp-admin/index.php":                           filepath.Join("..", "shared", "admin-index.php"),
+		"wp-login.php":                                 filepath.Join("shared", "login.php"),
+		"wp-content/plugins/akismet/class.akismet.php": filepath.Join(outside, "evil.php"),
+	}
+	for p, target := range links {
+		link := filepath.Join(root, filepath.FromSlash(p))
+		if err := os.Remove(link); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, link); err != nil {
+			t.Skip("no links:", err)
+		}
+	}
+	api := &fakeWPOrg{}
+	res := integrityScan(t, root, api.client("", false))
+	got := map[string]engine.Finding{}
+	for _, f := range integrityFindings(res) {
+		got[f.ID+" "+f.Path] = f
+	}
+	want := map[string]string{
+		"local-integrity-core-modified /wp-includes/load.php":                           "WordPress core file replaced by a link",
+		"local-integrity-core-modified /wp-login.php":                                   "Modified WordPress core file",
+		"local-integrity-plugin-modified /wp-content/plugins/akismet/class.akismet.php": "File in plugin akismet replaced by a link",
+	}
+	for k, title := range want {
+		if f, ok := got[k]; !ok || f.Title != title {
+			t.Errorf("%s: got %+v", k, f)
+		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("findings %v", slices.Sorted(maps.Keys(got)))
+	}
+	ev := strings.Join(got["local-integrity-core-modified /wp-includes/load.php"].Evidence.Matched, "\n")
+	if !strings.Contains(ev, "a link to "+filepath.Join(outside, "evil.php")+" outside the install, so it wasn't compared") {
+		t.Errorf("evidence %q", ev)
+	}
+	if f := got["local-integrity-core-modified /wp-includes/load.php"]; f.Severity != engine.High {
+		t.Errorf("severity %s", f.Severity)
 	}
 }

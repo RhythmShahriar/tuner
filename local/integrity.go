@@ -401,7 +401,7 @@ func (v *integrityVisitor) need(e *entry) need {
 	rel := v.relPath(e.path)
 	if _, ok := v.core[rel]; ok && !strings.HasPrefix(rel, "wp-content/") {
 		if !e.regular() {
-			return needVisit // a link: counts as present, isn't hashed
+			return needVisit // a link: visit hashes its target
 		}
 		return needVisit | needMD5
 	}
@@ -412,7 +412,7 @@ func (v *integrityVisitor) need(e *entry) need {
 	if slug, inner, ok := v.plugin(rel); ok {
 		if _, listed := v.plugins[slug][inner]; listed && e.regular() {
 			return needVisit | needSHA256
-		} else if !listed && isPHP {
+		} else if listed || isPHP {
 			return needVisit
 		}
 	}
@@ -426,6 +426,18 @@ func (v *integrityVisitor) visit(e *entry, f *fileData) {
 		v.mu.Lock()
 		v.seen[rel] = true
 		v.mu.Unlock()
+		if !e.regular() {
+			lf, note := v.linkData(e, needMD5)
+			ev = append(ev, note)
+			if lf == nil {
+				v.add(v.s.finding("local-integrity-core-modified", engine.High, e.path, "WordPress core file replaced by a link", ev,
+					"WordPress ships this as a regular file. The link runs whatever it points to, which can't be compared with the release. Attackers use this to hide a changed core file; a few hosts link core to a shared copy on purpose.",
+					"Check where the link points. If your host didn't set it up, replace it with the file from WordPress "+v.version+" (wp core download --force --skip-content --version="+v.version+").",
+					"integrity", "wordpress", "malware"))
+				return
+			}
+			f = lf
+		}
 		if f.md5 != "" && !slices.Contains(sums, f.md5) {
 			ev = append(ev, fmt.Sprintf("MD5 %s, expected %s for WordPress %s (%s)", f.md5, sums[0], v.version, v.locale))
 			v.add(v.s.finding("local-integrity-core-modified", engine.Critical, e.path, "Modified WordPress core file", ev,
@@ -438,6 +450,18 @@ func (v *integrityVisitor) visit(e *entry, f *fileData) {
 	if slug, inner, ok := v.plugin(rel); ok {
 		ver := v.pver[slug]
 		if sums, listed := v.plugins[slug][inner]; listed {
+			if !e.regular() {
+				lf, note := v.linkData(e, needSHA256)
+				ev = append(ev, note)
+				if lf == nil {
+					v.add(v.s.finding("local-integrity-plugin-modified", engine.High, e.path, "File in plugin "+slug+" replaced by a link", ev,
+						"The wordpress.org release ships this as a regular file. The link runs whatever it points to, which can't be compared with the release.",
+						"Check where the link points. If nobody set it up on purpose, reinstall the plugin (wp plugin install "+slug+" --force --version="+ver+").",
+						"integrity", "wordpress", "malware"))
+					return
+				}
+				f = lf
+			}
 			if f.sha256 != "" && !slices.Contains(sums, f.sha256) {
 				ev = append(ev, fmt.Sprintf("SHA-256 %s, expected %s for %s %s", f.sha256, sums[0], slug, ver))
 				v.add(v.s.finding("local-integrity-plugin-modified", engine.High, e.path, "Modified file in plugin "+slug, ev,
@@ -460,6 +484,34 @@ func (v *integrityVisitor) visit(e *entry, f *fileData) {
 		"WordPress never adds files to wp-admin or wp-includes outside an update, so an extra PHP file there is very likely a backdoor or left over from one.",
 		"Check what the file does and when it appeared, then delete it and reinstall core (wp core download --force --skip-content --version="+v.version+").",
 		"integrity", "wordpress", "malware"))
+}
+
+// linkData hashes what a link in place of a checked file points to. A
+// link to a regular file inside the install is compared like the file
+// itself, since some deploys link files within a release. For any other
+// link it returns nil. The note says where the link points, for the
+// evidence.
+func (v *integrityVisitor) linkData(e *entry, n need) (*fileData, string) {
+	shown, err := os.Readlink(e.path)
+	if err != nil {
+		shown = "an unreadable target"
+	}
+	shown = "a link to " + snippet([]byte(shown), 0)
+	target, err := filepath.EvalSymlinks(e.path)
+	if err != nil {
+		return nil, shown + " that doesn't resolve"
+	}
+	root, err := filepath.EvalSymlinks(v.s.wp.root)
+	if err != nil {
+		root = v.s.wp.root
+	}
+	if r, err := filepath.Rel(root, target); err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+		return nil, shown + " outside the install, so it wasn't compared"
+	}
+	if fi, err := os.Stat(target); err != nil || !fi.Mode().IsRegular() {
+		return nil, shown + ", which isn't a regular file"
+	}
+	return v.s.load(&entry{path: target, name: filepath.Base(target)}, n), shown
 }
 
 // done reports what the walk found, plus core files that are missing.
