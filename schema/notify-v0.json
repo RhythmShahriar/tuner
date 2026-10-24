@@ -27,7 +27,8 @@
       }
     },
     "targets": { "type": "array", "items": { "type": "string" }, "description": "Targets with new findings, in scan order." },
-    "findings": { "type": "array", "items": { "$ref": "#/$defs/Item" } }
+    "findings": { "type": "array", "items": { "$ref": "#/$defs/Item" } },
+    "incomplete": { "type": "array", "items": { "type": "string" }, "description": "Present when the scan did not finish or lacked vulnerability data: its notes, e.g. \"Incomplete: stopped by --max-time\", with the target in front for a batch. Findings it did not reach are not listed." }
   },
   "$defs": {
     "Severity": { "type": "string", "enum": ["critical", "high", "medium", "low", "info"] },

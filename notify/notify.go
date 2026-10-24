@@ -74,6 +74,10 @@ type Message struct {
 	Counts      map[engine.Severity]int `json:"counts"`
 	Targets     []string                `json:"targets"`
 	Findings    []Item                  `json:"findings"`
+	// Incomplete holds the scan's status notes when it didn't finish, e.g.
+	// "Incomplete: stopped by --max-time", so nobody reads a short list as
+	// a clean bill of health.
+	Incomplete []string `json:"incomplete,omitempty"`
 }
 
 // Build turns a comparison into a message: the new findings at or above
@@ -110,6 +114,9 @@ func Build(res diff.Result, since string, lowest engine.Severity, version string
 			seen[it.Target] = true
 			m.Targets = append(m.Targets, it.Target)
 		}
+	}
+	for _, n := range res.Incomplete {
+		m.Incomplete = append(m.Incomplete, safe(n))
 	}
 	m.Summary = summary(m)
 	return m
@@ -154,6 +161,9 @@ func (m Message) Text(esc func(string) string) string {
 		b.WriteString(esc(fmt.Sprintf("Compared with %s. Showing %s and above.", m.Since, m.MinSeverity)) + "\n")
 	} else {
 		b.WriteString(esc(fmt.Sprintf("No earlier report to compare with. Showing %s and above.", m.MinSeverity)) + "\n")
+	}
+	for _, n := range m.Incomplete {
+		b.WriteString(esc(n) + "\n")
 	}
 	listed := 0
 	for _, t := range m.Targets {

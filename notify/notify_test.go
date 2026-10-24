@@ -347,3 +347,48 @@ func TestParseErrors(t *testing.T) {
 		t.Errorf("Redacted = %q", got)
 	}
 }
+
+// review: a title word that looks like a URL must not carry a masked link.
+func TestDiscordEscapesURLLookalikes(t *testing.T) {
+	for in, want := range map[string]string{
+		"[HIGH] https://x[click](https://evil.test) - https://a.test/p": `\[HIGH\] https://x%5Bclick%5D%28https://evil.test%29 - https://a.test/p`,
+		"see https://a.test/a_b?q=1 **now**":                            `see https://a.test/a_b?q=1 \*\*now\*\*`,
+		"https://a.test/<@everyone>":                                    "https://a.test/%3C@everyone%3E",
+	} {
+		if got := discordEscape(in); got != want {
+			t.Errorf("discordEscape(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// review: an incomplete scan says so in every message, even with nothing
+// new to list, and the field is in the published schema.
+func TestIncompleteScan(t *testing.T) {
+	res := diff.Result{Incomplete: []string{"Incomplete: blocked by Cloudflare challenge"}}
+	m := Build(res, "last-week.json", engine.High, "1.2.3")
+	want := "Tuner: no new findings\n" +
+		"Compared with last-week.json. Showing high and above.\n" +
+		"Incomplete: blocked by Cloudflare challenge\n"
+	if got := m.Text(func(s string) string { return s }); got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+	raw, err := os.ReadFile("../schema/notify-v0.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	_ = json.Unmarshal(raw, &schema)
+	body, _ := json.Marshal(m)
+	var doc map[string]json.RawMessage
+	_ = json.Unmarshal(body, &doc)
+	if _, ok := doc["incomplete"]; !ok {
+		t.Errorf("no incomplete field: %s", body)
+	}
+	for k := range doc {
+		if _, ok := schema.Properties[k]; !ok {
+			t.Errorf("%q is not in schema/notify-v0.json", k)
+		}
+	}
+}
