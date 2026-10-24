@@ -34,7 +34,7 @@ const (
 
 // Client queries OSV.dev for known vulnerabilities in Composer packages.
 // Like vulns.Client, it caches answers on disk, refreshes them once they're
-// a day old, and falls back to stale copies when the service is down.
+// a day old and falls back to stale copies when the service is down.
 type Client struct {
 	HTTP      *http.Client
 	UserAgent string

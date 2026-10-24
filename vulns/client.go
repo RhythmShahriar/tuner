@@ -398,7 +398,7 @@ func parseWPDate(s string) time.Time {
 // --- WPVulnerability wire format ---
 
 // flex accepts a JSON string, number, bool, null or object. The API is
-// inconsistent: unfixed is "0" for plugins and 0 for PHP, and kev may be
+// inconsistent: unfixed is "0" for plugins but 0 for PHP; kev may be
 // false or an object.
 type flex string
 
@@ -433,7 +433,7 @@ type rawResponse struct {
 	Data    json.RawMessage `json:"data"`
 }
 
-// object decodes a JSON object into T, and treats [] or null as absent:
+// object decodes a JSON object into T and treats [] or null as absent:
 // the API sends PHP's empty array where an object has no fields.
 type object[T any] struct {
 	V  T

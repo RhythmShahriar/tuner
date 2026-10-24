@@ -94,7 +94,7 @@ func closedFinding(base *url.URL, l *lookup) engine.Finding {
 	}
 	f := finding(base, "wp-"+l.kind+"-closed", engine.Medium, l.path,
 		fmt.Sprintf("%s %s was closed on wordpress.org", strings.ToUpper(l.kind[:1])+l.kind[1:], l.slug), ev,
-		"Closed "+l.kind+"s get no updates, and are often closed because of an unfixed security issue.",
+		"Closed "+l.kind+"s get no updates. They are often closed because of an unfixed security issue.",
 		"Remove it, or replace it with a maintained alternative.", "wordpress", "abandoned")
 	f.Source = Source
 	return f

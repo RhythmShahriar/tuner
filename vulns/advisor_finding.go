@@ -110,7 +110,7 @@ func (a *Advisor) vulnFinding(base *url.URL, l *lookup) (engine.Finding, bool) {
 		impact += fmt.Sprintf(" %d of them are in CISA's Known Exploited Vulnerabilities catalog: attackers use them in the wild.", kev)
 	}
 	if n := len(l.newer); n > 0 {
-		impact += fmt.Sprintf(" %d were disclosed after PHP %s reached end of life: they're listed for PHP %s with no lower version bound, so they reach older branches too, and will never be fixed on this one.",
+		impact += fmt.Sprintf(" %d were disclosed after PHP %s reached end of life: they're listed for PHP %s with no lower version bound, so they reach older branches too and will never be fixed on this one.",
 			n, branchOf(l.version), l.newerFrom)
 	}
 
@@ -190,10 +190,10 @@ func (a *Advisor) eolFinding(base *url.URL, l *lookup, now time.Time) (engine.Fi
 	sev, impact := engine.Medium, "No more security fixes are released for this branch."
 	fix := fmt.Sprintf("Upgrade to a supported %s release.", l.slug)
 	if l.kind == "php" {
-		// PHP is what every request runs through, and its EOL
+		// PHP is what every request runs through. Its EOL
 		// branches quietly collect new, never-fixed flaws.
 		sev = engine.High
-		impact = "No more security fixes are released for this branch: newly disclosed PHP flaws are never fixed on it, and vulnerability databases stop listing them for it."
+		impact = "No more security fixes are released for this branch: newly disclosed PHP flaws are never fixed on it. Vulnerability databases stop listing them for it."
 		if n := len(l.newer); n > 0 {
 			impact += fmt.Sprintf(" %d flaws disclosed since support ended likely affect it (see vuln-php).", n)
 		}

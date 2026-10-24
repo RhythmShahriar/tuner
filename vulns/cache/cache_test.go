@@ -157,7 +157,7 @@ func TestMemoExpires(t *testing.T) {
 }
 
 // TestKeyCollision checks that two keys sharing a file name never get
-// each other's data: "/" has its own escape, and Read checks the stored
+// each other's data: "/" has its own escape and Read checks the stored
 // key for the characters that still collide.
 func TestKeyCollision(t *testing.T) {
 	dir := t.TempDir()

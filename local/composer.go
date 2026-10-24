@@ -47,7 +47,7 @@ func (s *scan) laravelEnv() []engine.Finding {
 		ev = append(ev, "APP_ENV="+e)
 	}
 	return []engine.Finding{s.finding("local-laravel-debug", engine.Medium, path, "Laravel debug mode is on", ev,
-		"Error pages show stack traces, source code, and environment values including secrets.",
+		"Error pages show stack traces, source code and environment values including secrets.",
 		"Set APP_DEBUG=false in .env on production servers, then run: php artisan config:cache",
 		"laravel", "config", "disclosure")}
 }

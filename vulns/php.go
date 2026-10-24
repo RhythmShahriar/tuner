@@ -120,7 +120,7 @@ func advisoryKey(v Vuln) string {
 // newerPHPFlaws finds advisories disclosed after an end-of-life branch lost
 // support. WPVulnerability stops listing new CVEs for such branches, so they
 // are inferred: an advisory for the oldest supported branch with no lower
-// bound affects every older release too, and will never be fixed on an EOL
+// bound affects every older release too and will never be fixed on an EOL
 // branch. Advisories rec already lists are skipped. It returns nothing when
 // version's branch is still supported.
 func (a *Advisor) newerPHPFlaws(ctx context.Context, rec *Record, version string, now time.Time) (flaws []Vuln, from string, stale bool, err error) {
@@ -276,7 +276,7 @@ func hiddenPHPFinding(base *url.URL, flaws []*recentFlaw, branches []string) (en
 				line = f.CVEs[0] + " " + line
 			}
 			if fixed != "" {
-				line += " — " + fixed
+				line += " (" + fixed + ")"
 			}
 			if f.KEV {
 				line += " [actively exploited]"
