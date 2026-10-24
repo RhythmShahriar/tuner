@@ -1,0 +1,28 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# QA gap 7, bug 4. A vulnerability cache file holding null (a crash, a
+# full disk, another tool). It must count as missing, never crash the
+# scan.
+title: a cache file holding null does not crash the scan
+qa: [7]
+xfail: V1
+tree:
+  - copy: ../_fixtures/wordpress
+    to: site
+  - write: "{{cache}}/tuner/vulns/wpvulnerability/plugin/gallery.json"
+    content: "null"
+steps:
+  - name: offline
+    args: [scan, ./site, --offline, --plain]
+    expect:
+      exit: [0, 1]
+      output:
+        not_contains: [panic, "nil pointer"]
+  - name: online, with the data service down
+    data_state: down
+    args: [scan, ./site, --plain]
+    expect:
+      exit: [0, 1, 3]
+      output:
+        not_contains: [panic, "nil pointer"]

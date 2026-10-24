@@ -1,0 +1,27 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# The harness itself: a plain site with a leaked .env is found, the data
+# services are only asked on loopback and nothing else is touched.
+title: a leaked .env on a plain site fails the gate
+qa: []
+servers:
+  - name: site
+    routes:
+      /: {body: "<html><head><title>Shop</title></head><body>Welcome</body></html>"}
+      /.env: {body: "APP_NAME=shop\nDB_PASSWORD=scenario-not-a-secret\n", type: text/plain}
+steps:
+  - args: [scan, "{{url:site}}", --no-vulns, --no-check-updates, --rate, "0", --plain, --fail-on, high, -o, report.json]
+    expect:
+      exit: 1
+      stdout:
+        contains: [".env file exposed"]
+        not_contains: [scenario-not-a-secret]
+      files:
+        report.json:
+          finding_ids: [leak-dotenv]
+          not_contains: [scenario-not-a-secret]
+          json: {target: "{{url:site}}"}
+      requests:
+        site: {min: 10, paths: [/, /.env], hosts: ["{{host:site}}"]}
+        data: {max: 0}

@@ -64,9 +64,12 @@ jobs:
         with:
           go-version-file: go.mod
       # The race detector needs cgo, which Windows runners don't set up.
+      # ./... includes the scenario suite (testbed/scenarios); its table of
+      # passes and expected failures goes to the job summary.
       - name: go test
         shell: bash
         run: |
+          export TUNER_SCENARIO_SUMMARY="$GITHUB_STEP_SUMMARY"
           if [ "$RUNNER_OS" = Windows ]; then
             go test ./...
           else

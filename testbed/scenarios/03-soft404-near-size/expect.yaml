@@ -1,0 +1,21 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# QA gap 3, bug 6. A catch-all site answers 200 for every path with a
+# page about as long as the real .env. The .env content proves the leak, so
+# the soft-404 filter must not drop it.
+title: a real .env the size of the catch-all page is still found
+qa: [3]
+xfail: E8
+servers:
+  - name: site
+    routes:
+      /.env: {type: text/plain, body: "APP_KEY=base64:scenarioscenario\nDB_PASSWORD=scenario-pass\nAPP_ENV=production\n"}
+      "*": {body: "<html><body>Not found, try the search box. Sorry about that!</body></html>\n"}
+steps:
+  - args: [scan, "{{url:site}}", --no-vulns, --no-check-updates, --rate, "0", --plain, --id, leak-dotenv, -o, report.json]
+    expect:
+      exit: 0
+      files:
+        report.json:
+          finding_ids: [leak-dotenv]

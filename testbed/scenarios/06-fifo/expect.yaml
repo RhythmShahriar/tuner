@@ -1,0 +1,21 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# QA gap 6, bug 5. Named pipes where Tuner reads fixed files. Opening one
+# blocks forever; the scan must skip them and finish.
+title: FIFOs in the site tree never hang a local scan
+qa: [6]
+xfail: L2
+skip_on: [windows]
+tree:
+  - copy: ../_fixtures/wordpress
+    to: site
+  - remove: site/wp-config.php
+  - mkfifo: site/wp-config.php
+  - mkfifo: site/auth.json
+steps:
+  - args: [scan, ./site, --no-vulns, --plain]
+    timeout: 15s
+    expect:
+      exit: [0, 1]
+      max_time: 5s

@@ -1,0 +1,28 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# QA gap 4, bug 2. The .env's first line uses a key name outside the
+# masking list. No value may be printed in any output.
+title: .env values are masked whatever the key is called
+qa: [4]
+xfail: C2
+servers:
+  - name: site
+    routes:
+      /: {body: "<html><body>home</body></html>"}
+      /.env: {type: text/plain, body: "DB_PWD=Scenario-Prod-Pw-1\nSMTP_PW=Scenario-Mail-Pw-2\nMYSQL_PWD=Scenario-Mysql-Pw-3\n"}
+steps:
+  - args: [scan, "{{url:site}}", --no-vulns, --no-check-updates, --rate, "0", --plain, --id, leak-dotenv, -o, report.json]
+    expect:
+      output:
+        contains: [".env file exposed"]
+        not_contains: [Scenario-Prod-Pw-1, Scenario-Mail-Pw-2, Scenario-Mysql-Pw-3]
+      files:
+        report.json:
+          finding_ids: [leak-dotenv]
+          not_contains: [Scenario-Prod-Pw-1, Scenario-Mail-Pw-2, Scenario-Mysql-Pw-3]
+  - name: markdown and SARIF
+    args: [scan, "{{url:site}}", --no-vulns, --no-check-updates, --rate, "0", --plain, --id, leak-dotenv, --md]
+    expect:
+      stdout:
+        not_contains: [Scenario-Prod-Pw-1, Scenario-Mail-Pw-2]

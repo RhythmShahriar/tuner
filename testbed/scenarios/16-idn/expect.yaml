@@ -1,0 +1,22 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# QA gap 16. An internationalised hostname. It goes through a fixture
+# proxy so nothing is looked up in DNS; the proxy checks that the name
+# was sent in its ASCII (punycode) form and that the report keeps it
+# readable.
+title: IDN hostnames are sent as punycode
+qa: [16]
+servers:
+  - name: proxy
+    routes:
+      /: {body: "<html><body>Bücher</body></html>"}
+steps:
+  - args: [scan, "http://bücher.test", --proxy, "{{url:proxy}}", --no-vulns, --no-check-updates, --rate, "0", --plain, --profile, quick, -o, report.json]
+    expect:
+      exit: 0
+      files:
+        report.json:
+          min_size: 10
+      requests:
+        proxy: {min: 1, hosts: [xn--bcher-kva.test]}

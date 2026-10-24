@@ -12,7 +12,7 @@ PIN_FILES ?= $(wildcard .github/workflows/*.yml .github/workflows/*.yaml action.
 #   checks-pack.yml        maintained with the check pack; remove once pinned
 PIN_EXEMPT := release-go\.yml@master$$|^\.github/workflows/checks-pack\.yml:
 
-.PHONY: build test test-all vuln checks-lint lint fmt check hooks pack pins actionlint init-ci-lint release-check
+.PHONY: build test test-all testbed-fast vuln checks-lint lint fmt check hooks pack pins actionlint init-ci-lint release-check
 
 build: ## build bin/rhythm-tuner
 	go build -o bin/rhythm-tuner ./cmd/rhythm-tuner
@@ -23,6 +23,12 @@ test: ## run tests, including every check's fixtures
 test-all: test ## test, then compile every package and test for Windows and macOS
 	GOOS=windows go vet ./...
 	GOOS=darwin go vet ./...
+
+# The hermetic scenario suite (testbed/scenarios). go test ./... runs it
+# too; this target runs only it, with a summary when TUNER_SCENARIO_SUMMARY
+# names a file.
+testbed-fast: ## run the scenario suite: loopback fixtures for QA's failure modes
+	go test -count=1 ./testbed/scenarios/
 
 vuln: ## report known vulnerabilities in the code paths Tuner calls
 	$(GOVULNCHECK) ./...

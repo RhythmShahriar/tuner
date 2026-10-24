@@ -1,0 +1,21 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# QA gap 7, bug 17. A fresh cache entry written by an older release, with
+# a title format that release used. Without a format number it would be
+# trusted for a day online and forever offline; it must be refetched.
+title: an older release's cache entry is refetched after an upgrade
+qa: [7]
+xfail: V1
+tree:
+  - copy: ../_fixtures/wordpress
+    to: site
+  - write: "{{cache}}/tuner/vulns/wpvulnerability/plugin/gallery.json"
+    content: '{"fetched":"2099-01-01T00:00:00Z","data":{"name":"Gallery","vulns":[{"id":"old","title":"OLD-FORMAT TITLE","severity":"low","max":"2.0","max_op":"lt"}]}}'
+steps:
+  - args: [scan, ./site, --plain, -o, report.json]
+    expect:
+      output:
+        not_contains: [OLD-FORMAT TITLE]
+      requests:
+        data: {paths: [/plugin/gallery/]}

@@ -1,0 +1,22 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# QA gap 17. A server that speaks only HTTP/2 over TLS (with -k for its
+# test certificate).
+title: an HTTP/2-only server is scanned over HTTP/2
+qa: [17]
+servers:
+  - name: site
+    tls: h2-only
+    routes:
+      /: {body: "<html><body>home</body></html>"}
+      /.env: {type: text/plain, body: "APP_KEY=scenario\n"}
+steps:
+  - args: [scan, "{{url:site}}", -k, --no-vulns, --no-check-updates, --rate, "0", --plain, -o, report.json]
+    expect:
+      exit: 0
+      files:
+        report.json:
+          finding_ids: [leak-dotenv]
+      requests:
+        site: {min: 10, protos: [HTTP/2.0]}

@@ -1,0 +1,28 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# QA gap 15, bug 10. A site that never answers, without --max-time. The
+# error must blame the per-request --timeout, not --max-time.
+title: request timeouts and --max-time get their own messages
+qa: [15]
+xfail: U3 E11
+servers:
+  - name: site
+    routes:
+      "*": {hang: true}
+steps:
+  - name: --timeout
+    args: [scan, "{{url:site}}", --no-vulns, --no-check-updates, --rate, "0", --plain, --timeout, 1s, --retries, "0"]
+    expect:
+      exit: 3
+      max_time: 10s
+      stderr:
+        contains: ["no response within"]
+        not_contains: ["--max-time"]
+  - name: --max-time
+    args: [scan, "{{url:site}}", --no-vulns, --no-check-updates, --rate, "0", --plain, --timeout, 30s, --max-time, 2s]
+    expect:
+      exit: 3
+      max_time: 10s
+      stderr:
+        contains: ["stopped by --max-time"]

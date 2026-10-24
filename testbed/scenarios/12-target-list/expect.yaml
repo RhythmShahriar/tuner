@@ -1,0 +1,42 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# QA gap 12, bug 11. A target list saved on Windows: a BOM, CRLF line
+# endings, a comment line over 64 KiB and the same site twice in
+# different forms. Every target is read, and the duplicate scanned once.
+title: target lists with a BOM, CRLF, long lines and duplicates
+qa: [12]
+xfail: U3
+servers:
+  - name: a
+    routes:
+      /: {body: "<html><body>site a</body></html>"}
+  - name: b
+    routes:
+      /: {body: "<html><body>site b</body></html>"}
+steps:
+  - name: BOM, CRLF and duplicates
+    tree:
+      - write: targets.txt
+        content: "﻿http://{{host:a}}\r\n# comment\r\nhttp://{{host:a}}/\r\n{{host:a}}\r\nhttp://{{host:b}}\r\n"
+    args: [scan, -l, targets.txt, --no-vulns, --no-check-updates, --rate, "0", --plain, --profile, quick, -o, report.json]
+    expect:
+      exit: 0
+      files:
+        report.json:
+          json: {"#": 2}
+      requests:
+        a: {path_max: {/: 1}}
+        b: {min: 1}
+  - name: a line over 64 KiB
+    tree:
+      - write: targets.txt
+        content: "http://{{host:a}}\n# {{x:70000}}\nhttp://{{host:b}}\n"
+    args: [scan, -l, targets.txt, --no-vulns, --no-check-updates, --rate, "0", --plain, --profile, quick, -o, report.json]
+    expect:
+      exit: 0
+      files:
+        report.json:
+          json: {"#": 2}
+      requests:
+        b: {min: 1}
