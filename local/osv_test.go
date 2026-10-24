@@ -4,10 +4,13 @@
 package local
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -160,5 +163,45 @@ func TestParseEnv(t *testing.T) {
 	env := parseEnv([]byte("# c\nexport APP_DEBUG=true # on\nAPP_NAME=\"My App\"\nEMPTY=\nBAD LINE\n"))
 	if env["APP_DEBUG"] != "true" || env["APP_NAME"] != "My App" || env["EMPTY"] != "" || len(env) != 3 {
 		t.Errorf("%q", env)
+	}
+}
+
+func TestOSVCorruptCache(t *testing.T) {
+	api := newFakeOSV(t)
+	cache := t.TempDir()
+	pkgs := []Package{{"laravel/framework", "8.0.0"}, {"acme/abandoned", "1.0.0"}, {"monolog/monolog", "2.9.1"}}
+	write := func(rel, body string) {
+		t.Helper()
+		p := filepath.Join(cache, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("packagist/laravel~framework@8.0.0.json", `null`)
+	write("packagist/acme~abandoned@1.0.0.json", `{"fetched":"2026-10-22T00:00:00Z","data":["GHSA-cccc"]}`) // format 0
+	write("packagist/monolog~monolog@2.9.1.json", `{}`)
+	write("vulns/GHSA-aaaa.json", `{"format":1,"fetched":"2026-10-22T00:00:00Z","data":null}`)
+	write("vulns/GHSA-bbbb.json", `["not","an","entry"]`)
+
+	// Offline: every bad entry is missing; nothing crashes.
+	o := &OSV{CacheDir: cache, Offline: true}
+	found, failed, _ := o.Query(context.Background(), pkgs)
+	if len(found) != 0 || failed != 3 {
+		t.Errorf("offline: found %v, %d failed", found, failed)
+	}
+
+	// Online: fetched again, then served from the rewritten cache.
+	o = &OSV{HTTP: api.Client(), Base: api.URL, CacheDir: cache}
+	found, failed, err := o.Query(context.Background(), pkgs)
+	if failed != 0 || err != nil || len(found[pkgs[0]]) != 2 || len(found[pkgs[1]]) != 1 {
+		t.Fatalf("online: found %v, %d failed, %v", found, failed, err)
+	}
+	api.down.Store(true)
+	o = &OSV{CacheDir: cache, Offline: true}
+	if found, failed, _ = o.Query(context.Background(), pkgs); failed != 0 || len(found[pkgs[0]]) != 2 {
+		t.Errorf("offline after refetch: found %v, %d failed", found, failed)
 	}
 }

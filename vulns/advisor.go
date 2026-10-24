@@ -22,6 +22,8 @@ import (
 // A plugin or theme with no release for this long counts as abandoned.
 const abandonedAfter = 2 * 365 * 24 * time.Hour
 
+var errNoRecord = errors.New("no vulnerability record")
+
 // Advisor implements engine.Advisor with Client's data.
 type Advisor struct {
 	Client *Client
@@ -109,7 +111,7 @@ func (a *Advisor) Advise(ctx context.Context, base *url.URL, fp fingerprint.Resu
 					l.stale = l.stale || stale
 				}
 			}
-			if c.kind == "php" && l.err == nil {
+			if c.kind == "php" && l.err == nil && l.rec != nil {
 				var stale bool
 				l.newer, l.newerFrom, stale, l.newerErr = a.newerPHPFlaws(ctx, l.rec, c.version, now())
 				l.stale = l.stale || stale
@@ -120,12 +122,15 @@ func (a *Advisor) Advise(ctx context.Context, base *url.URL, fp fingerprint.Resu
 
 	var findings []engine.Finding
 	var outdated, abandoned, unverified []string
-	var failed, stale int
+	var failed, stale, old int
 	var offline bool
 	var firstErr string
 	fail := func(what string, err error) {
 		failed++
-		offline = offline || errors.Is(err, ErrOffline)
+		if errors.Is(err, ErrOldCache) {
+			old++
+		}
+		offline = offline || errors.Is(err, ErrOffline) || errors.Is(err, ErrOldCache)
 		if firstErr == "" {
 			firstErr = fmt.Sprintf("%s: %v", what, err)
 		}
@@ -139,6 +144,9 @@ func (a *Advisor) Advise(ctx context.Context, base *url.URL, fp fingerprint.Resu
 		stale++
 	}
 	for _, l := range lookups {
+		if l.err == nil && l.rec == nil {
+			l.err = errNoRecord // never expected, but a nil record must not crash a scan
+		}
 		if l.err != nil {
 			fail(l.kind+" "+l.slug, l.err)
 			continue
@@ -244,6 +252,8 @@ func (a *Advisor) Advise(ctx context.Context, base *url.URL, fp fingerprint.Resu
 
 	var warnings []string
 	switch {
+	case failed > 0 && offline && old > 0:
+		warnings = append(warnings, fmt.Sprintf("vulnerability data not cached for %d components (%d cached by an older Tuner); run once online to cache it", failed, old))
 	case failed > 0 && offline:
 		warnings = append(warnings, fmt.Sprintf("vulnerability data not cached for %d components; run once online to cache it", failed))
 	case failed > 0:
@@ -258,7 +268,7 @@ func (a *Advisor) Advise(ctx context.Context, base *url.URL, fp fingerprint.Resu
 // vulnFinding builds the one finding that lists every advisory affecting a
 // component. It returns false if none apply.
 func (a *Advisor) vulnFinding(base *url.URL, l *lookup) (engine.Finding, bool) {
-	if l.version == "" {
+	if l.version == "" || l.rec == nil {
 		return engine.Finding{}, false
 	}
 	var affected []Vuln

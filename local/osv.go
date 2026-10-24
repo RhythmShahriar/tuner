@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"sync"
@@ -116,7 +117,7 @@ func (o *OSV) Query(ctx context.Context, pkgs []Package) (map[Package][]OSVVuln,
 			switch v, ok := got[p]; {
 			case ok:
 				ids[p] = v
-				writeCache(o.path("packagist", p.Name+"@"+p.Version), cached[[]string]{time.Now().UTC(), v})
+				writeCache(o.path("packagist", p.Name+"@"+p.Version), newCached(v))
 			case stale[p] != nil:
 				ids[p] = stale[p]
 			default:
@@ -225,7 +226,7 @@ func (o *OSV) batch(ctx context.Context, pkgs []Package) (map[Package][]string, 
 func (o *OSV) vuln(ctx context.Context, id string) (*OSVVuln, error) {
 	path := o.path("vulns", id)
 	var e cached[*OSVVuln]
-	ok := readCache(path, &e) && e.Data != nil
+	ok := readCache(path, &e)
 	if ok && (o.Offline || time.Since(e.Fetched) < o.TTL) {
 		return e.Data, nil
 	}
@@ -239,7 +240,7 @@ func (o *OSV) vuln(ctx context.Context, id string) (*OSVVuln, error) {
 		}
 		return nil, err
 	}
-	writeCache(path, cached[*OSVVuln]{time.Now().UTC(), &v})
+	writeCache(path, newCached(&v))
 	return &v, nil
 }
 
@@ -281,9 +282,26 @@ func (o *OSV) do(ctx context.Context, method, u string, body, v any) error {
 
 // --- cache ---
 
+// osvCacheFormat versions the entries on disk; bump it whenever what an
+// entry holds changes, so older entries are fetched again.
+const osvCacheFormat = 1
+
 type cached[T any] struct {
+	Format  int       `json:"format"`
 	Fetched time.Time `json:"fetched"`
 	Data    T         `json:"data"`
+}
+
+// newCached wraps data fetched now.
+func newCached[T any](data T) cached[T] {
+	return cached[T]{Format: osvCacheFormat, Fetched: time.Now().UTC(), Data: data}
+}
+
+// usable reports whether e can be served: the current format, a fetch
+// time and data (an empty, non-nil ID list included).
+func (e *cached[T]) usable() bool {
+	rv := reflect.ValueOf(e.Data)
+	return e.Format == osvCacheFormat && !e.Fetched.IsZero() && rv.IsValid() && !rv.IsZero()
 }
 
 var unsafeKey = regexp.MustCompile(`[^A-Za-z0-9._@-]`)
@@ -299,12 +317,14 @@ func (o *OSV) path(kind, key string) string {
 	return filepath.Join(o.CacheDir, kind, key+".json")
 }
 
-func readCache(path string, v any) bool {
+// readCache decodes the entry at path, reporting false for a missing,
+// corrupt, old-format or empty entry.
+func readCache[T any](path string, e *cached[T]) bool {
 	if path == "" {
 		return false
 	}
 	b, err := os.ReadFile(path) //nolint:gosec // path is built from the cache dir and a sanitized key
-	return err == nil && json.Unmarshal(b, v) == nil
+	return err == nil && json.Unmarshal(b, e) == nil && e.usable()
 }
 
 // writeCache writes atomically so a crash never leaves a torn file. A

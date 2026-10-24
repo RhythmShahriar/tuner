@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -44,6 +45,15 @@ const (
 
 // ErrOffline means the data isn't cached and --offline forbids fetching it.
 var ErrOffline = errors.New("not cached, and offline mode is on")
+
+// ErrOldCache means the only cached copy was written by an older Tuner,
+// which normalised records differently, and --offline forbids refetching it.
+var ErrOldCache = errors.New("cached by an older Tuner, and offline mode is on")
+
+// cacheFormat versions the records on disk. Bump it whenever normalize
+// changes what a record holds, so entries an older Tuner wrote are fetched
+// again instead of living on under --offline or a restored CI cache.
+const cacheFormat = 1
 
 type Client struct {
 	HTTP       *http.Client
@@ -136,6 +146,10 @@ type Vuln struct {
 	Published   string   `json:"published,omitempty"`
 }
 
+// Valid reports whether r holds a usable record; a cache entry without
+// one is fetched again.
+func (r *Record) Valid() bool { return r != nil && r.Vulns != nil }
+
 // Affects reports whether version v is in the vulnerable range.
 func (v Vuln) Affects(version string) bool {
 	return satisfies(version, v.MinOp, v.Min) && satisfies(version, v.MaxOp, v.Max)
@@ -155,6 +169,10 @@ type Release struct {
 	LastUpdated time.Time `json:"last_updated,omitzero"`
 	NotFound    bool      `json:"not_found,omitempty"` // not on wordpress.org: premium, custom or removed
 }
+
+// Valid reports whether r holds a usable release; a cache entry without
+// one is fetched again.
+func (r *Release) Valid() bool { return r != nil }
 
 // Advisories returns known vulnerabilities for a component. kind is plugin,
 // theme, core, php, nginx or apache; key is the slug, or the version for
@@ -263,8 +281,26 @@ func (c *Client) Refresh(ctx context.Context) (ok, failed int, err error) {
 
 // cacheEntry is what lands on disk.
 type cacheEntry[T any] struct {
+	Format  int       `json:"format"`
 	Fetched time.Time `json:"fetched"`
 	Data    T         `json:"data"`
+}
+
+// usable reports whether e can be served: the current format, a fetch
+// time and data. A truncated, hand-edited or pre-format file is not.
+func (e *cacheEntry[T]) usable() bool {
+	return e.Format == cacheFormat && !e.Fetched.IsZero() && validData(e.Data)
+}
+
+// validData reports whether v is worth serving: a type's own Valid method
+// decides when it has one; otherwise any non-zero value (an empty, non-nil
+// list included) is.
+func validData(v any) bool {
+	if vv, ok := v.(interface{ Valid() bool }); ok {
+		return vv.Valid()
+	}
+	rv := reflect.ValueOf(v)
+	return rv.IsValid() && !rv.IsZero()
 }
 
 // load returns fresh cached data, else fetches it, else falls back to stale
@@ -283,7 +319,8 @@ func load[T any](c *Client, ctx context.Context, kind, key string, fetch func(co
 	m.once.Do(func() {
 		path := c.cachePath(kind, key)
 		var cached cacheEntry[T]
-		have := path != "" && readJSON(path, &cached) == nil
+		found := path != "" && readJSON(path, &cached) == nil
+		have := found && cached.usable()
 		age := time.Since(cached.Fetched)
 		switch {
 		case have && c.Offline:
@@ -291,6 +328,9 @@ func load[T any](c *Client, ctx context.Context, kind, key string, fetch func(co
 			return
 		case have && !c.Force && age < c.TTL:
 			m.v = cached.Data
+			return
+		case c.Offline && found && cached.Format != cacheFormat && validData(cached.Data):
+			m.err = ErrOldCache
 			return
 		case c.Offline:
 			m.err = ErrOffline
@@ -308,7 +348,7 @@ func load[T any](c *Client, ctx context.Context, kind, key string, fetch func(co
 		}
 		m.v = data
 		if path != "" {
-			_ = writeJSON(path, cacheEntry[T]{Fetched: time.Now().UTC(), Data: data})
+			_ = writeJSON(path, cacheEntry[T]{Format: cacheFormat, Fetched: time.Now().UTC(), Data: data})
 		}
 	})
 	if m.err != nil {
