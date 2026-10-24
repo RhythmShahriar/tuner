@@ -78,7 +78,7 @@ func TestSummaryShowsIncomplete(t *testing.T) {
 	}
 }
 
-// A whole scan prints no notes, and that stays the default.
+// A whole scan prints no notes. That stays the default.
 func TestSummaryCompleteHasNoNotes(t *testing.T) {
 	var b bytes.Buffer
 	p := NewPretty(&b, &b, PrettyOptions{Plain: true})

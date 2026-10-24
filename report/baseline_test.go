@@ -163,7 +163,7 @@ func TestBaselineKeepsNewAdvisories(t *testing.T) {
 }
 
 // A low advisory that is new next to an accepted critical one must not
-// keep the finding critical, and the KEV tag goes with the critical one.
+// keep the finding critical. The KEV tag goes with the critical one.
 func TestBaselineNarrowsSeverityDown(t *testing.T) {
 	base, _ := LoadBaseline(writeBaseline(t, &engine.Result{Target: "/tmp/a/wp", Findings: []engine.Finding{gallery(critSQLi)}}))
 	res := &engine.Result{Findings: []engine.Finding{gallery(critSQLi, lowXSS)}}
@@ -175,7 +175,7 @@ func TestBaselineNarrowsSeverityDown(t *testing.T) {
 }
 
 // users P2: a baseline from /tmp/a/wp hides the same findings under
-// /tmp/b/moved, and one from staging hides them on www.
+// /tmp/b/moved. One from staging hides them on www.
 func TestBaselineIsPortable(t *testing.T) {
 	local := func(root string) *engine.Result {
 		res := &engine.Result{Target: root}

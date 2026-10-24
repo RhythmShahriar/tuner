@@ -123,7 +123,7 @@ func longestRun(s string, c byte) int {
 }
 
 // multiLine names the struct fields whose text has line breaks on purpose.
-// They come from check definitions, but advisor fixes quote slugs and
+// They come from check definitions. Advisor fixes quote slugs and
 // versions, so they are cleaned too (keeping \n).
 var multiLine = map[string]bool{"Fix": true, "Impact": true}
 

@@ -186,7 +186,7 @@ func TestWriteJSONLIsEmpty(t *testing.T) {
 	}
 }
 
-// Every finding in a JSON report, and every streamed line, carries its
+// Every finding in a JSON report and every streamed line carries its
 // fingerprint, so the file works as a baseline and diffs line up.
 func TestJSONCarriesFingerprints(t *testing.T) {
 	res := sampleResult("https://a.test")
