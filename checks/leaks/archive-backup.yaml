@@ -37,3 +37,5 @@ fix_server:
   apache: |
     # Add your own domain, e.g. example\.com, to the list of names.
     RedirectMatch 404 (?i)^/(backup|site|www|html|public_html|wordpress|wp-content)\.(zip|tar\.gz|tgz|sql\.gz)$
+references:
+  - https://cwe.mitre.org/data/definitions/530.html

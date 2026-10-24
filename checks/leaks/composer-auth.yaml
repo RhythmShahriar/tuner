@@ -23,3 +23,6 @@ fix_server:
     <Files "auth.json">
       Require all denied
     </Files>
+references:
+  - https://cwe.mitre.org/data/definitions/538.html
+  - https://getcomposer.org/doc/articles/authentication-for-private-packages.md

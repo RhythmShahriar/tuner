@@ -22,3 +22,5 @@ fix_server:
     autoindex off;
   apache: |
     Options -Indexes
+references:
+  - https://cwe.mitre.org/data/definitions/548.html

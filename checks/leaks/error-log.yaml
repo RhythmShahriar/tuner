@@ -25,3 +25,5 @@ fix_server:
     <FilesMatch "(\.log|^error_log)$">
       Require all denied
     </FilesMatch>
+references:
+  - https://cwe.mitre.org/data/definitions/532.html

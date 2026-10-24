@@ -27,3 +27,5 @@ fix_server:
     <FilesMatch "(\.log|^error_log)$">
       Require all denied
     </FilesMatch>
+references:
+  - https://developer.wordpress.org/advanced-administration/debug/debug-wordpress/

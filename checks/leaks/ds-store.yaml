@@ -22,3 +22,5 @@ fix_server:
     <FilesMatch "^\.">
       Require all denied
     </FilesMatch>
+references:
+  - https://cwe.mitre.org/data/definitions/538.html

@@ -24,3 +24,5 @@ fix_server:
     <Files "xmlrpc.php">
       Require all denied
     </Files>
+references:
+  - https://developer.wordpress.org/apis/xml-rpc/

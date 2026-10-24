@@ -26,3 +26,5 @@ fix_server:
     <FilesMatch "(\.log|^error_log)$">
       Require all denied
     </FilesMatch>
+references:
+  - https://laravel.com/docs/deployment#server-configuration

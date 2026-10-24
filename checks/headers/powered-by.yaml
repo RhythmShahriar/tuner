@@ -21,3 +21,6 @@ fix_server:
   apache: |
     Header unset X-Powered-By
     Header always unset X-Powered-By
+references:
+  - https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Headers_Cheat_Sheet.html
+  - https://www.php.net/manual/en/ini.core.php#ini.expose-php

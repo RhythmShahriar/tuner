@@ -16,3 +16,5 @@ fix: |
   Turn display_errors off in production.
   php.ini:      display_errors = Off
   wp-config:    define( 'WP_DEBUG_DISPLAY', false ); @ini_set( 'display_errors', 0 );
+references:
+  - https://www.php.net/manual/en/errorfunc.configuration.php#ini.display-errors

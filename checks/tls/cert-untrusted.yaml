@@ -13,3 +13,5 @@ match:
     - tls: {untrusted: true}
 impact: The certificate is self-signed, issued by an unknown authority, or doesn't match the hostname, so browsers warn visitors.
 fix: Use a certificate from a public CA (Let's Encrypt is free) that covers this hostname, and serve the full chain.
+references:
+  - https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html

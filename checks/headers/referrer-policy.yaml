@@ -20,3 +20,5 @@ fix_server:
     add_header Referrer-Policy strict-origin-when-cross-origin always;
   apache: |
     Header always set Referrer-Policy strict-origin-when-cross-origin
+references:
+  - https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Headers_Cheat_Sheet.html

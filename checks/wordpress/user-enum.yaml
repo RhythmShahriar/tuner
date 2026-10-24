@@ -20,3 +20,5 @@ fix: |
       if ( ! is_user_logged_in() ) { unset( $e['/wp/v2/users'], $e['/wp/v2/users/(?P<id>[\d]+)'] ); }
       return $e;
   } );
+references:
+  - https://developer.wordpress.org/rest-api/reference/users/

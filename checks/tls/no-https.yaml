@@ -15,3 +15,6 @@ impact: Logins and cookies travel unencrypted, and the site doesn't redirect to 
 fix: |
   Get a free certificate (e.g. certbot) and redirect all HTTP traffic.
   nginx:  return 301 https://$host$request_uri;
+references:
+  - https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html
+  - https://certbot.eff.org/

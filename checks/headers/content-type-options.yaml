@@ -21,3 +21,5 @@ fix_server:
     add_header X-Content-Type-Options nosniff always;
   apache: |
     Header always set X-Content-Type-Options nosniff
+references:
+  - https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Headers_Cheat_Sheet.html

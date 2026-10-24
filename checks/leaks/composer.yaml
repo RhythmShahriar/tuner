@@ -21,3 +21,5 @@ fix_server:
     location ~ ^/(composer\.(json|lock)|vendor/) { deny all; }
   apache: |
     RedirectMatch 404 ^/(composer\.(json|lock)|vendor/)
+references:
+  - https://cwe.mitre.org/data/definitions/538.html

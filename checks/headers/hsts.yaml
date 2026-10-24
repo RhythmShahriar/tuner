@@ -22,3 +22,5 @@ fix_server:
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
   apache: |
     Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+references:
+  - https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Strict_Transport_Security_Cheat_Sheet.html

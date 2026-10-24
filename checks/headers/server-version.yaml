@@ -18,3 +18,5 @@ fix: |
 fix_server:
   nginx: |
     server_tokens off;
+references:
+  - https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Headers_Cheat_Sheet.html

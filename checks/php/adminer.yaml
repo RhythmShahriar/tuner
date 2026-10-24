@@ -13,3 +13,5 @@ match:
     - regex: '(?i)<title>[^<]*Adminer'
 impact: A public database login page invites password guessing against the database.
 fix: Remove Adminer when you're done with it, or restrict it to your IP address.
+references:
+  - https://www.adminer.org/en/

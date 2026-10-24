@@ -26,3 +26,5 @@ fix_server:
     <FilesMatch "\.sql$">
       Require all denied
     </FilesMatch>
+references:
+  - https://cwe.mitre.org/data/definitions/530.html

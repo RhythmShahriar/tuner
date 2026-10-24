@@ -21,3 +21,5 @@ fix_server:
     <Files "readme.html">
       Require all denied
     </Files>
+references:
+  - https://developer.wordpress.org/advanced-administration/security/hardening/

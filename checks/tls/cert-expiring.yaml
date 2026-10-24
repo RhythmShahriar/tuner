@@ -13,3 +13,6 @@ match:
     - tls: {expires_within_days: 14}
 impact: The site will show a browser security warning when the certificate expires.
 fix: Renew the certificate, and check that automatic renewal is running.
+references:
+  - https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html
+  - https://certbot.eff.org/
