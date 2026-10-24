@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/RhythmShahriar/tuner/fingerprint"
 	"github.com/RhythmShahriar/tuner/local"
 	"github.com/RhythmShahriar/tuner/vulns"
+	"github.com/RhythmShahriar/tuner/vulns/osv"
 )
 
 const updateUsage = `Usage:
@@ -102,8 +104,8 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 		return exitError
 	}
 	// Composer advisories from OSV.dev, cached under the same folder.
-	osv := osvClient(ua, nil, false)
-	osvOK, osvFailed, err := osv.Refresh(ctx)
+	oc := osvClient(ua, nil, false)
+	osvOK, osvFailed, err := oc.Refresh(ctx)
 	if err != nil {
 		fmt.Fprintln(stderr, "rhythm tuner:", err)
 		return exitError
@@ -118,7 +120,7 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 		}
 		if osvOK+osvFailed > 0 {
 			fmt.Fprintf(stdout, "Refreshed %d Composer advisory records%s\n", osvOK, keptNote(osvFailed))
-			sources = append(sources, local.OSVSource)
+			sources = append(sources, osv.Source)
 		}
 		fmt.Fprintf(stdout, "Data: %s\nCache: %s\n", strings.Join(sources, "; "), c.CacheDir)
 	}
@@ -209,21 +211,18 @@ func checkPrefetchTarget(t string) error {
 // wordpress.org and php.net through c, and OSV.dev for a local
 // composer.lock. Lookups still fresh in the cache are not repeated.
 func prefetchTargets(ctx context.Context, targets []string, php string, c *vulns.Client, packOK bool, ua string, stdout, stderr io.Writer) int {
-	osv := osvClient(ua, nil, false)
+	oc := osvClient(ua, nil, false)
 	sources := []string{vulns.Source}
 	ok := packOK
 	for _, t := range targets {
 		var res *engine.Result
 		var err error
-		if isLocalPath(t) {
-			// Only advisor IDs are kept: the local checks' findings aren't
-			// wanted, but composer.lock is still matched (and cached).
-			res, err = local.Scan(ctx, t, local.Options{
-				PHP: php, OSV: osv, Select: engine.Selector{IDs: []string{"vuln-*"}},
-			}, engine.Hooks{})
-			if len(sources) == 1 {
-				sources = append(sources, local.OSVSource)
-			}
+		localTarget := isLocalPath(t)
+		if localTarget {
+			// No checks are wanted, only the fingerprint: selecting advisor
+			// IDs drops the local checks' findings. composer.lock is
+			// matched below, so the status can be told apart.
+			res, err = local.Scan(ctx, t, local.Options{PHP: php, Select: engine.Selector{IDs: []string{"vuln-*"}}}, engine.Hooks{})
 		} else {
 			res, err = engine.New(nil, engine.Options{
 				UserAgent: ua, Rate: 5, Timeout: 10 * time.Second, Concurrency: 10, Retries: 2,
@@ -237,8 +236,28 @@ func prefetchTargets(ctx context.Context, targets []string, php string, c *vulns
 			ok = false
 			continue
 		}
+		var pkgs []osv.Package
+		if localTarget {
+			// res.Target is the site folder's absolute path.
+			if b, err := os.ReadFile(filepath.Join(res.Target, "composer.lock")); err == nil { //nolint:gosec // the user's own site folder
+				pkgs, _ = osv.ParseLock(b) // a broken lock is already a scan warning
+			}
+		}
 		warnings, status := c.Prefetch(ctx, res.Fingerprint)
-		fmt.Fprintf(stdout, "Prefetched %s: %s\n", t, describeFingerprint(res.Fingerprint))
+		what := describeFingerprint(res.Fingerprint, len(pkgs))
+		if len(pkgs) > 0 {
+			r := oc.Check(ctx, pkgs)
+			if w := oc.Warning(r); w != "" {
+				warnings = append(warnings, w)
+			}
+			if r.Status() != vulns.StatusOK {
+				status = r.Status()
+			}
+			if len(sources) == 1 {
+				sources = append(sources, osv.Source)
+			}
+		}
+		fmt.Fprintf(stdout, "Prefetched %s: %s\n", t, what)
 		for _, w := range append(res.Warnings, warnings...) {
 			fmt.Fprintf(stderr, "rhythm tuner: %s: %s\n", t, w)
 		}
@@ -254,8 +273,8 @@ func prefetchTargets(ctx context.Context, targets []string, php string, c *vulns
 }
 
 // describeFingerprint lists what a prefetch looked up: "WordPress 6.4.1,
-// 2 plugins, 1 theme, PHP 8.3.6, nginx/1.24.0".
-func describeFingerprint(fp fingerprint.Result) string {
+// 2 plugins, 1 theme, PHP 8.3.6, nginx/1.24.0, 12 Composer packages".
+func describeFingerprint(fp fingerprint.Result, composer int) string {
 	var parts []string
 	if fp.Has("wordpress") && fp.WordPress != "" {
 		parts = append(parts, "WordPress "+fp.WordPress)
@@ -281,6 +300,13 @@ func describeFingerprint(fp fingerprint.Result) string {
 	}
 	if s := strings.ToLower(fp.Server); strings.HasPrefix(s, "nginx/") || strings.HasPrefix(s, "apache/") {
 		parts = append(parts, strings.Fields(fp.Server)[0])
+	}
+	switch composer {
+	case 0:
+	case 1:
+		parts = append(parts, "1 Composer package")
+	default:
+		parts = append(parts, fmt.Sprintf("%d Composer packages", composer))
 	}
 	if len(parts) == 0 {
 		return "nothing with known-vulnerability data found"

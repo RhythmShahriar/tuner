@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/RhythmShahriar/tuner/vulns/osv/osvtest"
 )
 
 func TestUpdateRefreshesOSV(t *testing.T) {
@@ -101,8 +103,10 @@ func TestUpdatePrefetchLocal(t *testing.T) {
 	}
 	packRelease(t, packCheck, "0.2.0") // sets XDG_CACHE_HOME
 	hits, down := fakeVulnAPI(t)
-	t.Setenv("TUNER_OSV_API", "http://127.0.0.1:1")
+	osvAPI := osvtest.NewServer(t)
+	t.Setenv("TUNER_OSV_API", osvAPI.URL)
 	root, php := localSite(t)
+	os.WriteFile(filepath.Join(root, "composer.lock"), []byte(`{"packages":[{"name":"guzzlehttp/guzzle","version":"7.4.1"},{"name":"monolog/monolog","version":"2.9.1"}]}`), 0o600)
 	plugin := filepath.Join(root, "wp-content", "plugins", "contact-form-7", "wp-contact-form-7.php")
 	os.MkdirAll(filepath.Dir(plugin), 0o755)
 	os.WriteFile(plugin, []byte("<?php\n/*\nPlugin Name: Contact Form 7\nVersion: 5.3.1\n*/"), 0o600)
@@ -113,28 +117,37 @@ func TestUpdatePrefetchLocal(t *testing.T) {
 	}
 
 	code, out, errs := tuner(t, "update", "--prefetch", root, "--php", php)
-	if code != exitOK || !strings.Contains(out, "Prefetched "+root+": WordPress 6.4.1, 1 plugin, PHP 8.3.6") ||
-		!strings.Contains(out, "Data: WPVulnerability") || strings.Contains(out, "Nothing cached") {
+	if code != exitOK || !strings.Contains(out, "Prefetched "+root+": WordPress 6.4.1, 1 plugin, PHP 8.3.6, 2 Composer packages") ||
+		!strings.Contains(out, "Data: WPVulnerability (wpvulnerability.com, CC0); OSV.dev") || strings.Contains(out, "Nothing cached") {
 		t.Fatalf("prefetch: exit %d, stderr %s\n%s", code, errs, out)
 	}
 	if hits.Load() == 0 {
 		t.Fatal("prefetch made no requests")
 	}
 
-	// Now offline works with the API down, and makes no requests.
+	// Now offline works with the APIs down, and makes no requests.
 	down.Store(true)
-	n := hits.Load()
+	osvAPI.Down.Store(true)
+	n := hits.Load() + osvAPI.Hits.Load()
 	code, out, errs = tuner(t, "scan", root, "--json", "--offline", "--php", php, "--id", "vuln-*")
-	if code != exitOK || !strings.Contains(out, "vuln-plugin-contact-form-7") || strings.Contains(errs, "not cached") ||
-		strings.Contains(out, "not cached") || hits.Load() != n {
+	if code != exitOK || !strings.Contains(out, "vuln-plugin-contact-form-7") || !strings.Contains(out, "vuln-composer-guzzlehttp-guzzle") ||
+		strings.Contains(errs+out, "not cached") || hits.Load()+osvAPI.Hits.Load() != n {
 		t.Errorf("offline scan after prefetch: exit %d, %d requests, stderr %s\n%s", code, hits.Load()-n, errs, out)
 	}
 
 	// A fresh cache isn't fetched again.
 	down.Store(false)
-	n = hits.Load()
-	if code, _, _ := tuner(t, "update", "--prefetch", root, "--php", php); code != exitOK || hits.Load() != n {
-		t.Errorf("second prefetch: exit %d, %d requests", code, hits.Load()-n)
+	osvAPI.Down.Store(false)
+	n = hits.Load() + osvAPI.Hits.Load()
+	if code, _, _ := tuner(t, "update", "--prefetch", root, "--php", php); code != exitOK || hits.Load()+osvAPI.Hits.Load() != n {
+		t.Errorf("second prefetch: exit %d, %d requests", code, hits.Load()+osvAPI.Hits.Load()-n)
+	}
+
+	// OSV.dev down with nothing cached: the prefetch fails and says why.
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	osvAPI.Down.Store(true)
+	if code, _, errs := tuner(t, "update", "--prefetch", root, "--php", php); code != exitError || !strings.Contains(errs, "2 Composer packages") {
+		t.Errorf("prefetch with OSV down: exit %d, stderr %s", code, errs)
 	}
 }
 
