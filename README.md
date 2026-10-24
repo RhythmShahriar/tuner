@@ -170,7 +170,7 @@ ignore:
     until: 2026-12-31                    # after this day the finding shows again
 ```
 
-A scan reads `.tuner.yml` from the current folder, so a cloned repository or a pull request can bring its own. Headers can only read variables whose names start with `TUNER_`, and every scan prints which file it used and which targets that file chose, also under `-q` and `--json`. Run `scan --no-config` in folders you don't trust.
+A scan reads `.tuner.yml` from the current folder, so a cloned repository or a pull request can bring its own. Headers can only read variables whose names start with `TUNER_`. Every scan prints which file it used and which targets that file chose, also under `-q` and `--json`. Run `scan --no-config` in folders you don't trust.
 
 More in the [CI guide](https://github.com/RhythmShahriar/rhythm/wiki/Tuner-CI).
 
