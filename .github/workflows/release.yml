@@ -20,7 +20,8 @@ jobs:
     uses: RhythmShahriar/.github/.github/workflows/release-go.yml@master
     permissions:
       contents: write
-      id-token: write
+      id-token: write # keyless cosign over checksums.txt and the images
+      packages: write # push and sign ghcr.io/rhythmshahriar/tuner (.goreleaser.yaml dockers)
 
   # Moves the major tag (v0 for v0.x) that `uses: RhythmShahriar/tuner@v0`
   # follows. Neither a prerelease nor a patch to an older line (once a
