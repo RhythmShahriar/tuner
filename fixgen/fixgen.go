@@ -171,7 +171,7 @@ func (b *Bundle) Write(w io.Writer, version string) error {
 			}
 			buf.WriteString(comment("  " + u))
 		}
-		buf.WriteString(blk.Snippet)
+		buf.WriteString(inertSnippet(blk.Snippet))
 		buf.WriteString("\n")
 	}
 	if len(b.Without) > 0 {
@@ -187,12 +187,14 @@ func (b *Bundle) Write(w io.Writer, version string) error {
 // --dry-run: one line per block with its checks and finding count.
 func (b *Bundle) WritePlan(w io.Writer) error {
 	var buf bytes.Buffer
+	// IDs come from the report, so they go through inert like the
+	// bundle's comments do.
 	fmt.Fprintf(&buf, "%s bundle: %s for %s\n", b.Server, plural(len(b.Blocks), "snippet"), plural(b.Findings, "finding"))
 	for _, blk := range b.Blocks {
-		fmt.Fprintf(&buf, "  %s (%s)\n", strings.Join(blk.Checks, ", "), plural(len(blk.URLs), "URL"))
+		fmt.Fprintf(&buf, "  %s (%s)\n", inert(strings.Join(blk.Checks, ", ")), plural(len(blk.URLs), "URL"))
 	}
 	if len(b.Without) > 0 {
-		fmt.Fprintf(&buf, "no %s snippet: %s\n", b.Server, strings.Join(b.Without, ", "))
+		fmt.Fprintf(&buf, "no %s snippet: %s\n", b.Server, inert(strings.Join(b.Without, ", ")))
 	}
 	_, err := w.Write(buf.Bytes())
 	return err
@@ -220,13 +222,25 @@ func (b *Bundle) header(version string) []string {
 // Report text is made inert first: a URL with a line break must not turn
 // the rest of its line into config.
 func comment(s string) string {
-	s = strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f || r >= 0x80 && r < 0xa0 {
+	return strings.TrimRight("# "+inert(s), " ") + "\n"
+}
+
+// inert drops control characters from report text, so a crafted report
+// can't send escape sequences to a terminal or break a line.
+func inert(s string) string { return drop(s, "") }
+
+// inertSnippet is inert for config text, which keeps its line breaks and
+// tabs.
+func inertSnippet(s string) string { return drop(s, "\n\t") }
+
+// drop removes C0 and C1 control characters other than those in keep.
+func drop(s, keep string) string {
+	return strings.Map(func(r rune) rune {
+		if (r < 0x20 || r == 0x7f || r >= 0x80 && r < 0xa0) && !strings.ContainsRune(keep, r) {
 			return -1
 		}
 		return r
 	}, s)
-	return strings.TrimRight("# "+s, " ") + "\n"
 }
 
 func plural(n int, noun string) string {

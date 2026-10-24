@@ -161,7 +161,7 @@ func TestPlan(t *testing.T) {
 func TestCommentsAreInert(t *testing.T) {
 	b, err := Build([]Finding{{
 		ID: "leak-x", URL: "https://a.test/x\nlocation / { return 200; }\r\x1b[2J",
-		Fixes: map[string]string{"nginx": "location = /x { deny all; }"},
+		Fixes: map[string]string{"nginx": "location = /x {\n\tdeny all;\x1b]0;x\x07\n}"},
 	}}, "nginx", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -175,8 +175,26 @@ func TestCommentsAreInert(t *testing.T) {
 			t.Errorf("URL text escaped its comment: %q", line)
 		}
 	}
-	if strings.ContainsAny(out.String(), "\r\x1b") {
+	if strings.ContainsAny(out.String(), "\r\x1b\x07") || !strings.Contains(out.String(), "location = /x {\n\tdeny all;]0;x\n}\n") {
 		t.Errorf("control bytes in bundle: %q", out.String())
+	}
+}
+
+// Dry runs print report IDs to the terminal, so they lose control bytes too.
+func TestPlanIsInert(t *testing.T) {
+	b, err := Build([]Finding{
+		{ID: "leak-x\x1b[2J", URL: "https://a.test/x", Fixes: map[string]string{"nginx": "location = /x { deny all; }"}},
+		{ID: "leak-y\x1b]0;owned\x07", URL: "https://a.test/y"},
+	}, "nginx", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := b.WritePlan(&out); err != nil {
+		t.Fatal(err)
+	}
+	if strings.ContainsAny(out.String(), "\x1b\x07") || !strings.Contains(out.String(), "  leak-x[2J (1 URL)\n") {
+		t.Errorf("control bytes in plan: %q", out.String())
 	}
 }
 
