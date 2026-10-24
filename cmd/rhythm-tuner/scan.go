@@ -564,7 +564,7 @@ func (p *scanPlan) applyConfig(set map[string]bool, haveTargets bool) error {
 // profiles are accepted in any case.
 func (p *scanPlan) checkValues() error {
 	o := &p.o
-	// deep is still accepted, but no check uses it yet, so help and errors
+	// deep is still accepted. No check uses it yet, so help and errors
 	// leave it out.
 	profile := engine.ProfileDeep
 	if !strings.EqualFold(strings.TrimSpace(o.profile), string(engine.ProfileDeep)) {

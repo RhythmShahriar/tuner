@@ -19,7 +19,7 @@ import (
 // Status says how much of a target one run saw. It mirrors report.Status
 // from the report writer work: until engine.Result and report.Report carry
 // these fields, Run fills them in from the run context and the
-// vulnerability advisor, and the CLI adds them to JSON.
+// vulnerability advisor. The CLI adds them to JSON.
 type Status struct {
 	Complete  bool   `json:"complete"`
 	StoppedBy string `json:"stopped_by,omitempty"` // interrupted or max-time

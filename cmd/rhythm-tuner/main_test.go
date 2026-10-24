@@ -1387,8 +1387,8 @@ func TestOwnNetworkRate(t *testing.T) {
 	}
 }
 
-// The header says when the automatic rate applies, and a scan of a local
-// test server without --rate is fast.
+// The header says when the automatic rate applies. A scan of a local
+// test server without --rate gets it.
 func TestOwnNetworkRateHeader(t *testing.T) {
 	srv := leakySite(t)
 	t.Chdir(t.TempDir())

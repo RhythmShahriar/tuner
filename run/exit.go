@@ -20,8 +20,8 @@ const (
 
 // Exit picks the exit code for a finished run and says why, one message
 // per reason, when it is not ExitOK or ExitFindings. A canceled run is
-// ExitCanceled. With FailOn, a finding at or above it is ExitFindings,
-// and a run with none is still ExitError when a target's vulnerability
+// ExitCanceled. With FailOn, a finding at or above it is ExitFindings.
+// A run with none is still ExitError when a target's vulnerability
 // data was missing or its scan was cut short, unless the plan allows
 // that. Otherwise a target that failed makes it ExitError.
 func (o *Outcome) Exit(p *Plan) (code int, why []string) {
