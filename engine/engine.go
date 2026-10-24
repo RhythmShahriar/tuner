@@ -7,6 +7,7 @@ package engine
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
@@ -273,10 +274,6 @@ func (s *Scanner) Scan(ctx context.Context, target string, h Hooks) (*Result, er
 		})
 	}
 
-	type job struct {
-		c    *Check
-		path string
-	}
 	var jobs []job
 	for _, c := range s.checks {
 		if !slices.ContainsFunc(c.Requires, func(t string) bool { return !res.Fingerprint.Has(t) }) {
@@ -286,6 +283,7 @@ func (s *Scanner) Scan(ctx context.Context, target string, h Hooks) (*Result, er
 			}
 		}
 	}
+	ss.plan(jobs)
 
 	var done atomic.Int64
 	var wg sync.WaitGroup
@@ -309,6 +307,7 @@ func (s *Scanner) Scan(ctx context.Context, target string, h Hooks) (*Result, er
 		wg.Go(func() {
 			for j := range ch {
 				f, ok := ss.run(ctx, j.c, j.path)
+				ss.finished(j)
 				n := int(done.Add(1))
 				ss.emit(func() {
 					if ok {
@@ -367,6 +366,69 @@ func SortFindings(fs []Finding) {
 		}
 		return strings.Compare(a.ID+a.Path, b.ID+b.Path)
 	})
+}
+
+// job is one check request: a check and one of its paths.
+type job struct {
+	c    *Check
+	path string
+}
+
+// keys returns the cache keys j reads: its own response and, when the
+// check compares against the soft-404 page, the probe for its path.
+func (ss *session) keys(j job) []string {
+	k := []string{j.c.Request.Method + " " + j.path}
+	if j.c.Match.NeedsBaseline() {
+		k = append(k, "GET "+probePath(j.path, ss.token))
+	}
+	return k
+}
+
+// plan counts how many jobs read each cached response, so finished can
+// drop a body once nothing needs it. A scan against a site that answers
+// every path with a 1 MiB page would otherwise keep all of them until it
+// ends. The home page and the soft-404 probe stay pinned. Bodies already
+// fetched that no job reads (version lookups, the PHP probe) go now.
+func (ss *session) plan(jobs []job) {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	ss.uses = map[string]int{"GET /": 1, "GET " + probePath("/x", ss.token): 1}
+	for _, j := range jobs {
+		for _, k := range ss.keys(j) {
+			ss.uses[k]++
+		}
+	}
+	for k, f := range ss.cache {
+		if ss.uses[k] == 0 {
+			ss.drop(f)
+		}
+	}
+}
+
+// finished releases what job j read, dropping bodies it was the last
+// reader of. Anything that needs a body, such as Options.ResponseAdvisors,
+// must run inside the job before this.
+func (ss *session) finished(j job) {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	for _, k := range ss.keys(j) {
+		if ss.uses[k]--; ss.uses[k] == 0 {
+			if f := ss.cache[k]; f != nil {
+				ss.drop(f)
+			}
+		}
+	}
+}
+
+// drop replaces a cached response with a copy without its body. Status,
+// headers, Size and SHA256 stay. Callers hold ss.mu.
+func (ss *session) drop(f *fetch) {
+	f.dropped = true
+	if f.resp != nil && f.resp.Body != nil {
+		r := *f.resp
+		r.Body = nil
+		f.resp = &r
+	}
 }
 
 func (ss *session) run(ctx context.Context, c *Check, p string) (Finding, bool) {
@@ -435,16 +497,18 @@ type session struct {
 	internalOK bool
 	mu         sync.Mutex
 	cache      map[string]*fetch
-	waf        wafTally // check responses that were block pages
+	uses       map[string]int // jobs still to read each cache key, see plan
+	waf        wafTally       // check responses that were block pages
 	requests   atomic.Int64
 	errors     atomic.Int64
 	throttled  atomic.Int64
 }
 
 type fetch struct {
-	once sync.Once
-	resp *matchers.Response
-	err  error
+	once    sync.Once
+	resp    *matchers.Response
+	err     error
+	dropped bool // the body is gone; a later get fetches it again
 }
 
 // emit runs a hook callback, never two at once.
@@ -621,12 +685,18 @@ func (ss *session) get(ctx context.Context, method, p string) (*matchers.Respons
 	key := method + " " + p
 	ss.mu.Lock()
 	f := ss.cache[key]
-	if f == nil {
+	// A dropped body only gets asked for again by a reader plan did not
+	// count; fetching again beats handing it an empty body.
+	if f == nil || f.dropped {
 		f = &fetch{}
 		ss.cache[key] = f
 	}
 	ss.mu.Unlock()
 	f.once.Do(func() { f.resp, f.err = ss.do(ctx, ss.client, method, ss.base.String()+p) })
+	// drop may swap f.resp after the last planned reader, so read it under
+	// the same lock.
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
 	return f.resp, f.err
 }
 
@@ -690,7 +760,10 @@ func (ss *session) attempt(ctx context.Context, c *http.Client, method, u string
 	if err != nil {
 		return nil, backoff(n), err
 	}
-	return &matchers.Response{URL: resp.Request.URL, Status: resp.StatusCode, Header: resp.Header, Body: body, TLSState: resp.TLS}, retryIn, nil
+	return &matchers.Response{
+		URL: resp.Request.URL, Status: resp.StatusCode, Header: resp.Header, Body: body, TLSState: resp.TLS,
+		Size: len(body), SHA256: sha256.Sum256(body),
+	}, retryIn, nil
 }
 
 // acquire waits for a free request slot, see session.inflight.

@@ -31,6 +31,12 @@ type Response struct {
 
 	// TLSState is the raw handshake, kept for the engine's TLS probe.
 	TLSState *tls.ConnectionState
+
+	// Size and SHA256 describe Body as it was read, up to the engine's
+	// 1 MiB cap. They stay set when the engine drops Body from its cache
+	// to bound memory.
+	Size   int
+	SHA256 [32]byte
 }
 
 // TLSInfo describes the target's certificate and protocol support.
