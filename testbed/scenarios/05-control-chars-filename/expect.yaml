@@ -6,6 +6,7 @@
 title: escape sequences in file names never reach the output
 qa: [5]
 xfail: E3 R1
+xfail_covers: ['matches \[\\x00']
 skip_on: [windows]
 tree:
   - write: "site/.env.\e]0;PWNED\a\e[2J\e[31mFAKE"

@@ -39,6 +39,12 @@ type scenario struct {
 	// expected failure; one that passes is reported as XPASS so the xfail
 	// can be cleared.
 	Xfail string `yaml:"xfail"`
+	// XfailCovers narrows the xfail to the problems it is about: Go
+	// regular expressions matched against each problem line. A problem no
+	// pattern matches fails the scenario even while the xfail stands, so
+	// a regression in a part that already works is not hidden. Empty
+	// means the xfail covers every problem.
+	XfailCovers []string `yaml:"xfail_covers"`
 	// SkipOn lists GOOS values the scenario can't run on, e.g. FIFOs on
 	// windows.
 	SkipOn  []string     `yaml:"skip_on"`
@@ -47,6 +53,8 @@ type scenario struct {
 	Data  serverSpec `yaml:"data"`
 	Tree  []treeOp   `yaml:"tree"`
 	Steps []step     `yaml:"steps"`
+
+	covers []*regexp.Regexp // XfailCovers, compiled by load
 }
 
 // step is one run of rhythm-tuner.
@@ -253,7 +261,32 @@ func load(path string) (*scenario, error) {
 			return nil, fmt.Errorf("%s: every server needs a name other than data", path)
 		}
 	}
+	for _, c := range sc.XfailCovers {
+		re, err := regexp.Compile(c)
+		if err != nil {
+			return nil, fmt.Errorf("%s: xfail_covers: %w", path, err)
+		}
+		sc.covers = append(sc.covers, re)
+	}
+	if len(sc.covers) > 0 && sc.Xfail == "" {
+		return nil, fmt.Errorf("%s: xfail_covers needs an xfail", path)
+	}
 	return &sc, nil
+}
+
+// notCovered returns the problems no xfail_covers pattern matches. With
+// no patterns the xfail covers everything.
+func notCovered(problems []string, covers []*regexp.Regexp) []string {
+	if len(covers) == 0 {
+		return nil
+	}
+	var out []string
+	for _, p := range problems {
+		if !slices.ContainsFunc(covers, func(re *regexp.Regexp) bool { return re.MatchString(p) }) {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func runScenario(t *testing.T, name string, sc *scenario) {
@@ -329,12 +362,19 @@ func runScenario(t *testing.T, name string, sc *scenario) {
 		}
 	}
 
+	var uncovered []string
+	if sc.Xfail != "" {
+		uncovered = notCovered(problems, sc.covers)
+	}
 	switch {
 	case len(problems) == 0 && sc.Xfail != "":
 		record(result{name: name, status: "XPASS", xfail: sc.Xfail, detail: "passes now; remove xfail: " + sc.Xfail})
 		t.Logf("XPASS: passes now; remove xfail: %s from %s/expect.yaml", sc.Xfail, name)
 	case len(problems) == 0:
 		record(result{name: name, status: "pass"})
+	case sc.Xfail != "" && len(uncovered) > 0:
+		record(result{name: name, status: "FAIL", xfail: sc.Xfail, detail: uncovered[0]})
+		t.Errorf("%s: fails outside xfail %s:\n  %s", sc.Title, sc.Xfail, strings.Join(uncovered, "\n  "))
 	case sc.Xfail != "":
 		record(result{name: name, status: "xfail", xfail: sc.Xfail, detail: problems[0]})
 		t.Skipf("xfail %s (expected until it merges):\n  %s", sc.Xfail, strings.Join(problems, "\n  "))

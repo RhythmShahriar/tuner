@@ -5,6 +5,9 @@ package scenarios
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"regexp"
 	"testing"
 )
 
@@ -40,6 +43,38 @@ func TestExits(t *testing.T) {
 	}
 	if got := exits("three"); len(got) != 1 || got[0] != -999 {
 		t.Errorf("a typo must never match, got %v", got)
+	}
+}
+
+func TestNotCovered(t *testing.T) {
+	problems := []string{"step 1: exit 0, want 3", "step 1: stdout lacks \"x\""}
+	if got := notCovered(problems, nil); len(got) != 0 {
+		t.Errorf("no patterns must cover everything, got %v", got)
+	}
+	covers := []*regexp.Regexp{regexp.MustCompile(`exit \d+, want`)}
+	if got := notCovered(problems, covers); len(got) != 1 || got[0] != problems[1] {
+		t.Errorf("want only the stdout problem uncovered, got %v", got)
+	}
+}
+
+func TestLoadXfailCovers(t *testing.T) {
+	dir := t.TempDir()
+	write := func(body string) string {
+		p := filepath.Join(dir, "expect.yaml")
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	sc, err := load(write("title: t\nxfail: E1\nxfail_covers: ['exit']\nsteps: [{args: [version]}]\n"))
+	if err != nil || len(sc.covers) != 1 {
+		t.Fatalf("load = %v, %v", sc, err)
+	}
+	if _, err := load(write("title: t\nxfail_covers: ['exit']\nsteps: [{args: [version]}]\n")); err == nil {
+		t.Error("xfail_covers without an xfail must be refused")
+	}
+	if _, err := load(write("title: t\nxfail: E1\nxfail_covers: ['(']\nsteps: [{args: [version]}]\n")); err == nil {
+		t.Error("a bad pattern must be refused")
 	}
 }
 

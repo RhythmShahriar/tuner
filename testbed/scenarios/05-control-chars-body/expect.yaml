@@ -7,6 +7,7 @@
 title: escape sequences in a response body never reach the output
 qa: [5]
 xfail: E3 R1
+xfail_covers: ['matches \[\\x00']
 servers:
   - name: site
     routes:

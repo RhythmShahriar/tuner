@@ -35,6 +35,7 @@ covers QA gap 14). `-short` skips it.
 title: a cross-host redirect does not move the scan
 qa: [1]          # QA gap numbers
 xfail: E1        # roadmap items whose fix this waits for (optional)
+xfail_covers: ['exit 0, want 3']   # problems the xfail is about (optional)
 skip_on: [windows]
 servers:
   - name: site
@@ -103,6 +104,12 @@ says `xfail`. When it starts passing it is reported as `XPASS`: remove the
 `xfail` line in the same change that merges the fix. Set
 `TUNER_SCENARIO_SUMMARY` to a file (CI uses `$GITHUB_STEP_SUMMARY`) for a
 table of every scenario and why each xfail still fails.
+
+`xfail_covers` narrows an xfail to the problems it is about: a list of Go
+regular expressions matched against each problem line the harness
+prints. Any other problem fails the scenario even while the xfail stands,
+so a part that already works can't regress unseen. Without it the xfail
+covers every problem.
 
 | Scenario | QA gap | Waits for |
 |---|---|---|
