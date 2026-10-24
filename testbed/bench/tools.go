@@ -116,7 +116,7 @@ func parseTunerJSON(out string) (*tunerDoc, error) {
 		} `json:"findings"`
 	}
 	if err := json.Unmarshal([]byte(out[start:]), &raw); err != nil {
-		return nil, fmt.Errorf("Tuner JSON: %w", err)
+		return nil, fmt.Errorf("parsing Tuner JSON: %w", err)
 	}
 	doc := &tunerDoc{blocked: raw.BlockedBy != "", requests: raw.Requests}
 	for _, c := range raw.Fingerprint.Components {
@@ -162,7 +162,7 @@ func parseWPScanJSON(out string) ([]string, error) {
 		Plugins map[string]json.RawMessage `json:"plugins"`
 	}
 	if err := json.Unmarshal([]byte(out[start:]), &raw); err != nil {
-		return nil, fmt.Errorf("WPScan JSON: %w", err)
+		return nil, fmt.Errorf("parsing WPScan JSON: %w", err)
 	}
 	var out2 []string
 	for slug := range raw.Plugins {
@@ -199,7 +199,7 @@ func parseWpprobeJSON(out string) ([]string, error) {
 		Plugins map[string]json.RawMessage `json:"plugins"`
 	}
 	if err := json.Unmarshal([]byte(out[start:]), &raw); err != nil {
-		return nil, fmt.Errorf("wpprobe JSON: %w", err)
+		return nil, fmt.Errorf("parsing wpprobe JSON: %w", err)
 	}
 	var out2 []string
 	for _, t := range raw {
