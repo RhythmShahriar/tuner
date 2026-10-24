@@ -8,6 +8,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -28,13 +29,31 @@ const (
 // checkSet is the checks a run uses and where they came from.
 type checkSet struct {
 	source   string
-	pack     *checkpack.Manifest // when source is setPack
+	pack     *checkpack.Pack // when source is setPack
 	checks   []*engine.Check
 	warnings []string // pack trouble; the run goes on with what's here
 	// alerts are the warnings that matter even with -q, such as an
 	// unreachable pack host, which would otherwise look like an
 	// unexplained delay. Each is also in warnings.
 	alerts []string
+}
+
+// data returns a fingerprint data file from the pack in use, or false to
+// use the built-in copy. Plugin discovery reads its tables through it.
+func (s *checkSet) data(name string) ([]byte, bool) {
+	if s.source != setPack {
+		return nil, false
+	}
+	return s.pack.Data(name)
+}
+
+// localRules returns the pack's local scan rules, or nil for the
+// built-in rules; it is what local scans take as Options.Rules.
+func (s *checkSet) localRules() fs.FS {
+	if s.source != setPack {
+		return nil
+	}
+	return s.pack.LocalRules()
 }
 
 // How long a scan waits for the check pack release. There is always a set
@@ -100,7 +119,7 @@ func loadCheckSet(dir string, updates, offline bool, ua string, proxy *url.URL) 
 		return set, nil
 	}
 	if p.Supersedes(checkpack.CurrentBuild()) {
-		set.source, set.pack, set.checks = setPack, &p.Manifest, p.Loaded
+		set.source, set.pack, set.checks = setPack, p, p.Loaded
 	}
 	switch {
 	case errors.Is(p.Warning, checkpack.ErrUnreachable) && set.source == setPack:

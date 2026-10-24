@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"encoding/json"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -47,11 +48,17 @@ func packRelease(t *testing.T, check, minTuner string) {
 // with key unless key is nil and trusts testPackKey.
 func servePack(t *testing.T, config, check string, key ed25519.PrivateKey) {
 	t.Helper()
+	servePackWith(t, config, check, checkpack.Extras{}, key)
+}
+
+// servePackWith is servePack with fingerprint data and local rules.
+func servePackWith(t *testing.T, config, check string, x checkpack.Extras, key ed25519.PrivateKey) {
+	t.Helper()
 	src := fstest.MapFS{
 		checkpack.ConfigName: {Data: []byte(config)},
 		"leaks/pack.yaml":    {Data: []byte(check)},
 	}
-	b, err := checkpack.Build(src, "feedfacecafe", time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC))
+	b, err := checkpack.BuildWith(src, x, "feedfacecafe", time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,5 +305,41 @@ func TestUnreachablePackHostWithoutCache(t *testing.T) {
 	n := hits.Load()
 	if set, _ := loadCheckSet("", true, false, "test", nil); len(set.warnings) != 0 || hits.Load() != n {
 		t.Errorf("second run: %+v, %d requests", set.warnings, hits.Load()-n)
+	}
+}
+
+// A pack's fingerprint data and local rules replace the built-in copies
+// when the pack is in use, and only then.
+func TestPackDataAndLocalRules(t *testing.T) {
+	retired, _ := json.Marshal(builtInIDs())
+	servePackWith(t, `{"min_tuner": "0.2.0", "retired": `+string(retired)+`}`, packCheck, checkpack.Extras{
+		Data:  fstest.MapFS{"rest-namespaces.json": {Data: []byte(`{"acme-forms/v1": "acme-forms"}`)}},
+		Local: fstest.MapFS{"acme-backdoor.yaml": {Data: []byte("id: local-acme-backdoor\n")}},
+	}, testPackKey)
+
+	set, err := loadCheckSet("", true, false, "test", nil)
+	if err != nil || set.source != setPack {
+		t.Fatalf("source %v, err %v, warnings %v", set.source, err, set.warnings)
+	}
+	if data, ok := set.data("rest-namespaces.json"); !ok || !strings.Contains(string(data), "acme-forms") {
+		t.Errorf("data = %q, %v", data, ok)
+	}
+	if _, ok := set.data("top-plugins.json"); ok {
+		t.Error("a file the pack lacks should fall back to the built-in copy")
+	}
+	rules := set.localRules()
+	if rules == nil {
+		t.Fatal("no local rules from the pack")
+	}
+	if data, err := fs.ReadFile(rules, "acme-backdoor.yaml"); err != nil || !strings.Contains(string(data), "local-acme-backdoor") {
+		t.Errorf("rule = %q, %v", data, err)
+	}
+
+	builtIn, err := loadCheckSet("", false, false, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := builtIn.data("rest-namespaces.json"); ok || builtIn.localRules() != nil {
+		t.Error("built-in check set should use the binary's data and rules")
 	}
 }
