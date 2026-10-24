@@ -148,6 +148,13 @@ func Parse(data []byte, name string, env func(string) (string, bool)) (*Config, 
 	if err := dec.Decode(&f); err != nil && !errors.Is(err, io.EOF) {
 		return nil, yamlError(name, err)
 	}
+	// Later documents would be skipped unchecked, typos and all.
+	var more yaml.Node
+	if err := dec.Decode(&more); err == nil && !empty(&more) {
+		return nil, fmt.Errorf("%s: holds more than one YAML document; keep the settings in one", name)
+	} else if err != nil && !errors.Is(err, io.EOF) {
+		return nil, yamlError(name, err)
+	}
 	c := &Config{
 		Path: name, Targets: f.Targets, Rate: f.Rate, Concurrency: f.Concurrency,
 		Tags: f.Tags, ExcludeTags: f.ExcludeTags, IDs: f.IDs, ExcludeIDs: f.ExcludeIDs,
@@ -347,6 +354,19 @@ func token(s string) bool {
 var unknownKey = regexp.MustCompile(`line (\d+): field (\S+) not found in type`)
 
 // yamlError rewords yaml.v3's errors to name the file and the key.
+// quotedValue is the value yaml.v3 quotes in a type error, such as the
+// " `Bearer ...`" in "cannot unmarshal !!str `Bearer ...` into ...".
+var quotedValue = regexp.MustCompile(" `[^`]*`")
+
+// empty reports whether n is a YAML document with nothing in it, as a
+// trailing "---" gives.
+func empty(n *yaml.Node) bool {
+	if n.Kind == yaml.DocumentNode && len(n.Content) == 1 {
+		n = n.Content[0]
+	}
+	return n.Kind == 0 || (n.Kind == yaml.ScalarNode && n.Tag == "!!null")
+}
+
 func yamlError(name string, err error) error {
 	var te *yaml.TypeError
 	if errors.As(err, &te) {
@@ -355,7 +375,9 @@ func yamlError(name string, err error) error {
 			if m := unknownKey.FindStringSubmatch(e); m != nil {
 				lines = append(lines, fmt.Sprintf("%s line %s: unknown key %q", name, m[1], m[2]))
 			} else {
-				lines = append(lines, name+" "+e)
+				// yaml.v3 quotes the start of the value, which may be a
+				// token given where the headers map belongs.
+				lines = append(lines, name+" "+quotedValue.ReplaceAllString(e, ""))
 			}
 		}
 		return errors.New(strings.Join(lines, "\n"))

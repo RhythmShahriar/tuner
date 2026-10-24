@@ -77,11 +77,29 @@ func TestParseErrors(t *testing.T) {
 		{"ignore:\n  - reason: why\n", "ignore 1: needs an id or a path"},
 		{"ignore:\n  - id: x\n    reason: y\n    until: 31/12/2026\n", `ignore 1 (x): until "31/12/2026": want a date such as 2026-12-31`},
 		{"profile: [", ".tuner.yml: yaml:"},
+		{"fail_on: high\n---\nrate: -5\nbogus: 1\n", ".tuner.yml: holds more than one YAML document"},
+		{"fail_on: high\n---\nprofile: [\n", ".tuner.yml: yaml:"},
 	} {
 		_, err := Parse([]byte(c.data), ".tuner.yml", env(nil))
 		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%q: got %v, want %q", c.data, err, c.want)
 		}
+	}
+}
+
+// A trailing "---" is an empty document, not a second one.
+func TestParseTrailingSeparator(t *testing.T) {
+	if _, err := Parse([]byte("fail_on: high\n---\n"), ".tuner.yml", env(nil)); err != nil {
+		t.Error(err)
+	}
+}
+
+// A type error never shows any of the value, which may be a token.
+func TestTypeErrorHidesValue(t *testing.T) {
+	_, err := Parse([]byte(`headers: "Bearer abcdefghijkl"`), ".tuner.yml", env(nil))
+	if err == nil || strings.Contains(err.Error(), "Bearer") || strings.Contains(err.Error(), "abc") ||
+		!strings.Contains(err.Error(), ".tuner.yml line 1: cannot unmarshal !!str into map[string]string") {
+		t.Errorf("got %v", err)
 	}
 }
 
