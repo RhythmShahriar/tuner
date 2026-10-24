@@ -1,0 +1,29 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# Weekly, grouped updates: one pull request for actions (workflows and the
+# root action.yml), one for Go modules. Actions are pinned by commit SHA;
+# Dependabot updates the SHA and the version comment together.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
+      include: scope
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      go:
+        patterns: ["*"]
+    commit-message:
+      prefix: build
+      include: scope

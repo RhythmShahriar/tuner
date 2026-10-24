@@ -33,10 +33,16 @@ checksum:
 release:
   prerelease: auto
 
-# Keyless Sigstore signature over checksums.txt. Verify with:
+# Keyless Sigstore signature over checksums.txt, made by the shared
+# release-go.yml (see .github/workflows/release.yml). Any repository can call
+# that workflow, so check the repository and tag too. Verify with:
 #   cosign verify-blob --bundle checksums.txt.sigstore.json \
 #     --certificate-identity https://github.com/RhythmShahriar/.github/.github/workflows/release-go.yml@refs/heads/master \
-#     --certificate-oidc-issuer https://token.actions.githubusercontent.com checksums.txt
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+#     --certificate-github-workflow-repository RhythmShahriar/tuner \
+#     --certificate-github-workflow-ref refs/tags/v<version> checksums.txt
+# release-go.yml picks the GoReleaser that builds releases; CI and
+# `make release-check` validate this file with an exact one (v2.18.3).
 signs:
   - cmd: cosign
     artifacts: checksum

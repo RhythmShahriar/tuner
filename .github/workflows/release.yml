@@ -4,9 +4,19 @@
 name: release
 on:
   push:
-    tags: ["v*"]
+    # Version tags only, so the moving major tag (v0) never starts a release.
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
 jobs:
   release:
+    # Deliberately on master, not a commit SHA: the keyless signature's
+    # certificate names this ref (release-go.yml@refs/heads/master) and
+    # users, installers and the Action verify against it. Pinning a SHA
+    # changes that identity, so it waits for the signing identity cut-over.
+    # `make pins` allows only this one line.
     uses: RhythmShahriar/.github/.github/workflows/release-go.yml@master
     permissions:
       contents: write
