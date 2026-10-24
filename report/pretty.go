@@ -286,7 +286,7 @@ func badge(sev engine.Severity, lowConf bool) string {
 }
 
 // card renders a critical, high or medium finding with its evidence and fix.
-// Lines that hold a URL, and the fix, wrap rather than lose their end.
+// The fix and lines that hold a URL wrap rather than lose their end.
 func card(f engine.Finding, width int) string {
 	lowConf := f.Confidence == "low"
 	titleCol := width - titleIndent - 2
@@ -344,7 +344,7 @@ func card(f engine.Finding, width int) string {
 	rail := lipgloss.NewStyle().Border(lipgloss.Border{Left: "▌"}, false, false, false, true).
 		BorderForeground(ui.SeverityColor(string(f.Severity))).PaddingLeft(1).MarginLeft(1)
 	// One line at a time: rendered as a block, every line would be padded
-	// to the widest, and a long URL would make each of them wrap.
+	// to the widest: one long URL would make each of them wrap.
 	for i, l := range body {
 		body[i] = rail.Render(l)
 	}

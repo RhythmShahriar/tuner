@@ -58,7 +58,7 @@ func (e *reportExtension) Plan(*scanPlan) error {
 }
 
 // Finished prints what changed to stderr, so it never mixes into a report
-// on stdout, and exits 1 for --fail-on-new.
+// on stdout. It exits 1 for --fail-on-new.
 func (e *reportExtension) Finished(p *scanPlan, reports []report.Report, stderr io.Writer) (int, error) {
 	if e.since == "" {
 		return exitOK, nil

@@ -277,7 +277,7 @@ func artifactLocation(f engine.Finding, root string) sarifArtifactLocation {
 }
 
 // fileURI turns a local folder into a file URI with three slashes on every
-// system: file:///srv/www, and file:///C:/inetpub/wwwroot for a Windows
+// system: file:///srv/www, or file:///C:/inetpub/wwwroot for a Windows
 // path, where Go's url package would make "C:" the host.
 func fileURI(dir string) string {
 	p := strings.TrimSuffix(strings.ReplaceAll(dir, "\\", "/"), "/")

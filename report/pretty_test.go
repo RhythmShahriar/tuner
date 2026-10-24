@@ -126,7 +126,7 @@ func TestPartsGolden(t *testing.T) {
 func TestPlainPrintsEveryFix(t *testing.T) {
 	out := render(PrettyOptions{Plain: true}, viewResult(), 0)
 	for _, want := range []string{
-		// medium and low get fixes too, and a multi-line fix says there is more
+		// medium and low get fixes too; a multi-line fix says there is more
 		"  fix: Turn off WP_DEBUG_LOG on production or point it outside the web root (see report)\n",
 		"  fix: Block xmlrpc.php in the server config.\n",
 		"[MEDIUM] WordPress debug mode is on - /wp-config.php\n",
