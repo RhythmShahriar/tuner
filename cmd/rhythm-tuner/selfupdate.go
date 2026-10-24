@@ -8,32 +8,31 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/RhythmShahriar/rhythm/kit/update"
+
+	"github.com/RhythmShahriar/tuner/internal/release"
 )
 
-// checkForUpdate looks for a newer release while the scan runs, at most
-// once a day. The channel yields the notice, or closes without one. Offline
-// runs (--offline or RHYTHM_OFFLINE) never ask GitHub.
-func checkForUpdate(ctx context.Context, ua string, offline bool) <-chan string {
-	notice := make(chan string, 1)
-	if offline || envOn("RHYTHM_OFFLINE") {
-		close(notice)
-		return notice
+// releaseUpdater is the kit Updater for Tuner's own releases. offline
+// (--offline) keeps it off the network; the kit adds RHYTHM_OFFLINE,
+// RHYTHM_NO_UPDATE_CHECK and CI. It only looks up the latest tag: Tuner
+// never installs a release itself (rhythm update does). A command that
+// installs or locks one must set Verifier to release.NewVerifier, so the
+// kit refuses a checksums.txt not signed for Tuner and that tag.
+func releaseUpdater(ua string, offline bool) *update.Updater {
+	return &update.Updater{
+		Repo: release.Repo, Binary: release.Binary, Current: version, UserAgent: ua,
+		API: os.Getenv("RHYTHM_GITHUB_API"), Offline: offline,
 	}
-	go func() {
-		u := &update.Updater{Repo: "RhythmShahriar/tuner", Binary: "rhythm-tuner", Current: version,
-			UserAgent: ua, API: os.Getenv("RHYTHM_GITHUB_API")}
-		cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		if latest, newer := u.Check(cctx); newer {
-			notice <- fmt.Sprintf("A new release of rhythm-tuner is available: %s → %s\n  run: rhythm update", version, latest)
-		}
-		close(notice)
-	}()
-	return notice
+}
+
+// checkForUpdate looks for a newer release while the scan runs, at most
+// once a day. The channel yields the notice, or closes without one.
+// Offline runs (--offline or RHYTHM_OFFLINE) never ask GitHub.
+func checkForUpdate(ctx context.Context, ua string, offline bool) <-chan string {
+	return update.Notice(ctx, releaseUpdater(ua, offline))
 }
 
 // printUpdateNotice prints the notice if the check has finished, waiting
@@ -46,11 +45,4 @@ func printUpdateNotice(notice <-chan string, stderr io.Writer) {
 		}
 	case <-time.After(200 * time.Millisecond):
 	}
-}
-
-// envOn reports whether a switch variable is set to anything but empty,
-// "0" or "false".
-func envOn(name string) bool {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
-	return v != "" && v != "0" && v != "false"
 }
