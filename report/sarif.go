@@ -216,11 +216,14 @@ func writeSARIF(w io.Writer, reports []Report, o WriteOptions) error {
 				res.Properties = map[string]any{"cves": cves, "advisories": len(f.Advisories), "source": f.Source}
 			}
 			if len(f.Evidence.Secrets) > 0 {
+				if res.Properties == nil {
+					res.Properties = map[string]any{}
+				}
 				var secrets []string
 				for _, s := range f.Evidence.Secrets {
 					secrets = append(secrets, SafeText(s.String()))
 				}
-				res.Properties = map[string]any{"secrets": secrets}
+				res.Properties["secrets"] = secrets
 			}
 			run.Results = append(run.Results, res)
 		}

@@ -42,6 +42,7 @@ type sarifView struct {
 			Message             sarifText         `json:"message"`
 			PartialFingerprints map[string]string `json:"partialFingerprints"`
 			Locations           []sarifLocation   `json:"locations"`
+			Properties          map[string]any    `json:"properties"`
 		} `json:"results"`
 	} `json:"runs"`
 }
@@ -172,6 +173,21 @@ func TestFileURI(t *testing.T) {
 	} {
 		if got := fileURI(in); got != want {
 			t.Errorf("fileURI(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// A finding with both advisories and secrets keeps both sets of properties.
+func TestSARIFPropertiesMerge(t *testing.T) {
+	r := localReport("/tmp/ci/wp")
+	f := &r.Findings[1]
+	f.Source = "wpvulnerability"
+	f.Advisories = []engine.Advisory{{ID: "wv-1", CVEs: []string{"CVE-2026-0001"}}}
+	v := readSARIF(t, sarifOf(t, []Report{r}, WriteOptions{}))
+	props := v.Runs[0].Results[1].Properties
+	for _, k := range []string{"cves", "advisories", "source", "secrets"} {
+		if _, ok := props[k]; !ok {
+			t.Errorf("properties lack %q: %v", k, props)
 		}
 	}
 }
