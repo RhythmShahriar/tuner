@@ -223,7 +223,7 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 	if o.list != "" {
 		f, err := os.Open(o.list)
 		if err != nil {
-			return nil, err
+			return nil, usagef("-l %s: %v", o.list, unwrapPath(err))
 		}
 		more, err := readTargets(f, o.list)
 		_ = f.Close()
@@ -508,8 +508,10 @@ func (p *scanPlan) applyConfig(set map[string]bool, haveTargets bool) error {
 			return err
 		}
 		path = found
-	} else if _, err := os.Stat(path); err != nil {
+	} else if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		return usagef("--config %s: no such file", path)
+	} else if err != nil {
+		return usagef("--config %s: %v", path, unwrapPath(err))
 	}
 	c, err := tunerconfig.Load(path)
 	if err != nil {

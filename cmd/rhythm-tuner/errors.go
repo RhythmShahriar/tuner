@@ -4,9 +4,11 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"slices"
 	"strconv"
@@ -200,4 +202,15 @@ func orList(options []string) string {
 		return strings.Join(options, "")
 	}
 	return strings.Join(options[:len(options)-1], ", ") + " or " + options[len(options)-1]
+}
+
+// unwrapPath drops the operation and path from a *os.PathError, for a
+// message that already names the file: "-l x.txt: permission denied"
+// rather than "-l x.txt: open x.txt: permission denied".
+func unwrapPath(err error) error {
+	var pe *os.PathError
+	if errors.As(err, &pe) {
+		return pe.Err
+	}
+	return err
 }

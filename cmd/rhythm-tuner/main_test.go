@@ -590,6 +590,7 @@ func TestReportThroughSymlink(t *testing.T) {
 	if data, _ := os.ReadFile(real); !strings.Contains(string(data), "leak-dotenv") {
 		t.Errorf("target not written:\n%.200s", data)
 	}
+
 }
 
 // A temporary report left by a killed run is removed once it is a day
@@ -1420,6 +1421,24 @@ func TestConfigHeadersAndErrors(t *testing.T) {
 	code, out, errs = tuner(t, "scan", "--config", "ci/tuner.yml", "--plain", "--no-vulns")
 	if code != exitFindings || !strings.Contains(out, "(config: ci/tuner.yml)") || !strings.Contains(out, ".env file in the web root") {
 		t.Errorf("--config: exit %d, stderr %s\n%s", code, errs, out)
+	}
+}
+
+// A file -l or --config can't open is a usage error that says why.
+func TestUnreadableListAndConfig(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if code, _, errs := tuner(t, "scan", "-l", "nope.txt"); code != exitUsage || errs != "rhythm tuner scan: -l nope.txt: no such file or directory\n" {
+		t.Errorf("-l: exit %d: %q", code, errs)
+	}
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		return // permissions don't stop root
+	}
+	os.Mkdir("locked", 0o700)
+	os.WriteFile("locked/tuner.yml", []byte("fail_on: high\n"), 0o600)
+	os.Chmod("locked", 0)
+	defer os.Chmod("locked", 0o700)
+	if code, _, errs := tuner(t, "scan", "x.example", "--config", "locked/tuner.yml"); code != exitUsage || errs != "rhythm tuner scan: --config locked/tuner.yml: permission denied\n" {
+		t.Errorf("--config: exit %d: %q", code, errs)
 	}
 }
 
