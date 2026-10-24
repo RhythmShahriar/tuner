@@ -646,7 +646,7 @@ func (s *Scanner) open(ctx context.Context, target string, h Hooks) (*session, *
 	} else {
 		home, err = ss.retry(ctx, ss.follow, "GET", u.String(), notHTTPS)
 	}
-	fallback := err != nil && !explicit && ctx.Err() == nil && !errors.As(err, new(*RedirectError))
+	fallback := err != nil && !explicit && ctx.Err() == nil && !refused(err)
 	// A broken handshake, a bad certificate or a timeout on 443 can be an
 	// on-path attacker's doing. Falling back to http then would hand them
 	// the user's headers, cookies and URL credentials in clear, so with
@@ -809,13 +809,14 @@ func (ss *session) do(ctx context.Context, c *http.Client, method, u string) (*m
 
 // retry is do with a way out: an error for which final returns true ends
 // the request at once, without a retry and without counting as an error.
+// A refused redirect or address is never retried either.
 func (ss *session) retry(ctx context.Context, c *http.Client, method, u string, final func(error) bool) (*matchers.Response, error) {
 	for attempt := 0; ; attempt++ {
 		r, retryIn, err := ss.attempt(ctx, c, method, u, attempt)
 		if err != nil && final != nil && final(err) {
 			return r, err
 		}
-		if retryIn == 0 || attempt >= ss.opts.Retries || ctx.Err() != nil {
+		if retryIn == 0 || refused(err) || attempt >= ss.opts.Retries || ctx.Err() != nil {
 			if err != nil {
 				ss.errors.Add(1)
 				var ne net.Error
@@ -829,6 +830,14 @@ func (ss *session) retry(ctx context.Context, c *http.Client, method, u string, 
 			return nil, err
 		}
 	}
+}
+
+// refused reports whether err is the scan's own refusal to follow a
+// redirect or reach an address. Sending the request again gets the same
+// answer, so it is not retried. It still counts as an error: a check that
+// a rebound name kept from running leaves the scan incomplete.
+func refused(err error) bool {
+	return errors.As(err, new(*RedirectError)) || errors.As(err, new(*AddressError))
 }
 
 // notHTTPS reports whether err shows that a host given without a scheme

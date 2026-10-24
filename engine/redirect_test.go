@@ -17,6 +17,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/RhythmShahriar/tuner/fingerprint"
 )
@@ -166,6 +167,39 @@ func TestCrossHostRedirectStops(t *testing.T) {
 	}
 	if got := first.requests(); len(got) != 1 || got[0].auth == "" {
 		t.Errorf("first host requests: %+v", got)
+	}
+}
+
+// A refused redirect is the scan's own answer, so retrying it only sends
+// the home request again and waits out the backoff.
+func TestRefusedRedirectNotRetried(t *testing.T) {
+	other := newLogServer(t, false, nil)
+	internalSrv := newLogServer(t, false, nil)
+	for _, tc := range []struct {
+		name, to string
+		names    map[string]string
+	}{
+		{"cross host", "http://localhost:" + other.port(), map[string]string{"public.test": "203.0.113.7", "localhost": "127.0.0.1"}},
+		{"internal", "http://127.0.0.1:" + internalSrv.port(), map[string]string{"public.test": "203.0.113.7"}},
+	} {
+		origin := newLogServer(t, false, redirectTo(tc.to))
+		n := &fakeNet{routes: map[string]string{"203.0.113.7:80": origin.Listener.Addr().String()}}
+		s := New([]*Check{mustParse(t, envCheck)}, Options{HTTPClient: n.client(), Retries: 2})
+		s.resolve = stubResolver(tc.names)
+		start := time.Now()
+		_, err := s.Scan(context.Background(), "http://public.test", Hooks{})
+		if !errors.As(err, new(*RedirectError)) {
+			t.Errorf("%s: err = %v", tc.name, err)
+		}
+		if got := origin.requests(); len(got) != 1 {
+			t.Errorf("%s: origin got %d home requests, want 1", tc.name, len(got))
+		}
+		if d := time.Since(start); d > 400*time.Millisecond {
+			t.Errorf("%s: took %v, a retry backoff", tc.name, d)
+		}
+	}
+	if len(other.requests())+len(internalSrv.requests()) != 0 {
+		t.Error("a refused redirect target got requests")
 	}
 }
 
