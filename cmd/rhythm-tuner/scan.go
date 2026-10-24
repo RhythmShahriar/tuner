@@ -977,9 +977,7 @@ const staleReportAge = 24 * time.Hour
 
 func createReport(dest string) (*reportFile, error) {
 	shown := dest
-	if real, err := filepath.EvalSymlinks(dest); err == nil {
-		dest = real
-	}
+	dest = followLinks(dest)
 	fi, statErr := os.Stat(dest)
 	if statErr == nil && fi.IsDir() {
 		return nil, fmt.Errorf("can't write the report to %s: it is a directory", shown)
@@ -989,13 +987,40 @@ func createReport(dest string) (*reportFile, error) {
 	removeStale(filepath.Join(dir, pattern))
 	f, err := os.CreateTemp(dir, pattern)
 	if err != nil {
-		var pe *os.PathError
-		if errors.As(err, &pe) {
-			err = pe.Err // the temporary name means nothing to the user
-		}
-		return nil, fmt.Errorf("can't write the report to %s: %w", dir, err)
+		// The temporary name means nothing to the user.
+		return nil, fmt.Errorf("can't write the report to %s: %w", dir, unwrapPath(err))
 	}
 	return &reportFile{File: f, dest: dest, existed: statErr == nil}, nil
+}
+
+// followLinks returns the file path names in the end, after any
+// symlinks. A link whose target does not exist yet (a dangling one) is
+// still followed, so the report is created where it points and the link
+// stays. A loop or a chain longer than 40 links, the usual kernel limit,
+// gives up and leaves path as it is.
+func followLinks(path string) string {
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		return real
+	}
+	cur := path
+	for range 40 {
+		fi, err := os.Lstat(cur)
+		if err != nil {
+			return cur // the end of the chain: a file that is not there yet
+		}
+		if fi.Mode()&os.ModeSymlink == 0 {
+			return cur
+		}
+		to, err := os.Readlink(cur)
+		if err != nil {
+			return path
+		}
+		if !filepath.IsAbs(to) {
+			to = filepath.Join(filepath.Dir(cur), to)
+		}
+		cur = to
+	}
+	return path
 }
 
 // removeStale deletes temporary reports matching glob that are older

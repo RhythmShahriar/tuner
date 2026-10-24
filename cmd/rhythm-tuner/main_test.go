@@ -591,6 +591,23 @@ func TestReportThroughSymlink(t *testing.T) {
 		t.Errorf("target not written:\n%.200s", data)
 	}
 
+	// A dangling link, relative to its folder: the report is created
+	// where it points and the link stays.
+	dir := t.TempDir()
+	os.Mkdir(filepath.Join(dir, "out"), 0o755)
+	dangling := filepath.Join(dir, "latest.json")
+	if err := os.Symlink(filepath.Join("out", "first.json"), dangling); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, errs := tuner(t, "scan", leakySite(t).URL, "-o", dangling, "-q"); code != exitOK {
+		t.Fatalf("dangling: exit %d: %s", code, errs)
+	}
+	if fi, err := os.Lstat(dangling); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("the dangling link was replaced: %v, %v", fi, err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, "out", "first.json")); !strings.Contains(string(data), "leak-dotenv") {
+		t.Errorf("dangling target not written:\n%.200s", data)
+	}
 }
 
 // A temporary report left by a killed run is removed once it is a day
