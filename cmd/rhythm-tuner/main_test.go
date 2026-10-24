@@ -540,12 +540,77 @@ func TestReportKeptOnCancel(t *testing.T) {
 		syscall.Kill(os.Getpid(), syscall.SIGINT) // execute catches it as a cancel
 	}()
 	code, _, errs := tuner(t, "scan", srv.URL, "-o", path, "--jsonl")
-	if code != exitCanceled || !strings.Contains(errs, "no report written: scan canceled") {
+	if code != exitCanceled || !strings.Contains(errs, "no report written: scan canceled; "+path+" keeps the previous report") {
 		t.Errorf("exit %d, stderr %q", code, errs)
 	}
 	assertOld(t, path)
 	if left, _ := filepath.Glob(filepath.Join(filepath.Dir(path), ".*.tmp")); len(left) > 0 {
 		t.Errorf("temporary files left: %v", left)
+	}
+}
+
+// A canceled scan with no previous report writes the partial one, marked
+// incomplete, so -o gets what stdout would.
+func TestPartialReportOnCancel(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("sends SIGINT to the test process")
+	}
+	srv, started := hangingSite(t)
+	path := filepath.Join(t.TempDir(), "report.json")
+	go func() {
+		<-started
+		syscall.Kill(os.Getpid(), syscall.SIGINT)
+	}()
+	code, _, errs := tuner(t, "scan", srv.URL, "-o", path, "--no-vulns")
+	if code != exitCanceled {
+		t.Errorf("exit %d, stderr %q", code, errs)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(data), `"complete": false`) || !strings.Contains(string(data), `"stopped_by": "interrupted"`) {
+		t.Errorf("partial report: %v\n%.400s", err, data)
+	}
+}
+
+// -o through a symlink replaces the file it points to and keeps the link.
+func TestReportThroughSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on Windows")
+	}
+	real := writeOld(t)
+	link := filepath.Join(t.TempDir(), "latest.json")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, errs := tuner(t, "scan", leakySite(t).URL, "-o", link, "-q"); code != exitOK {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("the link was replaced: %v, %v", fi, err)
+	}
+	if data, _ := os.ReadFile(real); !strings.Contains(string(data), "leak-dotenv") {
+		t.Errorf("target not written:\n%.200s", data)
+	}
+}
+
+// A temporary report left by a killed run is removed once it is a day
+// old; a fresh one may belong to a scan still running.
+func TestStaleTemporaryReportsRemoved(t *testing.T) {
+	path := writeOld(t)
+	dir := filepath.Dir(path)
+	stale, fresh := filepath.Join(dir, ".report.json.111.tmp"), filepath.Join(dir, ".report.json.222.tmp")
+	for _, n := range []string{stale, fresh} {
+		os.WriteFile(n, []byte("{"), 0o600)
+	}
+	old := time.Now().Add(-25 * time.Hour)
+	os.Chtimes(stale, old, old)
+	if code, _, errs := tuner(t, "scan", leakySite(t).URL, "-o", path, "-q"); code != exitOK {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("stale file kept: %v", err)
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Errorf("fresh file removed: %v", err)
 	}
 }
 

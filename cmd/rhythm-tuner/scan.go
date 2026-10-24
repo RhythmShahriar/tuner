@@ -711,7 +711,9 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 			"Tuner is non-intrusive and never sends exploit payloads. This notice is shown once.\n\n")
 	}
 
-	// The first Ctrl-C asks the scan to stop and write what it has. A second
+	// The first Ctrl-C asks the scan to stop and write what it has: to
+	// stdout, or to a new -o file. An -o file that already holds a report
+	// keeps it, as a cut-short scan is a worse record. A second
 	// one must always work, even when a target ignores cancellation, so
 	// the handler goes away after the first: the next signal ends the
 	// process the default way.
@@ -815,8 +817,8 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 	keep := ""
 	switch {
 	case file == nil:
-	case outcome.Canceled:
-		keep = "scan canceled"
+	case outcome.Canceled && file.existed:
+		keep = "scan canceled; " + o.output + " keeps the previous report"
 	case len(reports) == 0 && len(p.write.Failed) > 0:
 		keep = "every target failed"
 	}
@@ -944,18 +946,37 @@ const (
 // replaces the destination only once complete, so a killed, canceled or
 // failed run never leaves the previous report truncated. Two cron runs
 // writing the same path never interleave either.
+//
+// The report is written in the destination's folder, so that folder must
+// be writable, not just the file. A symlink is followed: the file it
+// points to is replaced and the link stays. A run killed with SIGKILL
+// leaves its .<name>.*.tmp file behind; the next run removes ones older
+// than a day.
 type reportFile struct {
 	*os.File
-	dest string
-	done bool
+	dest    string
+	existed bool // there was a report at dest before this run
+	done    bool
 }
 
+// staleReportAge is how old a leftover temporary report must be before
+// createReport removes it. A day is far longer than any scan, so the
+// file can't belong to one still running.
+const staleReportAge = 24 * time.Hour
+
 func createReport(dest string) (*reportFile, error) {
-	if fi, err := os.Stat(dest); err == nil && fi.IsDir() {
-		return nil, fmt.Errorf("can't write the report to %s: it is a directory", dest)
+	shown := dest
+	if real, err := filepath.EvalSymlinks(dest); err == nil {
+		dest = real
+	}
+	fi, statErr := os.Stat(dest)
+	if statErr == nil && fi.IsDir() {
+		return nil, fmt.Errorf("can't write the report to %s: it is a directory", shown)
 	}
 	dir := filepath.Dir(dest)
-	f, err := os.CreateTemp(dir, "."+filepath.Base(dest)+".*.tmp")
+	pattern := "." + filepath.Base(dest) + ".*.tmp"
+	removeStale(filepath.Join(dir, pattern))
+	f, err := os.CreateTemp(dir, pattern)
 	if err != nil {
 		var pe *os.PathError
 		if errors.As(err, &pe) {
@@ -963,7 +984,18 @@ func createReport(dest string) (*reportFile, error) {
 		}
 		return nil, fmt.Errorf("can't write the report to %s: %w", dir, err)
 	}
-	return &reportFile{File: f, dest: dest}, nil
+	return &reportFile{File: f, dest: dest, existed: statErr == nil}, nil
+}
+
+// removeStale deletes temporary reports matching glob that are older
+// than staleReportAge. Errors are ignored: the files only take space.
+func removeStale(glob string) {
+	names, _ := filepath.Glob(glob)
+	for _, n := range names {
+		if fi, err := os.Lstat(n); err == nil && fi.Mode().IsRegular() && time.Since(fi.ModTime()) > staleReportAge {
+			_ = os.Remove(n)
+		}
+	}
 }
 
 // commit flushes the report to disk and moves it into place. A report
