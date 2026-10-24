@@ -40,8 +40,8 @@
       }
     },
     {
-      "id": "php-phpinfo",
-      "title": "phpinfo",
+      "id": "php-display-errors",
+      "title": "display_errors on",
       "severity": "medium",
       "confidence": "high",
       "target": "https://shop.example.test",

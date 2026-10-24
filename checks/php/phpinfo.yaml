@@ -14,5 +14,16 @@ match:
     - not_baseline: true
 impact: Shows the PHP version, loaded modules, server paths and environment variables, which may include secrets.
 fix: Delete the file. phpinfo() pages should never be left on a live server.
+fix_server:
+  nginx: |
+    # Deleting the file is the fix; this blocks it until then. Leave out
+    # any name your site uses for something else.
+    location ~ ^/(phpinfo|info|php_info|php|test|i)\.php$ { deny all; }
+  apache: |
+    # Deleting the file is the fix; this blocks it until then. Leave out
+    # any name your site uses for something else.
+    <LocationMatch "^/(phpinfo|info|php_info|php|test|i)\.php$">
+      Require all denied
+    </LocationMatch>
 references:
   - https://www.php.net/manual/en/function.phpinfo.php

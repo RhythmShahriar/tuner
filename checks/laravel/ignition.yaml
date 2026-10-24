@@ -14,5 +14,14 @@ match:
     - regex: '"can_execute_commands"\s*:'
 impact: Debug mode is on in production. Older Ignition versions allow remote code execution (CVE-2021-3129).
 fix: Set APP_DEBUG=false in .env and update facade/ignition or spatie/laravel-ignition.
+fix_server:
+  nginx: |
+    # Blocks the debug endpoints; still turn APP_DEBUG off.
+    location ^~ /_ignition/ { deny all; }
+  apache: |
+    # Blocks the debug endpoints; still turn APP_DEBUG off.
+    <Location "/_ignition/">
+      Require all denied
+    </Location>
 references:
   - https://nvd.nist.gov/vuln/detail/CVE-2021-3129

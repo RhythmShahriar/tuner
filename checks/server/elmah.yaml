@@ -17,5 +17,14 @@ impact: The log shows every recent exception with its request, cookies and serve
 fix: |
   Set allowRemoteAccess="false" in the elmah security section of web.config,
   or protect elmah.axd with an authorization rule.
+fix_server:
+  nginx: |
+    # Only when nginx proxies to the .NET site.
+    location ~* ^/elmah\.axd { deny all; }
+  apache: |
+    # Only when Apache proxies to the .NET site.
+    <LocationMatch "(?i)^/elmah\.axd">
+      Require all denied
+    </LocationMatch>
 references:
   - https://cwe.mitre.org/data/definitions/215.html

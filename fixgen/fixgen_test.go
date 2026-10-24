@@ -124,7 +124,7 @@ func TestOldReportFallsBackToChecks(t *testing.T) {
 	for _, want := range []string{
 		"# leak-git\n#   https://shop.example.test/.git/HEAD\nRedirectMatch 404 /\\.git\n",
 		"# wp-dir-listing\n#   https://shop.example.test/wp-content/uploads/\nOptions -Indexes\n",
-		"# No apache snippet for: php-phpinfo\n",
+		"# No apache snippet for: php-display-errors\n",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("missing %q in:\n%s", want, out.String())
