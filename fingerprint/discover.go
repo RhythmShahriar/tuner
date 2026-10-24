@@ -33,7 +33,13 @@ const (
 type Data interface {
 	// RESTNamespaces maps a REST namespace, or its leading segments, to
 	// the slug of the plugin that registers it, e.g. "wc" to woocommerce.
+	// These are known from the plugin's code and give high confidence.
 	RESTNamespaces() map[string]string
+	// InferredNamespaces has the same shape for mappings nobody checked
+	// against a real /wp-json/ index, or that a free plugin shares with its
+	// premium edition. They give low confidence, so a wrong guess never
+	// reads as a confirmed vulnerable plugin.
+	InferredNamespaces() map[string]string
 	// TopPlugins lists popular plugin slugs, most installed first.
 	TopPlugins() []string
 }
@@ -55,6 +61,7 @@ var Embedded = sync.OnceValue(func() Data {
 func LoadData(fsys fs.FS) (Data, error) {
 	var ns struct {
 		Namespaces map[string]string `json:"namespaces"`
+		Inferred   map[string]string `json:"inferred"`
 	}
 	var top struct {
 		Plugins []string `json:"plugins"`
@@ -68,12 +75,14 @@ func LoadData(fsys fs.FS) (Data, error) {
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}
 	}
-	d := &staticData{ns: map[string]string{}}
-	for k, slug := range ns.Namespaces {
-		if !ValidSlug(slug) {
-			return nil, fmt.Errorf("data/rest-namespaces.json: %q is not a plugin slug", slug)
+	d := &staticData{ns: map[string]string{}, inferred: map[string]string{}}
+	for from, to := range map[*map[string]string]map[string]string{&ns.Namespaces: d.ns, &ns.Inferred: d.inferred} {
+		for k, slug := range *from {
+			if !ValidSlug(slug) {
+				return nil, fmt.Errorf("data/rest-namespaces.json: %q is not a plugin slug", slug)
+			}
+			to[strings.ToLower(strings.Trim(k, "/"))] = slug
 		}
-		d.ns[strings.ToLower(strings.Trim(k, "/"))] = slug
 	}
 	for _, slug := range top.Plugins {
 		if !ValidSlug(slug) {
@@ -85,12 +94,13 @@ func LoadData(fsys fs.FS) (Data, error) {
 }
 
 type staticData struct {
-	ns  map[string]string
-	top []string
+	ns, inferred map[string]string
+	top          []string
 }
 
-func (d *staticData) RESTNamespaces() map[string]string { return d.ns }
-func (d *staticData) TopPlugins() []string              { return d.top }
+func (d *staticData) RESTNamespaces() map[string]string     { return d.ns }
+func (d *staticData) InferredNamespaces() map[string]string { return d.inferred }
+func (d *staticData) TopPlugins() []string                  { return d.top }
 
 var slugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
@@ -119,13 +129,14 @@ func RESTNamespaces(body []byte) []string {
 // Namespaces WordPress core registers; they say nothing about plugins.
 var coreNamespaces = []string{"wp", "oembed", "wp-site-health", "wp-block-editor", "wp-abilities"}
 
-// PluginsFromREST maps REST namespaces to plugins. A namespace in d
-// (matched on its longest known leading segments) gives a high-confidence
-// plugin. One whose first segment is a popular plugin's slug gives a
-// low-confidence one: plugins often name their namespace after their
-// slug, but nothing guarantees it.
+// PluginsFromREST maps REST namespaces to plugins. A namespace is matched
+// on its longest known leading segments: one in d.RESTNamespaces gives a
+// high-confidence plugin, one in d.InferredNamespaces a low-confidence
+// one. A namespace whose first segment is a popular plugin's slug also
+// gives a low-confidence plugin: plugins often name their namespace after
+// their slug but nothing guarantees it.
 func PluginsFromREST(d Data, namespaces []string) []Component {
-	known := d.RESTNamespaces()
+	known, inferred := d.RESTNamespaces(), d.InferredNamespaces()
 	top := d.TopPlugins()
 	var out []Component
 	add := func(slug, confidence string) {
@@ -142,13 +153,18 @@ func PluginsFromREST(d Data, namespaces []string) []Component {
 		if parts[0] == "" || slices.Contains(coreNamespaces, parts[0]) {
 			continue
 		}
-		slug := ""
+		slug, confidence := "", ""
 		for n := len(parts); n > 0 && slug == ""; n-- {
-			slug = known[strings.Join(parts[:n], "/")]
+			key := strings.Join(parts[:n], "/")
+			if slug = known[key]; slug != "" {
+				confidence = ConfidenceHigh
+			} else if slug = inferred[key]; slug != "" {
+				confidence = ConfidenceLow
+			}
 		}
 		switch {
 		case slug != "":
-			add(slug, ConfidenceHigh)
+			add(slug, confidence)
 		case slices.Contains(top, parts[0]):
 			add(parts[0], ConfidenceLow)
 		}

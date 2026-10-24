@@ -18,8 +18,19 @@ func TestEmbeddedData(t *testing.T) {
 	if top := d.TopPlugins(); top[0] != "elementor" || slices.Index(top, "contact-form-7") < 0 {
 		t.Errorf("top plugins start %v", top[:3])
 	}
-	if n := len(d.RESTNamespaces()); n < 300 {
+	if n := len(d.RESTNamespaces()) + len(d.InferredNamespaces()); n < 300 {
 		t.Errorf("%d REST namespaces, want at least 300", n)
+	}
+	// Free and premium editions share these, so they stay low confidence.
+	for _, k := range []string{"acf", "edd", "aioseo", "jetpack"} {
+		if d.RESTNamespaces()[k] != "" || d.InferredNamespaces()[k] == "" {
+			t.Errorf("namespace %q should be inferred", k)
+		}
+	}
+	for k := range d.RESTNamespaces() {
+		if d.InferredNamespaces()[k] != "" {
+			t.Errorf("namespace %q is both known and inferred", k)
+		}
 	}
 	seen := map[string]bool{}
 	for _, s := range d.TopPlugins() {
@@ -32,7 +43,7 @@ func TestEmbeddedData(t *testing.T) {
 
 func TestLoadDataRejectsBadSlugs(t *testing.T) {
 	fsys := fstest.MapFS{
-		"data/rest-namespaces.json": {Data: []byte(`{"namespaces": {"acme": "acme"}}`)},
+		"data/rest-namespaces.json": {Data: []byte(`{"namespaces": {"acme": "acme"}, "inferred": {"acme-pro": "acme-pro"}}`)},
 		"data/top-plugins.json":     {Data: []byte(`{"plugins": ["../../wp-config.php"]}`)},
 	}
 	if _, err := LoadData(fsys); err == nil || !strings.Contains(err.Error(), "not a plugin slug") {
@@ -40,8 +51,12 @@ func TestLoadDataRejectsBadSlugs(t *testing.T) {
 	}
 	fsys["data/top-plugins.json"] = &fstest.MapFile{Data: []byte(`{"plugins": ["acme-forms"]}`)}
 	d, err := LoadData(fsys)
-	if err != nil || d.RESTNamespaces()["acme"] != "acme" || d.TopPlugins()[0] != "acme-forms" {
+	if err != nil || d.RESTNamespaces()["acme"] != "acme" || d.InferredNamespaces()["acme-pro"] != "acme-pro" || d.TopPlugins()[0] != "acme-forms" {
 		t.Errorf("pack data: %v %v", d, err)
+	}
+	fsys["data/rest-namespaces.json"] = &fstest.MapFile{Data: []byte(`{"namespaces": {}, "inferred": {"x": "Bad Slug"}}`)}
+	if _, err := LoadData(fsys); err == nil || !strings.Contains(err.Error(), "not a plugin slug") {
+		t.Errorf("bad inferred slug: %v", err)
 	}
 	if _, err := LoadData(fstest.MapFS{}); err == nil {
 		t.Error("missing files must fail")
@@ -62,24 +77,27 @@ func TestRESTNamespaces(t *testing.T) {
 }
 
 type testData struct {
-	ns  map[string]string
-	top []string
+	ns, inferred map[string]string
+	top          []string
 }
 
-func (d testData) RESTNamespaces() map[string]string { return d.ns }
-func (d testData) TopPlugins() []string              { return d.top }
+func (d testData) RESTNamespaces() map[string]string     { return d.ns }
+func (d testData) InferredNamespaces() map[string]string { return d.inferred }
+func (d testData) TopPlugins() []string                  { return d.top }
 
 func TestPluginsFromREST(t *testing.T) {
 	d := testData{
-		ns:  map[string]string{"wc": "woocommerce", "wc/gla": "google-listings-and-ads", "yoast": "wordpress-seo"},
-		top: []string{"jetpack", "akismet"},
+		ns:       map[string]string{"wc": "woocommerce", "yoast": "wordpress-seo"},
+		inferred: map[string]string{"wc/gla": "google-listings-and-ads", "acf": "advanced-custom-fields"},
+		top:      []string{"jetpack", "akismet"},
 	}
-	got := PluginsFromREST(d, []string{"wp/v2", "oembed/1.0", "wc/v3", "wc/store/v1", "wc/gla", "yoast/v1", "jetpack/v4", "acme-internal/v1", "custom/v2", ""})
+	got := PluginsFromREST(d, []string{"wp/v2", "oembed/1.0", "wc/v3", "wc/store/v1", "wc/gla", "yoast/v1", "jetpack/v4", "acf/v3", "acme-internal/v1", "custom/v2", ""})
 	want := []Component{
 		{Type: "plugin", Slug: "woocommerce", FoundBy: "rest", Confidence: "high"},
-		{Type: "plugin", Slug: "google-listings-and-ads", FoundBy: "rest", Confidence: "high"},
+		{Type: "plugin", Slug: "google-listings-and-ads", FoundBy: "rest", Confidence: "low"}, // more specific than wc, but inferred
 		{Type: "plugin", Slug: "wordpress-seo", FoundBy: "rest", Confidence: "high"},
 		{Type: "plugin", Slug: "jetpack", FoundBy: "rest", Confidence: "low"}, // only its slug matches
+		{Type: "plugin", Slug: "advanced-custom-fields", FoundBy: "rest", Confidence: "low"},
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("got  %+v\nwant %+v", got, want)

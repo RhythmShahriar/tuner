@@ -20,12 +20,13 @@ import (
 )
 
 type pluginData struct {
-	ns  map[string]string
-	top []string
+	ns, inferred map[string]string
+	top          []string
 }
 
-func (d pluginData) RESTNamespaces() map[string]string { return d.ns }
-func (d pluginData) TopPlugins() []string              { return d.top }
+func (d pluginData) RESTNamespaces() map[string]string     { return d.ns }
+func (d pluginData) InferredNamespaces() map[string]string { return d.inferred }
+func (d pluginData) TopPlugins() []string                  { return d.top }
 
 // testPluginData knows three of the fixture's five plugin namespaces and
 // lists 20 popular slugs, four of which the fixture has.
