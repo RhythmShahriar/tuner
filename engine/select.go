@@ -33,15 +33,12 @@ func (p Profile) Rank() int { return slices.Index(Profiles, p) }
 // findings (vuln-*) may still apply.
 var ErrNoChecks = errors.New("no checks match the selection; list them with: rhythm tuner checks")
 
-// IsAdvisorID reports whether an ID pattern names advisor findings
-// (vulnerability matching) or local-scan findings rather than YAML checks.
+// IsAdvisorID reports whether an ID pattern names findings that Go code
+// emits (vulnerability matching, local scans) rather than YAML checks. It
+// asks the rule registry (RegisterRules), so a new provider's IDs work
+// once it registers them.
 func IsAdvisorID(pattern string) bool {
-	for _, p := range []string{"vuln", "local-", "wp-core-", "wp-components-", "wp-plugin-closed", "wp-theme-closed", "php-eol", "php-version-hidden", "nginx-eol", "apache-eol"} {
-		if strings.HasPrefix(pattern, p) || strings.HasPrefix(p, strings.TrimSuffix(pattern, "*")) && strings.HasSuffix(pattern, "*") && pattern != "*" {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(allRules(), func(r Rule) bool { return r.mayMatch(pattern) })
 }
 
 // Selector narrows the checks a scan runs. Zero values select everything

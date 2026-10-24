@@ -45,3 +45,83 @@ func Rules() []Rule {
 	slices.SortStableFunc(out, func(a, b Rule) int { return strings.Compare(a.ID, b.ID) })
 	return out
 }
+
+// fallbackRules cover what vulns and local emit until they register their
+// own rules (vulns-service V7, local-server L10); delete them then. They
+// match IDs and tags but are left out of Rules, so listings only show
+// rules a source declared.
+var fallbackRules = []Rule{
+	{ID: "vuln", Prefix: true, Tags: []string{"vuln", "wordpress", "php", "core", "plugin", "theme", "composer", "known-exploited"}},
+	{ID: "local-", Prefix: true},
+	{ID: "wp-core-", Prefix: true, Tags: []string{"wordpress", "core", "outdated"}},
+	{ID: "wp-components-", Prefix: true, Tags: []string{"wordpress", "plugin", "theme", "outdated"}},
+	{ID: "wp-plugin-closed", Prefix: true, Tags: []string{"wordpress", "plugin", "abandoned"}},
+	{ID: "wp-theme-closed", Prefix: true, Tags: []string{"wordpress", "theme", "abandoned"}},
+	{ID: "php-eol", Prefix: true, Tags: []string{"php", "outdated"}},
+	{ID: "php-version-hidden", Prefix: true, Tags: []string{"php"}},
+	{ID: "nginx-eol", Prefix: true, Tags: []string{"nginx", "outdated"}},
+	{ID: "apache-eol", Prefix: true, Tags: []string{"apache", "outdated"}},
+}
+
+// allRules is Rules plus the fallback list.
+func allRules() []Rule { return append(Rules(), fallbackRules...) }
+
+// Matches reports whether finding ID id belongs to r.
+func (r Rule) Matches(id string) bool {
+	if r.Prefix {
+		return strings.HasPrefix(id, r.ID)
+	}
+	return id == r.ID
+}
+
+// mayMatch reports whether an ID glob such as vuln-* can match a finding
+// of r. A prefix rule matches when the glob's literal start and the prefix
+// agree as far as both go; "*" alone matches nothing, so it never turns
+// advisors on by itself.
+func (r Rule) mayMatch(pattern string) bool {
+	lit := pattern
+	if i := strings.IndexAny(pattern, "*?["); i >= 0 {
+		lit = pattern[:i]
+	} else {
+		return r.Matches(pattern)
+	}
+	if lit == "" {
+		return false
+	}
+	if r.Prefix {
+		return strings.HasPrefix(lit, r.ID) || strings.HasPrefix(r.ID, lit)
+	}
+	return globMatch(pattern, r.ID)
+}
+
+// RuleFor returns the registered rule a finding ID belongs to: an exact
+// rule first, else the longest matching prefix rule.
+func RuleFor(id string) (Rule, bool) {
+	var best Rule
+	found := false
+	for _, r := range allRules() {
+		switch {
+		case !r.Matches(id):
+		case !r.Prefix:
+			return r, true
+		case !found || len(r.ID) > len(best.ID):
+			best, found = r, true
+		}
+	}
+	return best, found
+}
+
+// AdvisorTags returns every tag a rule declares, sorted: the tags --tags
+// can select advisor findings by.
+func AdvisorTags() []string {
+	var tags []string
+	for _, r := range allRules() {
+		for _, t := range r.Tags {
+			if !slices.Contains(tags, t) {
+				tags = append(tags, t)
+			}
+		}
+	}
+	slices.Sort(tags)
+	return tags
+}
