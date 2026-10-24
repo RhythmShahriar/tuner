@@ -27,7 +27,6 @@ import (
 	"github.com/muesli/termenv"
 
 	"github.com/RhythmShahriar/rhythm/kit/config"
-	"github.com/RhythmShahriar/rhythm/kit/update"
 	"github.com/RhythmShahriar/tuner/engine"
 	"github.com/RhythmShahriar/tuner/local"
 	"github.com/RhythmShahriar/tuner/report"
@@ -162,6 +161,12 @@ type scanPlan struct {
 	format   string // json, jsonl, sarif, md, or "" for the terminal view only
 	failOn   engine.Severity
 	baseline report.Baseline
+
+	// local is the base for local scans; scanTarget copies it and fills in
+	// PHP, Advisor, OSV and Select.
+	local local.Options
+	// write is passed to the report writer.
+	write writeOptions
 }
 
 func scan(args []string, stdout, stderr io.Writer) int {
@@ -185,6 +190,9 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 	p := &scanPlan{}
 	o := &p.o
 	flags := scanFlagSet(o, io.Discard)
+	for _, e := range scanExtensions {
+		e.Flags(flags)
+	}
 	pos, err := parseInterspersed(flags, args)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -323,6 +331,13 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 	if vulnsOn {
 		p.osv = osvClient(ua, p.engine.Proxy, o.offline)
 	}
+	p.write = writeOptions{Many: len(p.targets) > 1, Version: version}
+
+	for _, e := range scanExtensions {
+		if err := e.Plan(p); err != nil {
+			return nil, err
+		}
+	}
 	return p, nil
 }
 
@@ -370,23 +385,12 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 		defer cancel()
 	}
 
-	// Look for a newer release while the scan runs; at most once a day.
-	notice := make(chan string, 1)
-	go func() {
-		u := &update.Updater{Repo: "RhythmShahriar/tuner", Binary: "rhythm-tuner", Current: version,
-			UserAgent: p.engine.UserAgent, API: os.Getenv("RHYTHM_GITHUB_API")}
-		cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		if latest, newer := u.Check(cctx); newer {
-			notice <- fmt.Sprintf("A new release of rhythm-tuner is available: %s → %s\n  run: rhythm update", version, latest)
-		}
-		close(notice)
-	}()
+	notice := checkForUpdate(ctx, p.engine.UserAgent)
 
 	scanner := engine.New(p.checks, p.engine)
 	single := len(p.targets) == 1
 	results := make([]*engine.Result, len(p.targets))
-	failed := make([]bool, len(p.targets))
+	failed := make([]string, len(p.targets)) // why each target failed, or ""
 	var outMu sync.Mutex
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, p.o.parallel)
@@ -436,6 +440,7 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 
 			res, err := p.scanTarget(ctx, scanner, target, h)
 			if res != nil {
+				stampFindings(res, target)
 				suppressed := p.baseline.Filter(res)
 				if live {
 					view.Summary(res, target, suppressed)
@@ -448,8 +453,8 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 				_, _ = stdout.Write(buf.Bytes())
 			}
 			if err != nil && !errors.Is(err, context.Canceled) {
-				failed[i] = true
-				fmt.Fprintf(stderr, "rhythm tuner: %s: %v\n", target, describe(err))
+				failed[i] = describe(err)
+				fmt.Fprintf(stderr, "rhythm tuner: %s: %v\n", target, failed[i])
 			}
 		})
 	}
@@ -466,14 +471,14 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 			reports = append(reports, r)
 		}
 	}
+	for i, why := range failed {
+		if why != "" {
+			p.write.Failed = append(p.write.Failed, targetError{Target: p.targets[i], Error: why})
+		}
+	}
 	var werr error
-	switch p.format {
-	case "json":
-		werr = report.JSON(out, reports, len(p.targets) > 1)
-	case "sarif":
-		werr = report.SARIF(out, reports, version)
-	case "md":
-		werr = report.Markdown(out, reports)
+	if p.format != "" && p.format != "jsonl" {
+		werr = writeReport(p.format, out, reports, p.write)
 	}
 	if werr == nil && file != nil {
 		werr = file.Close()
@@ -487,15 +492,23 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 	}
 
 	if live && !o.quiet {
-		select {
-		case msg, ok := <-notice:
-			if ok {
-				fmt.Fprintln(stderr, msg)
-			}
-		case <-time.After(200 * time.Millisecond): // don't hold up the exit for it
-		}
+		printUpdateNotice(notice, stderr)
 	}
 
+	exit := scanExit(ctx, p, reports, failed, stderr)
+	for _, e := range scanExtensions {
+		code, err := e.Finished(p, reports, stderr)
+		if err != nil {
+			fmt.Fprintln(stderr, "rhythm tuner:", err)
+			code = max(code, exitError)
+		}
+		exit = max(exit, code)
+	}
+	return exit
+}
+
+// scanExit picks the built-in exit code once every target is done.
+func scanExit(ctx context.Context, p *scanPlan, reports []report.Report, failed []string, stderr io.Writer) int {
 	if errors.Is(ctx.Err(), context.Canceled) {
 		fmt.Fprintln(stderr, "rhythm tuner: scan canceled; results are partial")
 		return exitCanceled
@@ -507,11 +520,39 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 			}
 		}
 	}
-	if slices.Contains(failed, true) {
+	if slices.ContainsFunc(failed, func(why string) bool { return why != "" }) {
 		return exitError
 	}
 	return exitOK
 }
+
+// targetError and writeOptions mirror report.TargetError and
+// report.WriteOptions from the report writer registry. Until that registry
+// is released, writeReport dispatches to the existing writers; then all
+// three become report.TargetError, report.WriteOptions and report.Write.
+type targetError struct{ Target, Error string }
+
+type writeOptions struct {
+	Many    bool          // several targets: JSON is an array
+	Failed  []targetError // targets that could not be scanned
+	Version string        // the rhythm-tuner version
+}
+
+func writeReport(format string, w io.Writer, reports []report.Report, o writeOptions) error {
+	switch format {
+	case "json":
+		return report.JSON(w, reports, o.Many)
+	case "sarif":
+		return report.SARIF(w, reports, o.Version)
+	case "md":
+		return report.Markdown(w, reports)
+	}
+	return fmt.Errorf("no writer for %s reports", format)
+}
+
+// stampFindings gives each finding a stable fingerprint before baseline
+// filtering. It is a seam for report.Stamp, which does nothing yet either.
+func stampFindings(*engine.Result, string) {}
 
 func describe(err error) string {
 	switch {

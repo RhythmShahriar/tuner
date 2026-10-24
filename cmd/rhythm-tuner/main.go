@@ -49,6 +49,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "update":
 		return cmdUpdate(args[1:], stdout, stderr)
 	}
+	if c := lookupCommand(args[0]); c != nil {
+		return c.Run(args[1:], stdout, stderr)
+	}
 	fmt.Fprintf(stderr, "rhythm tuner: unknown command %q\n\n", args[0])
 	usage(stderr)
 	return exitUsage
@@ -64,7 +67,7 @@ Usage:
   rhythm tuner scan <dir> [flags]    scan a site's files on the server
   rhythm tuner checks [flags]        list the checks (rhythm tuner checks --help)
   rhythm tuner update [--clear]      refresh the check pack and vulnerability data now
-
+`+commandUsage()+`
 Output:
       --json               JSON report (an array when scanning several targets)
       --jsonl              one JSON finding per line, streamed as found
@@ -116,7 +119,7 @@ Batch and CI:
       --fail-on <level>    exit 1 if a finding is at or above this severity
       --baseline <file>    hide findings already in this JSON report
 
-Vulnerability data comes from WPVulnerability (CC0), api.wordpress.org and
+`+extensionHelp()+`Vulnerability data comes from WPVulnerability (CC0), api.wordpress.org and
 php.net; Composer packages are matched with OSV.dev. New checks arrive as a
 check pack from Tuner's GitHub releases. Both are cached under your user cache
 directory and refreshed automatically once a day; TUNER_VULN_API,

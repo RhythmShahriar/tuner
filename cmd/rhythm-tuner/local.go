@@ -21,12 +21,9 @@ func (p *scanPlan) scanTarget(ctx context.Context, s *engine.Scanner, target str
 	if !isLocalPath(target) {
 		return s.Scan(ctx, target, h)
 	}
-	return local.Scan(ctx, target, local.Options{
-		PHP:     p.o.php,
-		Advisor: p.engine.Advisor,
-		OSV:     p.osv,
-		Select:  p.sel,
-	}, h)
+	o := p.local
+	o.PHP, o.Advisor, o.OSV, o.Select = p.o.php, p.engine.Advisor, p.osv, p.sel
+	return local.Scan(ctx, target, o, h)
 }
 
 // osvClient builds the OSV.dev client for Composer packages. It caches
