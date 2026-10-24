@@ -62,7 +62,7 @@ irm https://rythm.sh/install.ps1 | iex
 go install github.com/RhythmShahriar/tuner/cmd/rhythm-tuner@latest
 ```
 
-The installers check every download against the release checksums, which are [signed with cosign](https://github.com/RhythmShahriar/rhythm#verify-a-release). Prefer a manual install? Grab a binary from [Releases](https://github.com/RhythmShahriar/tuner/releases/latest).
+The installers and `rhythm update` check every download against the release's `checksums.txt`. That file comes from the same release, so it catches a broken download, not a tampered release. Releases are also signed with cosign. Nothing checks the signature for you yet, so [verify a release by hand](https://github.com/RhythmShahriar/rhythm#verify-a-release) if that matters to you. Prefer a manual install? Grab a binary from [Releases](https://github.com/RhythmShahriar/tuner/releases/latest).
 
 ## Scan
 
@@ -84,7 +84,7 @@ That's it. Tuner fingerprints the site, learns how it answers "not found", runs 
 Every flag is in the [CLI reference](https://github.com/RhythmShahriar/rhythm/wiki/Tuner-CLI-Reference), and the [documentation wiki](https://github.com/RhythmShahriar/rhythm/wiki) covers everything else.
 
 > [!IMPORTANT]
-> Scan only sites you own or have permission to test. Tuner is non-intrusive (plain GET requests, no exploit payloads, 5 requests a second by default), but a scan of someone else's site without permission may still be illegal. See [Responsible use](#responsible-use--disclaimer).
+> Scan only sites you own or have permission to test. Tuner is non-intrusive (its checks send plain GET requests with no exploit payloads, 5 requests a second by default). Even so, a scan of someone else's site without permission may be illegal. See [Responsible use](#responsible-use--disclaimer).
 
 ## What it finds
 
@@ -93,7 +93,7 @@ Every flag is in the [CLI reference](https://github.com/RhythmShahriar/rhythm/wi
 <td width="50%" valign="top">
 
 ### 🔑 Leaks
-`.env` files, `.git` and `.svn` directories, `wp-config.php` backups, SQL dumps, backup archives, error and debug logs, `phpinfo()`, `.htpasswd`, Composer auth tokens. Secrets are detected and **always masked**.
+`.env` files, `.git` and `.svn` directories, `wp-config.php` backups, SQL dumps, backup archives, error and debug logs, `phpinfo()`, `.htpasswd`, Composer auth tokens. Secrets Tuner recognises are **masked** in every report. Some values it does not recognise yet, such as a password in a `redis://:password@host` URL, can still show in evidence, so treat reports as private.
 
 </td>
 <td width="50%" valign="top">
@@ -128,12 +128,22 @@ Security headers, cookie flags, version leaks, plain HTTP, expired or untrusted 
 - **Extensible.** Checks are [YAML files](https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Writing-Checks), each with tests. Adding one takes no Go code.
 - **Polite by default.** Rate limited, slows down on `429`/`503`, honest user agent.
 
+### Known limits
+
+These are being fixed; until then, plan around them.
+
+- **Headers follow redirects.** `-H` and `--cookie` go with every request of a scan, also after the home page redirects to another host. Scan the final address directly when you pass credentials.
+- **Only built-in checks are held to GET.** Every check Tuner ships sends GET requests only, as does the published check pack. Tuner does not yet refuse other methods in checks you load with `--checks`, so load only checks you trust.
+- **The check pack is checksummed, not signed.** Its checksum comes from the same release as the pack. `--no-check-updates` keeps to the checks built into the binary.
+
 ## CI
 
 Show findings in your repository's **Security** tab:
 
 ```yaml
-- run: curl -fsSL https://rythm.sh/install | sh
+- run: |
+    curl -fsSL https://rythm.sh/install | sh
+    echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 - run: rhythm tuner scan https://staging.yoursite.com --sarif -o tuner.sarif
 - uses: github/codeql-action/upload-sarif@v3
   with:
@@ -173,7 +183,7 @@ Tuner is built to help people **find and fix weaknesses in their own websites** 
 - **Use it only on sites you own, or have explicit written permission to test.** Scanning systems without authorization may be illegal where you or the target are, for example under the U.S. Computer Fraud and Abuse Act, the UK Computer Misuse Act, or similar laws elsewhere.
 - **You are responsible for how you use it.** By using Tuner you agree to comply with all applicable laws and the terms of any service you test. The authors and contributors are not responsible for misuse, or for any damage, legal consequences or loss arising from its use.
 - **No warranty.** Tuner is provided "as is", without warranty of any kind, as set out in sections 15 and 16 of the [license](LICENSE). Findings may include false positives or miss real issues; verify before acting.
-- **Detection only.** Tuner sends ordinary, rate-limited GET requests and never sends exploit payloads.
+- **Detection only.** Tuner's checks send ordinary, rate-limited GET requests and never send exploit payloads (see [Known limits](#known-limits) for checks you load yourself).
 
 Found a vulnerability in Tuner itself? Please [report it privately](https://github.com/RhythmShahriar/tuner/security/advisories/new).
 

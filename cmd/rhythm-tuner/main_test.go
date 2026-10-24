@@ -1036,7 +1036,7 @@ func TestHTTPClientUsesProxy(t *testing.T) {
 		t.Errorf("proxy saw %+v, timeout %v", g, c.Timeout)
 	}
 
-	// A caller's own User-Agent wins, and its request is left as it was.
+	// A caller's own User-Agent wins and its request is left as it was.
 	req, _ := http.NewRequest(http.MethodGet, "http://vulns.example.invalid/", nil)
 	req.Header.Set("User-Agent", "custom")
 	if resp, err := c.Do(req); err == nil {
@@ -1051,5 +1051,43 @@ func TestHTTPClientUsesProxy(t *testing.T) {
 	}
 	if req.Header.Get("User-Agent") != "" {
 		t.Error("the default User-Agent changed the caller's request")
+	}
+}
+
+// The help and README promise only what the code does today. Each claim
+// listed here was too strong; the limits stay stated until the fix lands.
+func TestHelpAndReadmeClaims(t *testing.T) {
+	var help bytes.Buffer
+	usage(&help)
+	readme, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]struct {
+		text    string
+		without []string
+		with    []string
+	}{
+		"help": {help.String(),
+			[]string{"refresh the check pack and vulnerability data now"},
+			[]string{"also after\n                           the home page redirects to another host", "(checksummed, not signed;",
+				"Never runs\n                           site code", "--allow-missing-vulns", "--allow-partial"}},
+		"README": {string(readme),
+			[]string{"always masked", "which are [signed with cosign]", "Tuner is non-intrusive (plain GET requests",
+				"Tuner sends ordinary, rate-limited GET requests"},
+			[]string{"Nothing checks the signature for you yet", "also after the home page redirects to another host",
+				"Tuner does not yet refuse other methods", "The check pack is checksummed, not signed",
+				"echo \"$HOME/.local/bin\" >> \"$GITHUB_PATH\""}},
+	} {
+		for _, s := range c.without {
+			if strings.Contains(c.text, s) {
+				t.Errorf("%s still says %q", name, s)
+			}
+		}
+		for _, s := range c.with {
+			if !strings.Contains(c.text, s) {
+				t.Errorf("%s lacks %q", name, s)
+			}
+		}
 	}
 }

@@ -66,7 +66,8 @@ Usage:
   rhythm tuner scan <url>... [flags] scan one or more sites
   rhythm tuner scan <dir> [flags]    scan a site's files on the server
   rhythm tuner checks [flags]        list the checks (rhythm tuner checks --help)
-  rhythm tuner update [--clear]      refresh the check pack and vulnerability data now
+  rhythm tuner update [--clear]      refresh the check pack and the WordPress and
+                                     PHP vulnerability data now
 `+commandUsage()+`
 Output:
       --json               JSON report (an array when scanning several targets)
@@ -104,6 +105,8 @@ Requests:
   -A, --user-agent <ua>    User-Agent header
   -H, --header <h>         extra header, "Name: value" (repeatable)
       --cookie <c>         Cookie header, e.g. "session=abc"
+                           -H and --cookie go with every request, also after
+                           the home page redirects to another host
       --proxy <url>        http, https or socks5 proxy (HTTPS_PROXY also works)
   -k, --insecure           don't verify TLS certificates
 
@@ -128,7 +131,8 @@ Batch and CI:
 
 `+extensionHelp()+`Vulnerability data comes from WPVulnerability (CC0), api.wordpress.org and
 php.net; Composer packages are matched with OSV.dev. New checks arrive as a
-check pack from Tuner's GitHub releases. Both are cached under your user cache
+check pack from Tuner's GitHub releases (checksummed, not signed; built-in
+checks only with --no-check-updates). Both are cached under your user cache
 directory and refreshed automatically once a day; TUNER_VULN_API,
 TUNER_WPORG_API, TUNER_PHPNET_API, TUNER_OSV_API and TUNER_CHECKS_URL point
 Tuner at mirrors.
