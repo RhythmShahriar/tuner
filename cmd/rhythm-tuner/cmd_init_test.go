@@ -266,6 +266,7 @@ func TestCITarget(t *testing.T) {
 		{raw: filepath.Join(root, "web"), want: "./web", folder: true},
 		{raw: ".", want: ".", folder: true},
 		{raw: "https://user:pass@example.com", err: "username or password"},
+		{raw: "https://user:pass@example.com", err: "secret with the Action's headers input"},
 		{raw: "ftp://example.com", err: "not an http or https URL"},
 		{raw: elsewhere, err: "outside the repository"},
 		{raw: "./missing", err: "neither a URL nor a folder"},

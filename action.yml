@@ -46,7 +46,11 @@ inputs:
     required: false
     default: ""
   sarif:
-    description: Write tuner.sarif in the working directory and upload it to GitHub code scanning (category tuner).
+    description: >
+      Write tuner.sarif in the working directory and upload it to GitHub code scanning (category tuner).
+      A Tuner release without the report command (before it can convert a saved report) scans every
+      target a second time for the SARIF, so the site gets its requests twice and the SARIF can differ
+      from the JSON report the step gates on.
     required: false
     default: "false"
   sarif-upload:
@@ -55,8 +59,20 @@ inputs:
       set "false" to only write the file, e.g. for pull requests from forks.
     required: false
     default: "true"
+  headers:
+    description: >
+      Extra request headers, one "Name: value" per line, each passed as -H. Use this, not args, for
+      anything with a space or a secret, e.g. "Authorization: Bearer ${{ secrets.STAGING_TOKEN }}".
+    required: false
+    default: ""
+  cookie:
+    description: A Cookie header for the scan, e.g. "session=${{ secrets.SESSION }}", passed as --cookie.
+    required: false
+    default: ""
   args:
-    description: Extra scan flags, e.g. "--profile quick --rate 2".
+    description: >
+      Extra scan flags, e.g. "--profile quick --rate 2". They are split on spaces with no quoting,
+      so a value with a space can't go here; headers and cookie have their own inputs.
     required: false
     default: ""
   working-directory:
@@ -224,6 +240,8 @@ runs:
         MIN_CONFIDENCE: ${{ inputs.min-confidence }}
         BASELINE: ${{ inputs.baseline }}
         SARIF: ${{ inputs.sarif }}
+        HEADERS: ${{ inputs.headers }}
+        COOKIE: ${{ inputs.cookie }}
         ARGS: ${{ inputs.args }}
       run: |
         set -uo pipefail
@@ -243,6 +261,15 @@ runs:
         [ -z "$MIN_CONFIDENCE" ] || flags+=(--min-confidence "$MIN_CONFIDENCE")
         base=()
         [ -z "$BASELINE" ] || base=(--baseline "$BASELINE")
+        # Each header line is one -H value, kept whole: "Name: value" always
+        # has a space, so it can't go through the word-split args.
+        req=()
+        while IFS= read -r line; do
+          line=${line#"${line%%[![:space:]]*}"}
+          line=${line%"${line##*[![:space:]]}"}
+          [ -n "$line" ] && req+=(-H "$line")
+        done <<< "$HEADERS"
+        [ -z "$COOKIE" ] || req+=(--cookie "$COOKIE")
         # Split ARGS on whitespace with globbing off, so a * or ? in a flag
         # value (a header, a pattern) is passed on as typed.
         set -f
@@ -254,7 +281,7 @@ runs:
         out="$RUNNER_TEMP/rhythm-tuner-report"
         mkdir -p "$out"
         report="$out/tuner.json"
-        rhythm-tuner scan "${targets[@]}" "${flags[@]}" ${base[@]+"${base[@]}"} ${extra[@]+"${extra[@]}"} -o "$report"
+        rhythm-tuner scan "${targets[@]}" "${flags[@]}" ${base[@]+"${base[@]}"} ${req[@]+"${req[@]}"} ${extra[@]+"${extra[@]}"} -o "$report"
         code=$?
         echo "exit-code=$code" >> "$GITHUB_OUTPUT"
         [ -s "$report" ] || { echo "::error::rhythm-tuner wrote no report (exit $code)"; exit "$((code > 1 ? code : 3))"; }
@@ -281,10 +308,12 @@ runs:
           if rhythm-tuner report --help >/dev/null 2>&1; then
             rhythm-tuner report "$report" --sarif > "$file"
           else
-            # This release can't convert a saved report, so scan again for
-            # SARIF from the cached check pack and vulnerability data.
+            # This release can't convert a saved report and writes one format
+            # per scan, so scan again for SARIF from the cached check pack and
+            # vulnerability data (the sarif input says so).
+            echo "::notice::this Tuner release has no report command, so the SARIF comes from a second scan"
             rhythm-tuner scan "${targets[@]}" --plain -q --offline \
-              ${base[@]+"${base[@]}"} ${extra[@]+"${extra[@]}"} -o "$file" > /dev/null
+              ${base[@]+"${base[@]}"} ${req[@]+"${req[@]}"} ${extra[@]+"${extra[@]}"} -o "$file" > /dev/null
           fi
           if [ -s "$file" ]; then
             # Other steps are not in Git Bash on Windows, so hand them a

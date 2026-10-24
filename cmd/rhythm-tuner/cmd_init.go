@@ -179,7 +179,7 @@ func ciTarget(root, dir, raw string) (target string, folder bool, err error) {
 		}
 		if u.User != nil {
 			// The workflow is committed, so a password in it is public.
-			return "", false, usagef("--target has a username or password; keep credentials out of the workflow (use a secret with args: -H)")
+			return "", false, usagef("--target has a username or password; keep credentials out of the workflow and pass them from a secret with the Action's headers input")
 		}
 		return u.String(), false, nil
 	}

@@ -25,6 +25,8 @@ permissions:
 env:
   MIRROR: http://127.0.0.1:20240
   SITE: http://127.0.0.1:20241
+  # The same site, logging each request's headers (testbed/action/header_log.py).
+  HEADER_SITE: http://127.0.0.1:20242
   # No vulnerability APIs or check pack downloads: only the fixtures.
   HERMETIC: --no-vulns --no-check-updates --profile quick
 
@@ -76,12 +78,14 @@ jobs:
           py=$(command -v python3 || command -v python)
           nohup "$py" -m http.server 20240 --bind 127.0.0.1 --directory "$RUNNER_TEMP/mirror" > "$RUNNER_TEMP/mirror.log" 2>&1 &
           nohup "$py" -m http.server 20241 --bind 127.0.0.1 --directory testbed/action/site > "$RUNNER_TEMP/site.log" 2>&1 &
+          nohup "$py" testbed/action/header_log.py 20242 testbed/action/site "$RUNNER_TEMP/headers.log" > "$RUNNER_TEMP/header-site.log" 2>&1 &
           for _ in $(seq 50); do
-            if curl -fsS -o /dev/null "$MIRROR/good/checksums.txt" && curl -fsS -o /dev/null "$SITE/"; then exit 0; fi
+            if curl -fsS -o /dev/null "$MIRROR/good/checksums.txt" && curl -fsS -o /dev/null "$SITE/" &&
+              curl -fsS -o /dev/null "$HEADER_SITE/"; then exit 0; fi
             sleep 0.2
           done
           echo "::error::fixture servers didn't start"
-          cat "$RUNNER_TEMP/mirror.log" "$RUNNER_TEMP/site.log"
+          cat "$RUNNER_TEMP/mirror.log" "$RUNNER_TEMP/site.log" "$RUNNER_TEMP/header-site.log"
           exit 1
 
       - name: Scan the fixture site
@@ -116,6 +120,32 @@ jobs:
             echo "::error::the fixture secret appears unmasked"
             exit 1
           fi
+
+      # A header value with spaces (every "Name: value" has one) must reach
+      # the site whole, the way init ci tells users to pass credentials.
+      - name: Scan with headers and a cookie
+        uses: ./
+        with:
+          target: ${{ env.HEADER_SITE }}
+          fail-on: none
+          headers: |
+            Authorization: Bearer fixture token with spaces
+            X-Tuner-Test: a * b ? c
+          cookie: session=fixture cookie
+          args: ${{ env.HERMETIC }}
+          verify-signature: false
+          download-url: ${{ env.MIRROR }}/good
+
+      - name: Check the headers arrived whole
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/headers.log"
+          [ -s "$log" ] || { echo "::error::the header site saw no requests"; exit 1; }
+          for want in 'Authorization: Bearer fixture token with spaces' 'X-Tuner-Test: a * b ? c' 'Cookie: session=fixture cookie'; do
+            grep -qxF "$want" "$log" || { echo "::error::no request carried \"$want\""; sort -u "$log"; exit 1; }
+          done
+          echo "every request header arrived whole"
 
       - name: Gate on the exposed .env
         id: gate
