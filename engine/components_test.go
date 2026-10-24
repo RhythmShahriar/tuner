@@ -5,12 +5,16 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"slices"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/RhythmShahriar/tuner/fingerprint"
 )
@@ -160,5 +164,48 @@ func TestRemotePHPNeedsEvidence(t *testing.T) {
 				t.Errorf("advisor saw PHP %q", spy.fp.PHP)
 			}
 		})
+	}
+}
+
+func TestConcurrencyCapsEveryRequest(t *testing.T) {
+	var home strings.Builder
+	for i := range 50 {
+		fmt.Fprintf(&home, `<link href="/wp-content/plugins/plugin-%d/a.css?ver=1.0">`, i)
+	}
+	var now, peak, total atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := now.Add(1)
+		defer now.Add(-1)
+		total.Add(1)
+		for p := peak.Load(); n > p && !peak.CompareAndSwap(p, n); p = peak.Load() {
+		}
+		if r.URL.Path == "/" {
+			w.Write([]byte(home.String()))
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	c := mustParse(t, `
+id: t-many
+name: many
+severity: low
+request: {path: ["/a", "/b", "/c", "/d", "/e", "/f"]}
+match: {all: [{status: 200}, {not_baseline: true}]}
+`)
+	for _, limit := range []int32{1, 4} {
+		peak.Store(0)
+		total.Store(0)
+		_, err := New([]*Check{c}, Options{Concurrency: int(limit), HTTPClient: srv.Client()}).Scan(context.Background(), srv.URL, Hooks{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if total.Load() < 50 {
+			t.Fatalf("-c %d: only %d requests, want the 50 readme lookups", limit, total.Load())
+		}
+		if p := peak.Load(); p > limit {
+			t.Errorf("-c %d: %d requests in flight", limit, p)
+		}
 	}
 }

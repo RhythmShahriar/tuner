@@ -39,7 +39,7 @@ type Options struct {
 	Headers     http.Header // sent with every request, e.g. Cookie or Authorization; overrides UserAgent
 	Rate        float64     // requests per second to the target; 0 means unlimited
 	Timeout     time.Duration
-	Concurrency int
+	Concurrency int // most requests in flight at once, for the whole scan
 	Retries     int // extra attempts after a network error or a 429/503
 	Proxy       *url.URL
 	Insecure    bool         // skip TLS certificate verification
@@ -423,6 +423,10 @@ type session struct {
 	dial     dialFunc // guarded raw dialer for the TLS probe
 	warnings []string
 	lim      *limiter
+	// inflight holds one token per HTTP exchange in progress. Every request
+	// of the scan (checks, soft-404 probes, version lookups, the PHP and
+	// TLS probes) takes one, so -c is a hard cap however the work is split.
+	inflight chan struct{}
 	token    string         // random path segment for soft-404 probes
 	roots    *x509.CertPool // trust store for the TLS probe; nil means the system's
 	proxied  bool           // requests go through a proxy, so raw TLS dials would bypass it
@@ -487,15 +491,16 @@ func (s *Scanner) open(ctx context.Context, target string, h Hooks) (*session, *
 		}
 	}
 	ss := &session{
-		opts:    s.opts,
-		hooks:   h,
-		headers: headers,
-		resolve: s.resolve,
-		roots:   roots,
-		proxied: proxied,
-		lim:     newLimiter(s.opts.Rate),
-		token:   "rhythm-tuner-" + randHex(6),
-		cache:   map[string]*fetch{},
+		opts:     s.opts,
+		hooks:    h,
+		headers:  headers,
+		resolve:  s.resolve,
+		roots:    roots,
+		proxied:  proxied,
+		lim:      newLimiter(s.opts.Rate),
+		inflight: make(chan struct{}, s.opts.Concurrency),
+		token:    "rhythm-tuner-" + randHex(6),
+		cache:    map[string]*fetch{},
 	}
 	ss.internalOK = ss.internalHost(ctx, u.Hostname())
 	ss.dial = ss.guardDial((&net.Dialer{Timeout: s.opts.Timeout}).DialContext)
@@ -651,6 +656,12 @@ func (ss *session) attempt(ctx context.Context, c *http.Client, method, u string
 	if err != nil {
 		return nil, 0, err
 	}
+	// Held until the body is read, so a slow body counts as in flight;
+	// released before do sleeps for a retry.
+	if err := ss.acquire(ctx); err != nil {
+		return nil, 0, err
+	}
+	defer ss.release()
 	if host := ss.setHeaders(req.Header, req.URL); host != "" {
 		req.Host = host
 	}
@@ -681,6 +692,18 @@ func (ss *session) attempt(ctx context.Context, c *http.Client, method, u string
 	}
 	return &matchers.Response{URL: resp.Request.URL, Status: resp.StatusCode, Header: resp.Header, Body: body, TLSState: resp.TLS}, retryIn, nil
 }
+
+// acquire waits for a free request slot, see session.inflight.
+func (ss *session) acquire(ctx context.Context) error {
+	select {
+	case ss.inflight <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (ss *session) release() { <-ss.inflight }
 
 func (ss *session) logRequest(l RequestLog) {
 	if ss.hooks.Request != nil {

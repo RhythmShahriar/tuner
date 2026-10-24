@@ -76,6 +76,10 @@ func (ss *session) legacyVersions(ctx context.Context, u *url.URL) []string {
 // legacyHandshake reports whether a TLS handshake with cfg succeeds. It
 // dials through the session's address guard like every other request.
 func (ss *session) legacyHandshake(ctx context.Context, addr string, cfg *tls.Config) bool {
+	if ss.acquire(ctx) != nil {
+		return false
+	}
+	defer ss.release()
 	ctx, cancel := context.WithTimeout(ctx, ss.opts.Timeout)
 	defer cancel()
 	raw, err := ss.dial(ctx, "tcp", addr)
