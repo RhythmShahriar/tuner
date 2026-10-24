@@ -266,11 +266,16 @@ func TestHangingPackHostBacksOff(t *testing.T) {
 	}
 	expirePack(t)
 	hits := hangingHost(t)
+	old := packWait
+	packWait = 300 * time.Millisecond
+	t.Cleanup(func() { packWait = old })
 
+	// The margin is wide for loaded CI runners under -race; a hang would
+	// still blow well past it.
 	start := time.Now()
 	set, err := loadCheckSet("", true, false, "test", nil)
-	if took := time.Since(start); took > 3500*time.Millisecond {
-		t.Errorf("first run waited %v", took)
+	if took := time.Since(start); took > packWait+2*time.Second {
+		t.Errorf("first run waited %v, want about %v", took, packWait)
 	}
 	want := "check pack host unreachable, using pack from 2026-10-01"
 	if err != nil || set.source != setPack || !slices.Contains(set.alerts, want) || !slices.Contains(set.warnings, want) {

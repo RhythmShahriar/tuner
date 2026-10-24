@@ -59,7 +59,8 @@ func (s *checkSet) localRules() fs.FS {
 // How long a scan waits for the check pack release. There is always a set
 // of checks to fall back on, so the wait is short; only a first fetch,
 // with no pack cached yet, gets longer, since it downloads the archive.
-const (
+// Variables so tests can shorten them.
+var (
 	packWait      = 3 * time.Second
 	packFirstWait = 10 * time.Second
 )
