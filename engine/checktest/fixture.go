@@ -76,7 +76,13 @@ func (c Case) bodies() [][]byte {
 // server starts the mock site and returns a client set up to reach it.
 func (c Case) server() (*httptest.Server, *http.Client, error) {
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		reply, ok := c.Routes[r.URL.Path]
+		// A route with a query string (/?rest_route=/wp/v2/users) wins over
+		// its bare path, which still answers any other query, as most
+		// sites ignore query strings they don't know.
+		reply, ok := c.Routes[r.URL.RequestURI()]
+		if !ok {
+			reply, ok = c.Routes[r.URL.Path]
+		}
 		if !ok {
 			if c.Default == nil {
 				http.NotFound(w, r)

@@ -211,3 +211,14 @@ func TestScaffoldPasses(t *testing.T) {
 		t.Errorf("bad id: %v", err)
 	}
 }
+
+func TestLintRouteQuery(t *testing.T) {
+	route := strings.Replace(goodCheck, "?v=1.2", "?rest_route=/wp/v2/users", 1)
+	if issues := lintOne(route, goodFixture); len(issues) != 0 {
+		t.Errorf("rest_route query: %v", issues)
+	}
+	up := strings.Replace(goodCheck, "?v=1.2", "?rest_route=/wp/../etc", 1)
+	if issues := lintOne(up, goodFixture); len(issues) != 1 || !strings.Contains(issues[0].Message, "looks like a payload") {
+		t.Errorf("traversal in query: %v", issues)
+	}
+}

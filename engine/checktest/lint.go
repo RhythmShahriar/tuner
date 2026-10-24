@@ -154,9 +154,10 @@ func lintID(id string) string {
 	return ""
 }
 
-// plainQuery is all a query value may hold: words, numbers and the
-// punctuation of ordinary file and version names.
-var plainQuery = regexp.MustCompile(`^[A-Za-z0-9_.,-]*$`)
+// plainQuery is all a query value may hold: words, numbers, the
+// punctuation of ordinary file and version names and slashes for routes
+// such as rest_route=/wp/v2/users (.. is refused separately).
+var plainQuery = regexp.MustCompile(`^[A-Za-z0-9_.,/-]*$`)
 
 // lintPath returns why a request path looks like an attack rather than a
 // read of something the site already serves, or "". Checks never send

@@ -184,3 +184,35 @@ func TestRawValuesInSecretFixtures(t *testing.T) {
 		t.Errorf("key values listed outside a secret fixture: %q", got)
 	}
 }
+
+func TestQueryRoutes(t *testing.T) {
+	const check = `id: wp-thing
+name: Users by route
+severity: low
+request:
+  path: ["/?rest_route=/wp/v2/users"]
+match:
+  all:
+    - status: 200
+    - regex: '"slug"'
+    - not_baseline: true
+`
+	// The query route answers its own query; every other query, the
+	// baseline probe's too, gets the bare path's page.
+	const fixture = `positive:
+  - name: route answers
+    routes:
+      /: {body: home}
+      /?rest_route=/wp/v2/users: {body: '[{"slug":"admin"}]'}
+negative:
+  - name: query ignored
+    routes:
+      /: {body: home}
+`
+	fsys := fstest.MapFS{"wp/thing.yaml": {Data: []byte(check)}, "wp/thing_test.yaml": {Data: []byte(fixture)}}
+	for _, r := range Run(fsys) {
+		if r.Failed(true) {
+			t.Errorf("%s: problems %q", r, r.Problems)
+		}
+	}
+}
