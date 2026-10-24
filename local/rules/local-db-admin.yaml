@@ -8,5 +8,5 @@ confidence: high
 tags: [php, database, admin]
 scope: web
 files: ["**/adminer*.php"]
-impact: A database login page on the public site invites password guessing, and old Adminer versions have known vulnerabilities.
+impact: A database login page on the public site invites password guessing and old Adminer versions have known vulnerabilities.
 fix: Delete it when you're done, or restrict it to your IP address.

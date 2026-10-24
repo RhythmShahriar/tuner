@@ -26,7 +26,7 @@ import (
 //
 //  1. session.serialize_handler is php_binary or php_serialize,
 //  2. the application switches it to php at runtime with ini_set(),
-//  3. before calling session_start(), and
+//  3. before calling session_start() and
 //  4. session.upload_progress.enabled is on (the default).
 //
 // Conditions 1 and 4 are configuration, read from what PHP reports and
@@ -128,7 +128,7 @@ func (s *scan) sessionUploadProgress(ctx context.Context, code *sessionVisitor) 
 	}
 	ev = append(ev, fmt.Sprintf("✓ switched to %s at runtime with ini_set() (%s:%d)", val, s.rel(sw.file), sw.line))
 	if n := len(toPHP) - 1; n > 0 {
-		ev[len(ev)-1] += fmt.Sprintf(", and %d more", n)
+		ev[len(ev)-1] += fmt.Sprintf(" and %d more", n)
 	}
 	ordered := sw.startLine > 0
 	switch {
@@ -154,7 +154,7 @@ func (s *scan) sessionUploadProgress(ctx context.Context, code *sessionVisitor) 
 		"Better still, remove the runtime ini_set() of session.serialize_handler, or call it with the configured handler."
 	impact := sessionCVE + " is an unpatched flaw in PHP's session upload progress. PHP says it is only reachable when " +
 		"the configured serialize handler is php_binary or php_serialize, the app switches it to php with ini_set() " +
-		"before session_start(), and upload progress is enabled."
+		"before session_start() and upload progress is enabled."
 	f := s.finding(sessionCheckID, engine.High, sw.file, "", ev, impact, fix, "php", "session", "vuln", strings.ToLower(sessionCVE))
 	f.Evidence.Request = "read config and code"
 	f.References = []string{"https://www.cve.org/CVERecord?id=" + sessionCVE}
@@ -383,7 +383,7 @@ func globSorted(pattern string) []string {
 }
 
 // sessionVisitor finds runtime switches of session.serialize_handler in
-// the site's PHP files, and .user.ini/.htaccess overrides of the two
+// the site's PHP files and .user.ini/.htaccess overrides of the two
 // settings. Like the stray-file checks it skips vendor/ and
 // node_modules/: they hold most of a project's files. A library that
 // switches the handler is the app's choice to call.

@@ -22,7 +22,7 @@ const phpTimeout = 5 * time.Second
 var phpVersionRe = regexp.MustCompile(`^([0-9]+\.[0-9]+\.[0-9]+)([^\s]*)`)
 
 // phpVersion asks the php binary for its version. It returns the version,
-// the full build string when it carries a distro suffix, and a warning
+// the full build string when it carries a distro suffix and a warning
 // when the version couldn't be read.
 //
 // php runs with -n so no php.ini is loaded: an auto_prepend_file there

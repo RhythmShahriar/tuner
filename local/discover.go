@@ -66,7 +66,7 @@ var installSkip = map[string]map[string]bool{
 
 // Discover finds every WordPress and Laravel install under root, root
 // included, down to maxDepth folders (0 means DefaultDiscoverDepth). It
-// doesn't follow links, so a link loop can't trap it, and it stops
+// doesn't follow links, so a link loop can't trap it. It stops
 // after 250,000 entries. Other sites nested in an install (a WordPress
 // in /blog) are found; copies inside dependency folders or wp-content
 // are not.

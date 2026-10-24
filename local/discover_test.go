@@ -20,7 +20,7 @@ func discoverTree(t *testing.T) string {
 		}
 	}
 	files := map[string]string{
-		// A Laravel app, and a package in its vendor with an artisan of
+		// A Laravel app with a package in its vendor with an artisan of
 		// its own that must not count.
 		"app.example/artisan":                                   "#!/usr/bin/env php",
 		"app.example/composer.json":                             `{"require": {"php": "^8.2", "laravel/framework": "^11.0"}}`,

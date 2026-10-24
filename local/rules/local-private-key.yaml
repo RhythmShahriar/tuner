@@ -13,4 +13,4 @@ match:
 extract:
   secrets: true
 impact: Anyone who downloads a private key can impersonate the server or log in where the key is trusted.
-fix: Move it out of the web root, and replace the key if it was ever reachable.
+fix: Move it out of the web root and replace the key if it was ever reachable.

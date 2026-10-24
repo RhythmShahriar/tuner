@@ -66,7 +66,7 @@ func (v *strayVisitor) visit(e *entry, f *fileData) {
 	v.add(runRules(v.s, v.rules, relSegs(v.s.web, e.path), e, f)...)
 }
 
-// dir reports a directory worth a finding, and whether to skip its contents.
+// dir reports a directory worth a finding and whether to skip its contents.
 func (s *scan) dir(p, name string) (*engine.Finding, bool) {
 	lower := strings.ToLower(name)
 	parent := filepath.Base(filepath.Dir(p))
@@ -110,7 +110,7 @@ func (s *scan) file(e *entry, f *fileData) *engine.Finding {
 		filepath.Dir(p) == s.web || siteish.MatchString(name) || strings.Contains(lower, strings.ToLower(filepath.Base(s.root)))):
 		return s.findingPtr("local-backup-archive", engine.High, p, "Backup archive in the web root", ev,
 			"Site backups usually contain the whole site including wp-config.php or .env. Backup plugins protect their folders with .htaccess, which nginx ignores.",
-			"Store backups outside the web root or off the server, and delete old ones.", "leak", "backup")
+			"Store backups outside the web root or off the server and delete old ones.", "leak", "backup")
 
 	case lower == "auth.json" && !inComponent:
 		var sec []matchers.Secret
