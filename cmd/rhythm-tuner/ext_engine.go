@@ -47,7 +47,7 @@ func (e *engineExtension) Plan(p *scanPlan) error {
 	p.engine.FollowHost = e.followHost
 	mode, err := engine.ParsePluginMode(e.plugins)
 	if err != nil {
-		return usageError{"--plugins: " + err.Error()}
+		return usagef("--plugins: %v", err)
 	}
 	p.engine.Plugins = mode
 	if e.requestBudget < 0 {
