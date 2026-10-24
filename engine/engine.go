@@ -26,6 +26,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/RhythmShahriar/rhythm/kit/ratelimit"
 	"github.com/RhythmShahriar/tuner/fingerprint"
 	"github.com/RhythmShahriar/tuner/matchers"
 )
@@ -624,7 +625,8 @@ func (s *Scanner) open(ctx context.Context, target string, h Hooks) (*session, *
 
 // ParseTarget accepts a URL or bare hostname. explicitScheme is false when
 // the scheme was guessed, in which case Scan falls back from https to http.
-// Credentials in the URL are dropped from u; ParseTargetAuth returns them.
+// It is kit/ratelimit.ParseTarget, except that credentials in the URL are
+// dropped from u and masked in errors; ParseTargetAuth returns them.
 func ParseTarget(target string) (u *url.URL, explicitScheme bool, err error) {
 	u, explicitScheme, _, err = ParseTargetAuth(target)
 	return u, explicitScheme, err
@@ -635,16 +637,15 @@ func ParseTarget(target string) (u *url.URL, explicitScheme bool, err error) {
 // them, so they can't reach findings, logs or error messages; Scan sends
 // the header with every request to the target instead of only the first.
 func ParseTargetAuth(target string) (u *url.URL, explicitScheme bool, authorization string, err error) {
-	explicitScheme = strings.Contains(target, "://")
-	if !explicitScheme {
-		target = "https://" + target
-	}
-	u, err = url.Parse(target)
-	if err != nil || u.Host == "" {
-		return nil, false, "", fmt.Errorf("%q is not a valid URL or hostname", redactUserinfo(target))
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return nil, false, "", fmt.Errorf("unsupported scheme %q, use http or https", u.Scheme)
+	u, explicitScheme, err = ratelimit.ParseTarget(target)
+	if err != nil {
+		// The kit quotes the target in its error, password included.
+		full := target
+		if !strings.Contains(full, "://") {
+			full = "https://" + full
+		}
+		msg := strings.ReplaceAll(err.Error(), strconv.Quote(full), strconv.Quote(redactUserinfo(full)))
+		return nil, false, "", errors.New(msg)
 	}
 	if u.User != nil {
 		pass, _ := u.User.Password()

@@ -87,9 +87,16 @@ func TestParseTargetAuth(t *testing.T) {
 	if u, _, _ := ParseTarget("http://a:b@example.com"); u.User != nil {
 		t.Errorf("ParseTarget keeps userinfo: %v", u)
 	}
-	_, _, _, err = ParseTargetAuth("http://admin:Hunter2Pass@exa mple.com")
-	if err == nil || strings.Contains(err.Error(), "Hunter2Pass") || !strings.Contains(err.Error(), "admin:xxxxx@") {
-		t.Errorf("bad URL error: %v", err)
+	// The kit's error quotes the target; the password must not survive,
+	// with or without a scheme and with characters %q escapes.
+	for _, bad := range []string{"http://admin:Hunter2Pass@exa mple.com", "admin:Hunter2Pass@exa mple.com", "http://admin:Hunter2Pass\"@exa mple.com"} {
+		_, _, _, err = ParseTargetAuth(bad)
+		if err == nil || strings.Contains(err.Error(), "Hunter2Pass") || !strings.Contains(err.Error(), "admin:xxxxx@") {
+			t.Errorf("%q: bad URL error: %v", bad, err)
+		}
+	}
+	if _, _, _, err := ParseTargetAuth("ftp://a:b@example.com"); err == nil || err.Error() != `unsupported scheme "ftp", use http or https` {
+		t.Errorf("ftp: %v", err)
 	}
 	if got := RedactURL("https://u:pw@example.com/x"); got != "https://u:xxxxx@example.com/x" {
 		t.Errorf("RedactURL = %q", got)
