@@ -225,7 +225,7 @@ func (p *Pretty) Finding(f engine.Finding) {
 	if f.Confidence == "low" {
 		label += ", likely"
 	}
-	fmt.Fprintf(p.w, "[%s] %s - %s\n", label, f.Title, place(f))
+	fmt.Fprintf(p.w, "[%s] %s - %s\n", label, f.Title, Place(f))
 	if f.Confidence == "low" && f.Caveat != "" {
 		fmt.Fprintf(p.w, "  %s\n", f.Caveat)
 	}
@@ -244,10 +244,10 @@ func (p *Pretty) Finding(f engine.Finding) {
 	}
 }
 
-// place is where a finding is, for the terminal: its URL, or for a local
+// Place is where a finding is, for the terminal: its URL, or for a local
 // finding its path inside the scanned folder. JSON keeps the full file://
 // URL; on screen it is mostly the temporary folder's name repeated.
-func place(f engine.Finding) string {
+func Place(f engine.Finding) string {
 	if u, err := url.Parse(f.URL); err == nil && u.Scheme == "file" && f.Path != "" {
 		return f.Path
 	}
@@ -467,7 +467,7 @@ func (p *Pretty) sorted(findings []engine.Finding) {
 		if f.Confidence == "low" {
 			label += ", likely"
 		}
-		fmt.Fprintf(p.w, "[%s] %s - %s\n", label, f.Title, place(f))
+		fmt.Fprintf(p.w, "[%s] %s - %s\n", label, f.Title, Place(f))
 	}
 }
 

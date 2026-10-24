@@ -7,8 +7,11 @@ package report
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/RhythmShahriar/tuner/engine"
 )
@@ -228,4 +231,57 @@ func writeJSON(w io.Writer, reports []Report, o WriteOptions) error {
 func JSONLine(w io.Writer, f engine.Finding) error {
 	f = sanitized(f)
 	return encoder(w).Encode(stampedFinding{f, Fingerprint(f, "")})
+}
+
+// ReadJSON reads what the json writer wrote: one report, or an array of
+// reports and failed targets. It is how a saved report comes back for a
+// diff or a later rendering.
+func ReadJSON(r io.Reader) ([]Report, []TargetError, error) {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, nil, err
+	}
+	var items []json.RawMessage
+	if err := json.Unmarshal(data, &items); err != nil {
+		items = []json.RawMessage{data}
+	}
+	var (
+		reports []Report
+		failed  []TargetError
+	)
+	for _, item := range items {
+		var probe struct {
+			Schema string  `json:"schema"`
+			Error  *string `json:"error"`
+		}
+		if err := json.Unmarshal(item, &probe); err != nil {
+			return nil, nil, fmt.Errorf("not a Tuner JSON report: %w", err)
+		}
+		if probe.Schema == "" && probe.Error != nil {
+			var t TargetError
+			if err := json.Unmarshal(item, &t); err != nil {
+				return nil, nil, fmt.Errorf("not a Tuner JSON report: %w", err)
+			}
+			failed = append(failed, sanitized(t))
+			continue
+		}
+		if !strings.HasPrefix(probe.Schema, "rhythm-tuner/") {
+			return nil, nil, errors.New("not a Tuner JSON report: no rhythm-tuner schema")
+		}
+		var rep Report
+		if err := json.Unmarshal(item, &rep); err != nil {
+			return nil, nil, fmt.Errorf("not a Tuner JSON report: %w", err)
+		}
+		if rep.Result == nil {
+			rep.Result = &engine.Result{}
+		}
+		rep.Duration = time.Duration(rep.DurationMS) * time.Millisecond
+		// A report from disk is untrusted like a site: clean it as New does.
+		clean := sanitized(*rep.Result)
+		rep.Result = &clean
+		rep.Version, rep.CheckSet, rep.CheckPack = SafeText(rep.Version), SafeText(rep.CheckSet), SafeText(rep.CheckPack)
+		rep.SetStatus(rep.Status())
+		reports = append(reports, rep)
+	}
+	return reports, failed, nil
 }

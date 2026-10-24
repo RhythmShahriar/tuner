@@ -194,7 +194,7 @@ func writeSARIF(w io.Writer, reports []Report, o WriteOptions) error {
 				rule.HelpURI = helpURI(f.ID)
 				run.Tool.Driver.Rules = append(run.Tool.Driver.Rules, rule)
 			}
-			msg := f.Title + " at " + place(f)
+			msg := f.Title + " at " + Place(f)
 			if len(f.Evidence.Matched) > 0 {
 				// The secrets themselves go in the result's properties, not below.
 				var ev []string
