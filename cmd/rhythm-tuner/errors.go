@@ -45,7 +45,7 @@ var (
 func flagError(fs *flag.FlagSet, err error) error {
 	msg := err.Error()
 	if m := flagUndefined.FindStringSubmatch(msg); m != nil {
-		// -Q may be -q, but --x should not turn into -o: compare long
+		// -Q may be -q while --x should not turn into -o: compare long
 		// names with long names and letters with letters.
 		typed := strings.TrimLeft(m[1], "-")
 		var names []string

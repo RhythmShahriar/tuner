@@ -28,8 +28,8 @@
 //
 // A key Tuner does not know is an error, so a typo never quietly turns a
 // setting off. Header values may name environment variables as ${NAME};
-// one that is unset or empty is an error, and header values never appear
-// in an error message.
+// one that is unset or empty is an error. Header values never appear in
+// an error message.
 package tunerconfig
 
 import (
@@ -273,7 +273,7 @@ var envRef = regexp.MustCompile(`\$\{([^}]*)\}`)
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // expand replaces each ${NAME} in v. An unset or empty variable is an
-// error: CI systems pass a missing secret as an empty string, and a scan
+// error: CI systems pass a missing secret as an empty string. A scan
 // without its credentials would report a login page as the site.
 func expand(v string, env func(string) (string, bool)) (string, error) {
 	var err error

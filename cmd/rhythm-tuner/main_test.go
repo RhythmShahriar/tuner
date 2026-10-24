@@ -1158,7 +1158,7 @@ func TestCommandName(t *testing.T) {
 }
 
 // The users' N7 table: each mistake gets one line that says what to type,
-// not the whole help, and exits 2.
+// not the whole help. Each exits 2.
 func TestFriendlyUsageErrors(t *testing.T) {
 	t.Chdir(t.TempDir())
 	os.Mkdir("wp", 0o755)
@@ -1307,8 +1307,8 @@ func TestConfigFile(t *testing.T) {
 		t.Errorf("ignored JSONL: exit %d\n%s", code, out)
 	}
 
-	// Flags win: --fail-on medium fails on the missing headers, and a
-	// target on the command line replaces the file's.
+	// Flags win: --fail-on medium fails on the missing headers. A target
+	// on the command line replaces the file's.
 	if code, _, errs := tuner(t, "scan", "--json", "--fail-on", "medium"); code != exitFindings {
 		t.Errorf("--fail-on over config: exit %d: %s", code, errs)
 	}

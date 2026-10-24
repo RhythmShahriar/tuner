@@ -376,7 +376,7 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 // today is the date ignore entries are checked against. Tests change it.
 var today = time.Now
 
-// applyConfig reads .tuner.yml, or the --config file, and fills in every
+// applyConfig reads .tuner.yml (or the --config file) and fills in every
 // option the command line left unset: flags always win. Its targets are
 // used only when none were given in any other way.
 func (p *scanPlan) applyConfig(set map[string]bool, haveTargets bool) error {
@@ -549,8 +549,8 @@ func flagValue(name string, o *scanOptions) string {
 	return strconv.Itoa(o.parallel)
 }
 
-// checkIDs catches a check ID that matches nothing, such as a typo in
-// --id leak-dotnev, and suggests the closest one. Patterns with globs and
+// checkIDs catches a check ID that matches nothing (such as a typo in
+// --id leak-dotnev) and suggests the closest one. Patterns with globs and
 // IDs the advisors and local scans produce are left to engine.Select.
 func checkIDs(all []*engine.Check, ids, excluded []string) error {
 	known := make([]string, len(all))
@@ -608,7 +608,7 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 		}
 	}
 	// Shown even with -q: an expired ignore can fail a CI run that passed
-	// yesterday, and the log should say why.
+	// yesterday. The log should say why.
 	for _, ig := range p.expired {
 		printErr(stderr, "scan", ig.Note())
 	}
