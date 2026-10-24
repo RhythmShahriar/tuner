@@ -190,7 +190,8 @@ func (ss *session) guardDial(dial dialFunc) dialFunc {
 // guardTransport returns a copy of rt whose connections go through
 // guardDial, or rt itself when that isn't possible: a custom RoundTripper,
 // or a proxy, where the dial reaches the proxy and not the site. Redirects
-// are still checked by name in checkRedirect then.
+// are still checked by name in checkRedirect then, which a DNS answer that
+// changes between the check and the proxy's own lookup gets past.
 func (ss *session) guardTransport(rt http.RoundTripper) http.RoundTripper {
 	if rt == nil {
 		rt = http.DefaultTransport
@@ -224,6 +225,11 @@ func normHost(u *url.URL) string { return strings.TrimSuffix(strings.ToLower(u.H
 // sameSite reports whether to is the scan's own host as seen from from:
 // the same host or its www/apex twin, with the same scheme and port or an
 // upgrade from http to https (which usually changes the port).
+//
+// The upgrade accepts any https port on that host on purpose: dev and
+// staging sites often pair ports such as 8080 and 8443, and a server that
+// answers for the host already chose where its https lives. The user's
+// headers follow it there.
 func sameSite(from, to *url.URL) bool {
 	a, b := normHost(from), normHost(to)
 	if a != b && strings.TrimPrefix(a, "www.") != strings.TrimPrefix(b, "www.") {
