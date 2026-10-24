@@ -9,3 +9,9 @@ import "embed"
 
 //go:embed */*.yaml
 var FS embed.FS
+
+// License is the MIT license the checks are published under, for exports
+// that ship checks outside this repository.
+//
+//go:embed LICENSE
+var License string
