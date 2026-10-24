@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/charmbracelet/x/term"
 
@@ -21,7 +22,7 @@ const (
 	exitOK       = 0
 	exitFindings = 1 // findings at or above --fail-on
 	exitUsage    = 2
-	exitError    = 3 // a target couldn't be scanned
+	exitError    = 3 // a target couldn't be scanned, or --fail-on can't trust the result
 	exitCanceled = 130
 )
 
@@ -49,29 +50,110 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "update":
 		return cmdUpdate(args[1:], stdout, stderr)
 	}
-	fmt.Fprintf(stderr, "rhythm tuner: unknown command %q\n\n", args[0])
-	usage(stderr)
+	if c := lookupCommand(args[0]); c != nil {
+		return c.Run(args[1:], stdout, stderr)
+	}
+	printErr(stderr, "", unknownCommand(args[0]))
 	return exitUsage
 }
 
+// invokedAsEnv is set by the rhythm router to what the user typed, such
+// as "rhythm tuner" or "rhythm t", so help and hints name a command that
+// works. A binary run on its own goes by its file name instead.
+const invokedAsEnv = "RHYTHM_INVOKED_AS"
+
+// argv0 is how the binary was started. Tests change it.
+var argv0 = os.Args[0]
+
+// cmdName is the command people type to run Tuner: "rhythm tuner" through
+// the rhythm router, else the binary's own name, such as rhythm-tuner
+// after go install.
+func cmdName() string {
+	if s := strings.TrimSpace(os.Getenv(invokedAsEnv)); s != "" && len(s) <= 64 && printable(s) {
+		return s
+	}
+	base := argv0[strings.LastIndexAny(argv0, `/\`)+1:]
+	if len(base) > 4 && strings.EqualFold(base[len(base)-4:], ".exe") {
+		base = base[:len(base)-4]
+	}
+	if base == "" || !printable(base) {
+		return "rhythm-tuner"
+	}
+	return base
+}
+
+// printable reports whether s has no control characters, so it can go in
+// help text without moving the cursor or ringing the bell.
+func printable(s string) bool {
+	return !strings.ContainsFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f })
+}
+
+// usageLine is one command in the Usage list: what to type, a summary
+// and any more summary lines.
+type usageLine struct {
+	cmd, summary string
+	more         []string
+}
+
+// formatUsage lines up the summaries one column after the longest command,
+// and no earlier than the flag descriptions below them.
+func formatUsage(lines []usageLine) string {
+	width := 34
+	for _, l := range lines {
+		width = max(width, len(l.cmd))
+	}
+	var b strings.Builder
+	for _, l := range lines {
+		fmt.Fprintf(&b, "  %-*s %s\n", width, l.cmd, l.summary)
+		for _, m := range l.more {
+			fmt.Fprintf(&b, "%s%s\n", strings.Repeat(" ", width+3), m)
+		}
+	}
+	return b.String()
+}
+
 func usage(w io.Writer) {
+	name := cmdName()
+	lines := []usageLine{
+		{cmd: name, summary: "interactive picker"},
+		{cmd: name + " scan <url>... [flags]", summary: "scan one or more sites"},
+		{cmd: name + " scan <dir> [flags]", summary: "scan a site's files on the server"},
+		{cmd: name + " checks [flags]", summary: "list the checks (" + name + " checks --help)"},
+		{cmd: name + " update [--clear]", summary: "refresh the check pack and the WordPress and", more: []string{"PHP vulnerability data now"}},
+	}
 	fmt.Fprintln(w, kit.Banner("rhythm tuner", version))
-	fmt.Fprint(w, `Find what's out of tune in your WordPress & PHP sites.
+	fmt.Fprint(w, "Find what's out of tune in your WordPress & PHP sites.\n\nUsage:\n"+
+		formatUsage(append(lines, commandUsage(name)...)))
+	fmt.Fprint(w, strings.ReplaceAll(scanHelp()+helpFooter(), "rhythm tuner", name))
+}
 
-Usage:
-  rhythm tuner                       interactive picker
-  rhythm tuner scan <url>... [flags] scan one or more sites
-  rhythm tuner scan <dir> [flags]    scan a site's files on the server
-  rhythm tuner checks [flags]        list the checks (rhythm tuner checks --help)
-  rhythm tuner update [--clear]      refresh the check pack and vulnerability data now
+// scanUsage is rhythm tuner scan --help: the scan commands and flags only.
+func scanUsage(w io.Writer) {
+	name := cmdName()
+	fmt.Fprintln(w, kit.Banner("rhythm tuner", version))
+	fmt.Fprint(w, "Usage:\n"+formatUsage([]usageLine{
+		{cmd: name + " scan <url>... [flags]", summary: "scan one or more sites"},
+		{cmd: name + " scan <dir> [flags]", summary: "scan a site's files on the server"},
+	}))
+	fmt.Fprint(w, strings.ReplaceAll(scanHelp()+helpFooter(), "rhythm tuner", name))
+}
 
+// scanHelp lists the scan flags, extension sections included. Every
+// "rhythm tuner" in it and in helpFooter becomes the name Tuner was
+// started as.
+func scanHelp() string {
+	return `
 Output:
       --json               JSON report (an array when scanning several targets)
+      --json-array         JSON report that is always an array, also for one
+                           target; targets that failed appear as
+                           {"target": ..., "error": ...}
       --jsonl              one JSON finding per line, streamed as found
       --sarif              SARIF 2.1.0 for GitHub code scanning
       --md                 Markdown for issues and pull requests
   -o, --output <file>      write the report to a file (format from the extension)
-                           and keep the live view on the terminal
+                           and keep the live view on the terminal; an existing
+                           file is replaced only once the new report is complete
   -q, --quiet              findings only
       --plain              no color, boxes or glyphs (screen readers, logs)
       --no-color           no color
@@ -79,7 +161,7 @@ Output:
                            prints the version)
 
 Checks:
-      --profile <name>     quick, default or deep (default "default")
+      --profile <name>     quick or default (default "default")
       --tags <list>        only checks with these tags, e.g. leak,wordpress
       --exclude-tags <list>
       --id <list>          only these checks; globs allowed, e.g. leak-*
@@ -88,10 +170,12 @@ Checks:
       --checks <dir>       load checks from a directory
       --no-check-updates   use the built-in checks, not the latest check pack
       --no-vulns           skip known-vulnerability matching
-      --offline            use cached vulnerability data and check pack only
+      --offline            use cached vulnerability data and check pack only;
+                           no update check either (RHYTHM_OFFLINE=1 skips it too)
 
 Requests:
-      --rate <n>           max requests per second per site (default 5)
+      --rate <n>           max requests per second per site (default 5, or 50
+                           for localhost and private or link-local addresses)
   -c, --concurrency <n>    requests in flight per site (default 10)
       --timeout <d>        per-request timeout (default 10s)
       --retries <n>        retries after network errors or 429/503 (default 2)
@@ -99,6 +183,8 @@ Requests:
   -A, --user-agent <ua>    User-Agent header
   -H, --header <h>         extra header, "Name: value" (repeatable)
       --cookie <c>         Cookie header, e.g. "session=abc"
+                           -H and --cookie go with every request, also after
+                           the home page redirects to another host
       --proxy <url>        http, https or socks5 proxy (HTTPS_PROXY also works)
   -k, --insecure           don't verify TLS certificates
 
@@ -114,16 +200,41 @@ Batch and CI:
       --stdin              read targets from stdin
       --parallel <n>       sites scanned at once (default 4)
       --fail-on <level>    exit 1 if a finding is at or above this severity
+      --min-confidence <c> confirmed or likely (default "likely"); with
+                           confirmed, --fail-on skips likely findings such
+                           as CVEs a distro PHP build may have patched
       --baseline <file>    hide findings already in this JSON report
+      --allow-missing-vulns
+                           let --fail-on pass a site whose vulnerability data
+                           couldn't be fetched (otherwise exit 3)
+      --allow-partial      let --fail-on pass a scan that was blocked or cut
+                           short (otherwise exit 3)
+      --config <file>      read settings from this file instead of .tuner.yml
+      --no-config          don't read .tuner.yml; use it in folders you
+                           don't trust
+                           A .tuner.yml in the current folder sets targets,
+                           profile, rate, concurrency, fail_on,
+                           min_confidence, baseline, headers (${TUNER_VAR}
+                           reads the environment; only TUNER_ names), tags,
+                           ids and ignore entries (id, path, reason, until).
+                           Flags win over it. When it sets the targets, -H
+                           and --cookie need targets on the command line.
 
-Vulnerability data comes from WPVulnerability (CC0), api.wordpress.org and
+` + extensionHelp()
+}
+
+// helpFooter explains where data comes from, the exit codes and examples.
+func helpFooter() string {
+	return `Vulnerability data comes from WPVulnerability (CC0), api.wordpress.org and
 php.net; Composer packages are matched with OSV.dev. New checks arrive as a
-check pack from Tuner's GitHub releases. Both are cached under your user cache
+check pack from Tuner's GitHub releases (checksummed, not signed; built-in
+checks only with --no-check-updates). Both are cached under your user cache
 directory and refreshed automatically once a day; TUNER_VULN_API,
 TUNER_WPORG_API, TUNER_PHPNET_API, TUNER_OSV_API and TUNER_CHECKS_URL point
 Tuner at mirrors.
 
-Exit codes: 0 ok · 1 findings at --fail-on · 2 usage error · 3 scan error · 130 interrupted
+Exit codes: 0 ok · 1 findings at --fail-on · 2 usage error · 130 interrupted ·
+3 scan error, or --fail-on with missing vulnerability data or a partial scan
 
 Examples:
   rhythm tuner scan example.com
@@ -132,5 +243,5 @@ Examples:
   rhythm tuner scan staging.example.com -H "Authorization: Basic dXNlcjpwYXNz" -k
   rhythm tuner scan example.com --sarif --fail-on high > tuner.sarif
   rhythm tuner scan /var/www/example.com --php /usr/bin/php8.3
-`)
+`
 }

@@ -5,7 +5,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"strings"
 
@@ -30,8 +29,10 @@ func pick(stdout, stderr io.Writer) int {
 				if s == "" {
 					return errors.New("enter a URL, a hostname, or a site folder")
 				}
-				if isLocalPath(s) {
-					_, err := local.Root(s)
+				if isLocal, err := classifyTarget(s); err != nil || isLocal {
+					if err == nil {
+						_, err = local.Root(s)
+					}
 					return err
 				}
 				_, _, err := engine.ParseTarget(s)
@@ -42,7 +43,6 @@ func pick(stdout, stderr io.Writer) int {
 			Options(
 				huh.NewOption("Quick: top checks, about 30 requests", string(engine.ProfileQuick)),
 				huh.NewOption("Default: every polite check", string(engine.ProfileDefault)),
-				huh.NewOption("Deep: same as default today; future checks that send many requests", string(engine.ProfileDeep)),
 			).
 			Value(&profile),
 		huh.NewSelect[string]().
@@ -60,7 +60,7 @@ func pick(stdout, stderr io.Writer) int {
 		if errors.Is(err, huh.ErrUserAborted) {
 			return exitCanceled
 		}
-		fmt.Fprintln(stderr, "rhythm tuner:", err)
+		printErr(stderr, "", err)
 		return exitError
 	}
 	args := []string{strings.TrimSpace(target), "--profile", profile}
