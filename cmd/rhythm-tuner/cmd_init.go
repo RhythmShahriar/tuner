@@ -18,6 +18,10 @@ import (
 	"github.com/RhythmShahriar/tuner/engine"
 )
 
+func init() {
+	registerCommand(command{Name: "init", Summary: "write a CI workflow that runs Tuner", Run: cmdInit})
+}
+
 // cmdInit runs `rhythm tuner init`. Its one subcommand, ci, writes a GitHub
 // Actions workflow that scans with the Tuner Action.
 //

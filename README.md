@@ -87,6 +87,7 @@ That's it. Tuner fingerprints the site, learns how it answers "not found", runs 
 | Scan all your clients' sites | `rhythm tuner scan -l sites.txt -o all.md` |
 | Fail a CI build on serious findings | `rhythm tuner scan yoursite.com --fail-on high` |
 | Fail CI only on confirmed findings, not *likely* ones | `rhythm tuner scan yoursite.com --fail-on high --min-confidence confirmed` |
+| Add a GitHub Actions workflow that scans on every push | `rhythm tuner init ci --target https://staging.yoursite.com` |
 | See what changed since the last scan and fail CI only on new findings | `rhythm tuner scan yoursite.com --since last.json --fail-on-new high` |
 | Send new findings to Slack, Discord, a webhook or email | `rhythm tuner scan yoursite.com --since last.json --notify slack://…` |
 | Write a client-ready HTML report with your agency's name | `rhythm tuner scan yoursite.com --html client.html --brand-name "Your Agency"` |
