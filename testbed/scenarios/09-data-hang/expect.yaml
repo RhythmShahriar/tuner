@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
 # SPDX-License-Identifier: AGPL-3.0-only
 
-# QA gap 9, bug 14. a vulnerability data service that never answers. The scan must not wait
+# QA gap 9, bug 14. A vulnerability data service that never answers. The scan must not wait
 # long, must say known vulnerabilities weren't checked and must not pass
 # a --fail-on gate as if they had been.
 title: a vulnerability data service that never answers fails the gate quickly
