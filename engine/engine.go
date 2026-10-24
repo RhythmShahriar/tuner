@@ -23,7 +23,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/RhythmShahriar/rhythm/kit/ratelimit"
@@ -641,7 +640,13 @@ func (s *Scanner) open(ctx context.Context, target string, h Hooks) (*session, *
 	} else {
 		home, err = ss.retry(ctx, ss.follow, "GET", u.String(), notHTTPS)
 	}
-	if err != nil && !explicit && ctx.Err() == nil && !errors.As(err, new(*RedirectError)) {
+	fallback := err != nil && !explicit && ctx.Err() == nil && !errors.As(err, new(*RedirectError))
+	// A broken handshake, a bad certificate or a timeout on 443 can be an
+	// on-path attacker's doing. Falling back to http then would hand them
+	// the user's headers, cookies and URL credentials in clear, so with
+	// those only a plain http server's answer or a refused port counts.
+	keptHTTPS := fallback && len(ss.headers) > 0 && !plainHTTPOnly(err)
+	if fallback && !keptHTTPS {
 		u.Scheme = "http"
 		ss.origin.Scheme = "http"
 		home, err = ss.do(ctx, ss.follow, "GET", u.String())
@@ -654,6 +659,8 @@ func (s *Scanner) open(ctx context.Context, target string, h Hooks) (*session, *
 			return nil, nil, re
 		case errors.As(err, &cv):
 			return nil, nil, fmt.Errorf("can't reach %s: invalid TLS certificate: %w (rerun with --insecure to scan anyway)", u.Host, cv.Err)
+		case keptHTTPS:
+			return nil, nil, fmt.Errorf("can't reach %s over https: %w (your headers and cookies are never sent over plain http; give http://%s to scan over http)", u.Host, err, u.Host)
 		}
 		return nil, nil, fmt.Errorf("can't reach %s: %w", u.Host, err)
 	}
@@ -826,8 +833,14 @@ func notHTTPS(err error) bool {
 	var rh tls.RecordHeaderError
 	var alert tls.AlertError
 	var cv *tls.CertificateVerificationError
-	return errors.Is(err, http.ErrSchemeMismatch) || errors.As(err, &rh) || errors.As(err, &alert) || errors.As(err, &cv) ||
-		errors.Is(err, syscall.ECONNREFUSED)
+	return plainHTTPOnly(err) || errors.As(err, &rh) || errors.As(err, &alert) || errors.As(err, &cv)
+}
+
+// plainHTTPOnly reports whether err shows that the host has no https at
+// all: a plain http server answered or the port refused the connection.
+// Only these let open fall back to http with the user's headers.
+func plainHTTPOnly(err error) bool {
+	return errors.Is(err, http.ErrSchemeMismatch) || connRefused(err)
 }
 
 // attempt returns a non-zero retryIn when the request is worth repeating.
