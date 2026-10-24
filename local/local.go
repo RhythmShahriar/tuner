@@ -39,6 +39,10 @@ type Options struct {
 	// path. Empty means "php". The CLI's PHP may differ from the one the
 	// web server runs, so point this at the right one when several exist.
 	PHP string
+	// PHPExplicit is true when the user chose the binary (--php). php is
+	// then asked even when the folder doesn't look like a PHP project. A
+	// non-empty PHP counts as explicit too.
+	PHPExplicit bool
 	// Exec runs a command without a shell and returns its stdout. Tests
 	// replace it; nil runs the real binary.
 	Exec func(ctx context.Context, name string, args ...string) ([]byte, error)
@@ -95,11 +99,16 @@ func Scan(ctx context.Context, root string, opts Options, h engine.Hooks) (*engi
 		add("laravel")
 		add("php")
 	}
-	if v, build, warn := s.phpVersion(ctx); v != "" {
-		add("php")
-		fp.PHP, fp.PHPBuild = v, build
-	} else if warn != "" {
-		s.warnings = append(s.warnings, warn)
+	// The php binary describes this machine, not the folder: only ask it
+	// when the folder is PHP code, or a Next.js app would get the
+	// laptop's PHP vulnerabilities.
+	if s.opts.PHPExplicit || s.opts.PHP != "" || fp.Has("php") || isPHPProject(abs) {
+		if v, build, warn := s.phpVersion(ctx); v != "" {
+			add("php")
+			fp.PHP, fp.PHPBuild, fp.PHPSource = v, build, s.phpSource()
+		} else if warn != "" {
+			s.warnings = append(s.warnings, warn)
+		}
 	}
 	if h.Fingerprint != nil {
 		h.Fingerprint(*fp)

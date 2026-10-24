@@ -252,9 +252,9 @@ func (s *scan) wpConfig() []engine.Finding {
 		case !isLit:
 			// Computed, e.g. getenv(); can't judge it.
 		case lit == "" || lit == saltPlaceholder:
-			weak = append(weak, name+" is the sample placeholder or empty")
+			weak = append(weak, name+" is the sample placeholder or empty"+cfg.at(name))
 		case seen[lit]:
-			weak = append(weak, name+" repeats another key's value")
+			weak = append(weak, name+" repeats another key's value"+cfg.at(name))
 		}
 		if isLit {
 			seen[lit] = true
@@ -273,7 +273,7 @@ func (s *scan) wpConfig() []engine.Finding {
 	if on, _ := cfg.truthy("WP_DEBUG"); on {
 		display, known := cfg.truthy("WP_DEBUG_DISPLAY")
 		display = display || !known // WordPress shows errors unless told not to
-		ev := []string{"WP_DEBUG is true"}
+		ev := []string{"WP_DEBUG is true" + cfg.at("WP_DEBUG")}
 		sev := engine.Low
 		if display {
 			ev = append(ev, "WP_DEBUG_DISPLAY is not false, so errors are shown on pages")
@@ -281,9 +281,9 @@ func (s *scan) wpConfig() []engine.Finding {
 		}
 		if v, ok := cfg.defines["WP_DEBUG_LOG"]; ok {
 			if p, isStr := phpString(v); isStr && p != "" && p != "0" && p != "1" {
-				ev = append(ev, "WP_DEBUG_LOG writes to "+p)
+				ev = append(ev, "WP_DEBUG_LOG writes to "+p+cfg.at("WP_DEBUG_LOG"))
 			} else if l, _ := cfg.truthy("WP_DEBUG_LOG"); l {
-				ev = append(ev, "WP_DEBUG_LOG writes to wp-content/debug.log, which is public by default")
+				ev = append(ev, "WP_DEBUG_LOG writes to wp-content/debug.log, which is public by default"+cfg.at("WP_DEBUG_LOG"))
 				sev = engine.Medium
 			}
 		}
@@ -298,7 +298,7 @@ func (s *scan) wpConfig() []engine.Finding {
 	mods, _ := cfg.truthy("DISALLOW_FILE_MODS")
 	if !edit && !mods {
 		out = append(out, s.maybe(cfg, true, "local-wp-file-edit", engine.Low, path,
-			"The dashboard file editor is enabled", []string{"DISALLOW_FILE_EDIT is not set to true"},
+			"The dashboard file editor is enabled", []string{"DISALLOW_FILE_EDIT is not set to true" + cfg.at("DISALLOW_FILE_EDIT")},
 			"An attacker who gets into any administrator account can edit plugin and theme PHP and run code on the server.",
 			"Add define( 'DISALLOW_FILE_EDIT', true ); to wp-config.php.",
 			"wordpress", "config", "hardening"))
@@ -307,7 +307,7 @@ func (s *scan) wpConfig() []engine.Finding {
 	// Table prefix.
 	if cfg.prefix == "wp_" {
 		out = append(out, s.finding("local-wp-table-prefix", engine.Info, path,
-			"Database tables use the default wp_ prefix", []string{"$table_prefix = 'wp_'"},
+			"Database tables use the default wp_ prefix", []string{"$table_prefix = 'wp_'" + lineNote(cfg.prefixLine)},
 			"Automated SQL injection attacks assume wp_ table names. A custom prefix is minor defense in depth, not a fix.",
 			"Use a custom prefix on new installs. Changing it on a live site means renaming tables and options, so only do it with a backup.",
 			"wordpress", "config", "hardening"))
@@ -316,7 +316,7 @@ func (s *scan) wpConfig() []engine.Finding {
 	// HTTPS for the dashboard.
 	if ssl, _ := cfg.truthy("FORCE_SSL_ADMIN"); !ssl {
 		out = append(out, s.maybe(cfg, true, "local-wp-force-ssl-admin", engine.Info, path,
-			"FORCE_SSL_ADMIN is not set", []string{"FORCE_SSL_ADMIN is not true"},
+			"FORCE_SSL_ADMIN is not set", []string{"FORCE_SSL_ADMIN is not true" + cfg.at("FORCE_SSL_ADMIN")},
 			"If the site can be reached over plain HTTP, logins and admin cookies could travel unencrypted. Most sites already redirect to HTTPS at the server.",
 			"Add define( 'FORCE_SSL_ADMIN', true ); to wp-config.php once the site has a certificate.",
 			"wordpress", "config", "hardening"))
@@ -349,7 +349,10 @@ func (s *scan) maybe(cfg config, absent bool, id string, sev engine.Severity, pa
 // config is what wp-config.php defines, read as text.
 type config struct {
 	defines map[string]string // name → raw PHP expression; the first definition wins
+	lines   map[string]int    // name → line of that definition
 	prefix  string
+	// prefixLine is the line $table_prefix is set on, 0 if it isn't.
+	prefixLine int
 	// includes is true when the file loads other PHP files (besides
 	// wp-settings.php) that may define what's missing here.
 	includes bool
@@ -357,14 +360,17 @@ type config struct {
 
 func parseConfig(src string) config {
 	code := stripComments(src)
-	c := config{defines: map[string]string{}}
-	for _, m := range defineRe.FindAllStringSubmatch(code, -1) {
-		if _, dup := c.defines[m[1]]; !dup {
-			c.defines[m[1]] = strings.TrimSpace(m[2])
+	c := config{defines: map[string]string{}, lines: map[string]int{}}
+	for _, m := range defineRe.FindAllStringSubmatchIndex(code, -1) {
+		name := code[m[2]:m[3]]
+		if _, dup := c.defines[name]; !dup {
+			c.defines[name] = strings.TrimSpace(code[m[4]:m[5]])
+			c.lines[name] = lineAt([]byte(code), m[0])
 		}
 	}
-	if m := tablePrefix.FindStringSubmatch(code); m != nil {
-		c.prefix = m[1]
+	if m := tablePrefix.FindStringSubmatchIndex(code); m != nil {
+		c.prefix = code[m[2]:m[3]]
+		c.prefixLine = lineAt([]byte(code), m[0])
 	}
 	for _, m := range includeRe.FindAllString(code, -1) {
 		if !strings.Contains(m, "wp-settings.php") {
@@ -372,6 +378,18 @@ func parseConfig(src string) config {
 		}
 	}
 	return c
+}
+
+// at renders where name is defined, e.g. " (line 14)", or "" when it isn't.
+func (c config) at(name string) string { return lineNote(c.lines[name]) }
+
+// lineNote renders a 1-based line number for evidence, or "" for 0.
+// Findings have no line field yet, so it goes in the evidence text.
+func lineNote(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (line %d)", n)
 }
 
 func (c config) defined(name string) bool {
@@ -418,7 +436,8 @@ func phpString(v string) (string, bool) {
 }
 
 // stripComments removes PHP comments, leaving strings intact, so a
-// commented-out define() doesn't count.
+// commented-out define() doesn't count. Line breaks are kept so offsets
+// in the result still give the file's line numbers.
 func stripComments(src string) string {
 	var b strings.Builder
 	b.Grow(len(src))
@@ -449,6 +468,7 @@ func stripComments(src string) string {
 				return b.String()
 			}
 			b.WriteByte(' ')
+			b.WriteString(strings.Repeat("\n", strings.Count(src[i+2:i+2+end], "\n")))
 			i += 2 + end + 1
 		default:
 			b.WriteByte(c)
