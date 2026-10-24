@@ -5,6 +5,7 @@
 package report
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 
@@ -25,6 +26,42 @@ type Report struct {
 	CheckPack  string                  `json:"check_pack,omitempty"` // the pack's version, when check_set is pack
 	Baselined  int                     `json:"baselined"`            // findings a baseline file hid
 	*engine.Result
+
+	root string // the local scan root, for fingerprints; see WriteOptions.Root
+}
+
+// stampedFinding is a finding as the JSON report writes it, with its
+// fingerprint. Once engine.Finding has its own Fingerprint field (contract
+// D1) this field shadows it with the same value.
+type stampedFinding struct {
+	engine.Finding
+	Fingerprint string `json:"fingerprint"`
+}
+
+// MarshalJSON writes the report with a fingerprint on every finding, so a
+// saved report works as a baseline and diffs line up across runs.
+func (r Report) MarshalJSON() ([]byte, error) {
+	type plain Report // no methods, so encoding it doesn't come back here
+	if r.Result == nil {
+		return marshal(plain(r))
+	}
+	// Findings and Warnings are listed again so they shadow the embedded
+	// ones and keep their place at the end of the object.
+	out := struct {
+		plain
+		Findings []stampedFinding `json:"findings"`
+		Warnings []string         `json:"warnings,omitempty"`
+	}{plain: plain(r), Findings: make([]stampedFinding, 0, len(r.Findings)), Warnings: r.Warnings}
+	for _, f := range r.Findings {
+		out.Findings = append(out.Findings, stampedFinding{f, Fingerprint(f, r.root)})
+	}
+	return marshal(out)
+}
+
+func marshal(v any) ([]byte, error) {
+	var b bytes.Buffer
+	err := encoder(&b).Encode(v)
+	return bytes.TrimSuffix(b.Bytes(), []byte("\n")), err
 }
 
 // New wraps a scan result for output. The report holds a copy of res with
@@ -66,10 +103,17 @@ func writeJSON(w io.Writer, reports []Report, o WriteOptions) error {
 	enc := encoder(w)
 	enc.SetIndent("", "  ")
 	if len(reports) == 1 && !o.Many && !o.Array && len(o.Failed) == 0 {
-		return enc.Encode(reports[0])
+		r := reports[0]
+		if o.Root != "" {
+			r.root = o.Root
+		}
+		return enc.Encode(r)
 	}
 	all := make([]any, 0, len(reports)+len(o.Failed))
 	for _, r := range reports {
+		if o.Root != "" {
+			r.root = o.Root
+		}
 		all = append(all, r)
 	}
 	for _, f := range o.Failed {
@@ -80,4 +124,8 @@ func writeJSON(w io.Writer, reports []Report, o WriteOptions) error {
 
 // JSONLine writes one finding as a single line, for streaming into jq or
 // a log pipeline while the scan runs.
-func JSONLine(w io.Writer, f engine.Finding) error { return encoder(w).Encode(f) }
+// The finding is cleaned with SafeText like every report.
+func JSONLine(w io.Writer, f engine.Finding) error {
+	f = sanitized(f)
+	return encoder(w).Encode(stampedFinding{f, Fingerprint(f, "")})
+}

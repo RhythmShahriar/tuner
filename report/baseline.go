@@ -4,59 +4,205 @@
 package report
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
+	"slices"
+	"strings"
 
 	"github.com/RhythmShahriar/tuner/engine"
 )
 
 // Baseline holds findings that were accepted earlier and should no longer
 // be reported. Any previous JSON report works as a baseline file.
-type Baseline map[string]bool
+//
+// Findings match on their Fingerprint, so a baseline keeps working when
+// the site moves host or a local copy moves folder. A finding that lists
+// advisories is accepted one advisory at a time: when a plugin that was
+// accepted with one low advisory gains a critical one, the finding comes
+// back with only the new advisory.
+type Baseline struct {
+	keys map[string]bool // fingerprints; fingerprint + " " + advisory ID for advisories
+	// legacy holds the "ID URL" keys of reports saved before fingerprints.
+	// They still count for one release, for findings without advisories.
+	legacy map[string]bool
+	old    string // the file, when it was saved before fingerprints
+}
 
-func baselineKey(f engine.Finding) string { return f.ID + " " + f.URL }
+func advisoryKey(fp, id string) string { return fp + " " + id }
+
+func legacyKey(f engine.Finding) string { return f.ID + " " + f.URL }
 
 // LoadBaseline reads a JSON report (one object or an array of them).
 func LoadBaseline(path string) (Baseline, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // path comes from the user's --baseline flag
 	if err != nil {
-		return nil, err
+		return Baseline{}, err
 	}
-	var many []struct{ Findings []engine.Finding }
+	type saved struct {
+		Target   string
+		Findings []stampedFinding
+	}
+	var many []saved
 	if err := json.Unmarshal(data, &many); err != nil {
-		var one struct{ Findings []engine.Finding }
+		var one saved
 		if err := json.Unmarshal(data, &one); err != nil {
-			return nil, fmt.Errorf("%s is not a Tuner JSON report: %w", path, err)
+			return Baseline{}, fmt.Errorf("%s is not a Tuner JSON report: %w", path, err)
 		}
 		many = append(many, one)
 	}
-	b := Baseline{}
+	b := Baseline{keys: map[string]bool{}, legacy: map[string]bool{}}
 	for _, r := range many {
 		for _, f := range r.Findings {
-			b[baselineKey(f)] = true
+			fp := f.Fingerprint
+			if !strings.HasPrefix(fp, fingerprintPrefix) {
+				b.old = path
+				fp = Fingerprint(f.Finding, r.Target)
+				if len(f.Advisories) == 0 {
+					b.legacy[legacyKey(f.Finding)] = true
+				}
+			}
+			if len(f.Advisories) == 0 {
+				b.keys[fp] = true
+			}
+			for _, a := range f.Advisories {
+				b.keys[advisoryKey(fp, a.ID)] = true
+			}
 		}
 	}
 	return b, nil
 }
 
-// Has reports whether f was in the baseline. A nil Baseline has nothing.
-func (b Baseline) Has(f engine.Finding) bool { return b[baselineKey(f)] }
+// Has reports whether f is in the baseline: for a finding with advisories,
+// whether every one of them is. A zero Baseline has nothing.
+func (b Baseline) Has(f engine.Finding) bool {
+	fp := Fingerprint(f, "")
+	if len(f.Advisories) > 0 {
+		return !slices.ContainsFunc(f.Advisories, func(a engine.Advisory) bool { return !b.keys[advisoryKey(fp, a.ID)] })
+	}
+	return b.keys[fp] || b.legacy[legacyKey(f)]
+}
 
 // Filter removes baselined findings from res and recomputes its score.
-// It returns how many were suppressed.
+// A finding with some new advisories stays, narrowed to the new ones. It
+// returns how many findings were hidden; the caller puts that in
+// Report.Baselined.
 func (b Baseline) Filter(res *engine.Result) int {
-	if len(b) == 0 {
+	if len(b.keys) == 0 && len(b.legacy) == 0 {
 		return 0
 	}
 	kept := res.Findings[:0]
 	for _, f := range res.Findings {
-		if !b.Has(f) {
-			kept = append(kept, f)
+		if b.Has(f) {
+			continue
 		}
+		if len(f.Advisories) > 0 {
+			fp := Fingerprint(f, "")
+			var fresh []engine.Advisory
+			for _, a := range f.Advisories {
+				if !b.keys[advisoryKey(fp, a.ID)] {
+					fresh = append(fresh, a)
+				}
+			}
+			f = narrow(f, fresh)
+		}
+		kept = append(kept, f)
 	}
 	n := len(res.Findings) - len(kept)
 	res.Findings = kept
 	res.Score = engine.Score(kept)
+	if b.old != "" {
+		res.Warnings = append(res.Warnings, fmt.Sprintf(
+			"baseline %s predates finding fingerprints; save a fresh one with --json -o %s", b.old, b.old))
+	}
 	return n
+}
+
+var knownVulns = regexp.MustCompile(`: \d+ known vulnerabilit(?:y|ies)$`)
+
+// narrow rewrites an advisory finding to list only fresh, the advisories
+// the baseline doesn't accept. Title, evidence, severity and tags follow;
+// the severity never rises above what the full finding had.
+func narrow(f engine.Finding, fresh []engine.Advisory) engine.Finding {
+	if len(fresh) == len(f.Advisories) {
+		return f
+	}
+	accepted := len(f.Advisories) - len(fresh)
+
+	// The advisors write one evidence line per advisory, in order, for the
+	// first few; reuse those lines and build the rest the same way.
+	lines := map[string]string{}
+	for i, a := range f.Advisories {
+		if i < len(f.Evidence.Matched) && !strings.HasPrefix(f.Evidence.Matched[i], "…and ") {
+			lines[a.ID] = f.Evidence.Matched[i]
+		}
+	}
+	const shown = 5
+	var ev []string
+	worst, kev := engine.Info, false
+	for i, a := range fresh {
+		if s := ratedOrMedium(a.Severity); s.Rank() < worst.Rank() {
+			worst = s
+		}
+		kev = kev || a.KEV
+		if i < shown {
+			ev = append(ev, cmp.Or(lines[a.ID], advisoryLine(a)))
+		}
+	}
+	if more := len(fresh) - shown; more > 0 {
+		ev = append(ev, fmt.Sprintf("…and %d more", more))
+	}
+	if f.Severity.Rank() >= 0 && worst.Rank() < f.Severity.Rank() {
+		worst = f.Severity
+	}
+
+	plural := "ies"
+	if len(fresh) == 1 {
+		plural = "y"
+	}
+	newTitle := fmt.Sprintf(": %d new known vulnerabilit%s", len(fresh), plural)
+	if knownVulns.MatchString(f.Title) {
+		f.Title = knownVulns.ReplaceAllLiteralString(f.Title, newTitle)
+	} else {
+		f.Title += fmt.Sprintf(" (%d new)", len(fresh))
+	}
+
+	f.Advisories = slices.Clone(fresh)
+	f.Severity = worst
+	f.Evidence.Matched = ev
+	f.Tags = slices.DeleteFunc(slices.Clone(f.Tags), func(t string) bool { return t == "known-exploited" })
+	if kev {
+		f.Tags = append(f.Tags, "known-exploited")
+	}
+	if f.Impact != "" {
+		f.Impact += fmt.Sprintf(" The baseline accepts %d of them, so only the new ones are listed.", accepted)
+	}
+	return f
+}
+
+// ratedOrMedium counts an unrated advisory as medium, as the advisors do.
+func ratedOrMedium(s engine.Severity) engine.Severity {
+	if s.Rank() < 0 {
+		return engine.Medium
+	}
+	return s
+}
+
+// advisoryLine renders an advisory the way the advisors' evidence does,
+// e.g. "CRITICAL CVE-2024-1234 SQL injection (fixed in 2.1) [actively exploited]".
+func advisoryLine(a engine.Advisory) string {
+	line := strings.ToUpper(string(cmp.Or(a.Severity, "unrated")))
+	if len(a.CVEs) > 0 && a.Title != a.CVEs[0] {
+		line += " " + a.CVEs[0]
+	}
+	line += " " + a.Title
+	if a.FixedIn != "" {
+		line += " (fixed in " + a.FixedIn + ")"
+	}
+	if a.KEV {
+		line += " [actively exploited]"
+	}
+	return line
 }

@@ -10,8 +10,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-
-	"github.com/RhythmShahriar/tuner/engine"
 )
 
 // TargetError is a target that could not be scanned. Batch reports list
@@ -118,11 +116,3 @@ func init() {
 	RegisterWriter("sarif", ".sarif", writeSARIF)
 	RegisterWriter("md", ".md", writeMarkdown)
 }
-
-// Stamp gives every finding in res its stable fingerprint. root is the
-// folder a local scan started from ("" for remote scans).
-//
-// Until engine.Finding has a Fingerprint field (contract D1), writers and
-// baselines compute fingerprints when they need them, so Stamp has
-// nothing to store yet.
-func Stamp(res *engine.Result, root string) {}

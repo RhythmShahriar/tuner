@@ -185,3 +185,36 @@ func TestWriteJSONLIsEmpty(t *testing.T) {
 		t.Errorf("jsonl wrote %q, %v", b.String(), err)
 	}
 }
+
+// Every finding in a JSON report, and every streamed line, carries its
+// fingerprint, so the file works as a baseline and diffs line up.
+func TestJSONCarriesFingerprints(t *testing.T) {
+	res := sampleResult("https://a.test")
+	want := Fingerprint(res.Findings[0], "")
+	var b bytes.Buffer
+	_ = Write("json", &b, []Report{New(res, "1")}, WriteOptions{})
+	var one struct {
+		Findings []struct{ Fingerprint string }
+		Warnings []string
+	}
+	if err := json.Unmarshal(b.Bytes(), &one); err != nil || len(one.Findings) != 1 || one.Findings[0].Fingerprint != want {
+		t.Errorf("fingerprint missing (%v):\n%s", err, b.String())
+	}
+	if strings.Index(b.String(), `"findings"`) < strings.Index(b.String(), `"throttled"`) {
+		t.Error("findings moved before the totals")
+	}
+
+	b.Reset()
+	_ = JSONLine(&b, res.Findings[0])
+	if !strings.Contains(b.String(), `"fingerprint":"`+want+`"`) || strings.Count(b.String(), "\n") != 1 {
+		t.Errorf("jsonl line: %s", b.String())
+	}
+
+	// A local finding without a target takes its root from the options.
+	local := &engine.Result{Findings: []engine.Finding{{ID: "local-x", URL: "file:///srv/site/a.php"}}}
+	b.Reset()
+	_ = Write("json", &b, []Report{New(local, "1")}, WriteOptions{Root: "/srv/site"})
+	if !strings.Contains(b.String(), Fingerprint(engine.Finding{ID: "local-x", URL: "file:///elsewhere/a.php", Target: "/elsewhere"}, "")) {
+		t.Errorf("root not used:\n%s", b.String())
+	}
+}
