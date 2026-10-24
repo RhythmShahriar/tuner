@@ -5,24 +5,19 @@ package local
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
-	"reflect"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/RhythmShahriar/tuner/vulns"
+	"github.com/RhythmShahriar/tuner/vulns/cache"
 )
 
 const (
@@ -42,7 +37,8 @@ type OSV struct {
 	TTL       time.Duration // 0 means 24h
 	Offline   bool          // never fetch; use cached data however old
 
-	once sync.Once
+	once  sync.Once
+	store *cache.Store
 }
 
 // Package is a Composer package at an installed version.
@@ -91,6 +87,7 @@ func (o *OSV) init() {
 		if o.TTL <= 0 {
 			o.TTL = 24 * time.Hour
 		}
+		o.store = &cache.Store{Dir: o.CacheDir, TTL: o.TTL, Offline: o.Offline, Format: osvCacheFormat}
 	})
 }
 
@@ -125,8 +122,7 @@ func (o *OSV) Check(ctx context.Context, pkgs []Package) OSVResult {
 	staleUsed := map[Package]bool{}
 	var missing []Package
 	for _, p := range pkgs {
-		var e cached[[]string]
-		ok := readCache(o.path("packagist", packageKey(p)), &e)
+		e, ok, _ := cache.Read[[]string](o.store, "packagist", packageKey(p))
 		switch {
 		case ok && o.Offline:
 			ids[p] = e.Data
@@ -148,7 +144,7 @@ func (o *OSV) Check(ctx context.Context, pkgs []Package) OSVResult {
 			switch v, ok := got[p]; {
 			case ok:
 				ids[p] = v
-				writeCache(o.path("packagist", packageKey(p)), newCached(packageKey(p), v))
+				_ = cache.Write(o.store, "packagist", packageKey(p), v)
 			case stale[p] != nil:
 				ids[p] = stale[p]
 				staleUsed[p] = true
@@ -226,38 +222,19 @@ func (o *OSV) Refresh(ctx context.Context) (ok, failed int, err error) {
 	var pkgs []Package
 	seen := map[Package]bool{}
 	ids := map[string]bool{}
-	walk := func(kind string, each func(key string, raw []byte)) error {
-		dir := filepath.Join(o.CacheDir, kind)
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				return nil
+	err = o.store.Entries(func(kind, key string) error {
+		switch kind {
+		case "packagist":
+			if p, ok := parsePackageKey(key); ok && !seen[p] {
+				seen[p] = true
+				pkgs = append(pkgs, p)
 			}
-			return err
-		}
-		for _, d := range entries {
-			if d.IsDir() || filepath.Ext(d.Name()) != ".json" {
-				continue
-			}
-			raw, _ := os.ReadFile(filepath.Join(dir, d.Name())) //nolint:gosec // inside the cache dir
-			var e struct {
-				Key string `json:"key"`
-			}
-			_ = json.Unmarshal(raw, &e)
-			each(cmp.Or(e.Key, strings.TrimSuffix(d.Name(), ".json")), raw)
+		case "vulns":
+			ids[key] = true
 		}
 		return nil
-	}
-	err = walk("packagist", func(key string, _ []byte) {
-		if p, ok := parsePackageKey(key); ok && !seen[p] {
-			seen[p] = true
-			pkgs = append(pkgs, p)
-		}
 	})
 	if err != nil {
-		return 0, 0, err
-	}
-	if err := walk("vulns", func(key string, _ []byte) { ids[key] = true }); err != nil {
 		return 0, 0, err
 	}
 
@@ -270,7 +247,7 @@ func (o *OSV) Refresh(ctx context.Context) (ok, failed int, err error) {
 				continue
 			}
 			ok++
-			writeCache(o.path("packagist", packageKey(p)), newCached(packageKey(p), v))
+			_ = cache.Write(o.store, "packagist", packageKey(p), v)
 			for _, id := range v {
 				ids[id] = true
 			}
@@ -361,9 +338,7 @@ func (o *OSV) batch(ctx context.Context, pkgs []Package) (map[Package][]string, 
 // a cache past its TTL. force ignores the TTL and reports a failed fetch
 // instead of falling back to the cached copy.
 func (o *OSV) vuln(ctx context.Context, id string, force bool) (*OSVVuln, bool, error) {
-	path := o.path("vulns", id)
-	var e cached[*OSVVuln]
-	ok := readCache(path, &e)
+	e, ok, _ := cache.Read[*OSVVuln](o.store, "vulns", id)
 	stale := ok && time.Since(e.Fetched) > o.TTL
 	if ok && !force && (o.Offline || !stale) {
 		return e.Data, stale, nil
@@ -378,7 +353,7 @@ func (o *OSV) vuln(ctx context.Context, id string, force bool) (*OSVVuln, bool, 
 		}
 		return nil, false, err
 	}
-	writeCache(path, newCached(id, &v))
+	_ = cache.Write(o.store, "vulns", id, &v)
 	return &v, false, nil
 }
 
@@ -418,71 +393,6 @@ func (o *OSV) do(ctx context.Context, method, u string, body, v any) error {
 	return nil
 }
 
-// --- cache ---
-
 // osvCacheFormat versions the entries on disk; bump it whenever what an
 // entry holds changes, so older entries are fetched again.
 const osvCacheFormat = 1
-
-type cached[T any] struct {
-	Format  int       `json:"format"`
-	Key     string    `json:"key,omitempty"` // what was looked up, for Refresh
-	Fetched time.Time `json:"fetched"`
-	Data    T         `json:"data"`
-}
-
-// newCached wraps data fetched now for key.
-func newCached[T any](key string, data T) cached[T] {
-	return cached[T]{Format: osvCacheFormat, Key: key, Fetched: time.Now().UTC(), Data: data}
-}
-
-// usable reports whether e can be served: the current format, a fetch
-// time and data (an empty, non-nil ID list included).
-func (e *cached[T]) usable() bool {
-	rv := reflect.ValueOf(e.Data)
-	return e.Format == osvCacheFormat && !e.Fetched.IsZero() && rv.IsValid() && !rv.IsZero()
-}
-
-var unsafeKey = regexp.MustCompile(`[^A-Za-z0-9._@-]`)
-
-func (o *OSV) path(kind, key string) string {
-	if o.CacheDir == "" {
-		return ""
-	}
-	key = unsafeKey.ReplaceAllString(strings.ReplaceAll(key, "/", "~"), "_")
-	if key == "" || key == "." || key == ".." {
-		return ""
-	}
-	return filepath.Join(o.CacheDir, kind, key+".json")
-}
-
-// readCache decodes the entry at path, reporting false for a missing,
-// corrupt, old-format or empty entry.
-func readCache[T any](path string, e *cached[T]) bool {
-	if path == "" {
-		return false
-	}
-	b, err := os.ReadFile(path) //nolint:gosec // path is built from the cache dir and a sanitized key
-	return err == nil && json.Unmarshal(b, e) == nil && e.usable()
-}
-
-// writeCache writes atomically so a crash never leaves a torn file. A
-// cache that can't be written is not an error.
-func writeCache(path string, v any) {
-	if path == "" {
-		return
-	}
-	b, err := json.Marshal(v)
-	if err != nil || os.MkdirAll(filepath.Dir(path), 0o700) != nil {
-		return
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
-	if err != nil {
-		return
-	}
-	_, werr := tmp.Write(b)
-	cerr := tmp.Close()
-	if werr != nil || cerr != nil || os.Rename(tmp.Name(), path) != nil {
-		_ = os.Remove(tmp.Name())
-	}
-}

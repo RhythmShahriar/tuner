@@ -22,6 +22,7 @@ import (
 
 	"github.com/RhythmShahriar/tuner/engine"
 	"github.com/RhythmShahriar/tuner/fingerprint"
+	"github.com/RhythmShahriar/tuner/vulns/cache"
 )
 
 // Responses shaped like the real APIs, including their inconsistencies:
@@ -265,12 +266,12 @@ func age(t *testing.T, dir string, by time.Duration) {
 			return err
 		}
 		data, _ := os.ReadFile(p)
-		var e cacheEntry[map[string]any]
+		var e cache.Entry[map[string]any]
 		if err := jsonUnmarshal(data, &e); err != nil {
 			t.Fatal(err)
 		}
 		e.Fetched = e.Fetched.Add(-by)
-		return writeJSON(p, e)
+		return cache.WriteJSON(p, e)
 	})
 }
 

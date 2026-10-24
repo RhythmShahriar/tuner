@@ -20,6 +20,7 @@ import (
 
 	"github.com/RhythmShahriar/tuner/engine"
 	"github.com/RhythmShahriar/tuner/vulns"
+	"github.com/RhythmShahriar/tuner/vulns/cache"
 )
 
 // osvRecords are shaped like api.osv.dev's /v1/vulns answers.
@@ -101,10 +102,10 @@ const lockFile = `{
 
 func TestComposer(t *testing.T) {
 	api := newFakeOSV(t)
-	cache := t.TempDir()
+	cacheDir := t.TempDir()
 	root := tree(t, map[string]string{"composer.lock": lockFile, "index.php": "<?php"})
 	osv := func(offline bool) *OSV {
-		return &OSV{HTTP: api.Client(), Base: api.URL, CacheDir: cache, Offline: offline, UserAgent: "test"}
+		return &OSV{HTTP: api.Client(), Base: api.URL, CacheDir: cacheDir, Offline: offline, UserAgent: "test"}
 	}
 
 	res := scanTree(t, root, Options{OSV: osv(false)})
@@ -171,11 +172,11 @@ func TestParseEnv(t *testing.T) {
 
 func TestOSVCorruptCache(t *testing.T) {
 	api := newFakeOSV(t)
-	cache := t.TempDir()
+	cacheDir := t.TempDir()
 	pkgs := []Package{{"laravel/framework", "8.0.0"}, {"acme/abandoned", "1.0.0"}, {"monolog/monolog", "2.9.1"}}
 	write := func(rel, body string) {
 		t.Helper()
-		p := filepath.Join(cache, filepath.FromSlash(rel))
+		p := filepath.Join(cacheDir, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -190,20 +191,20 @@ func TestOSVCorruptCache(t *testing.T) {
 	write("vulns/GHSA-bbbb.json", `["not","an","entry"]`)
 
 	// Offline: every bad entry is missing; nothing crashes.
-	o := &OSV{CacheDir: cache, Offline: true}
+	o := &OSV{CacheDir: cacheDir, Offline: true}
 	found, failed, _ := o.Query(context.Background(), pkgs)
 	if len(found) != 0 || failed != 3 {
 		t.Errorf("offline: found %v, %d failed", found, failed)
 	}
 
 	// Online: fetched again, then served from the rewritten cache.
-	o = &OSV{HTTP: api.Client(), Base: api.URL, CacheDir: cache}
+	o = &OSV{HTTP: api.Client(), Base: api.URL, CacheDir: cacheDir}
 	found, failed, err := o.Query(context.Background(), pkgs)
 	if failed != 0 || err != nil || len(found[pkgs[0]]) != 2 || len(found[pkgs[1]]) != 1 {
 		t.Fatalf("online: found %v, %d failed, %v", found, failed, err)
 	}
 	api.down.Store(true)
-	o = &OSV{CacheDir: cache, Offline: true}
+	o = &OSV{CacheDir: cacheDir, Offline: true}
 	if found, failed, _ = o.Query(context.Background(), pkgs); failed != 0 || len(found[pkgs[0]]) != 2 {
 		t.Errorf("offline after refetch: found %v, %d failed", found, failed)
 	}
@@ -211,10 +212,10 @@ func TestOSVCorruptCache(t *testing.T) {
 
 func TestOSVStatus(t *testing.T) {
 	api := newFakeOSV(t)
-	cache := t.TempDir()
+	cacheDir := t.TempDir()
 	ctx := context.Background()
 	pkgs := []Package{{"laravel/framework", "8.0.0"}, {"monolog/monolog", "2.9.1"}}
-	o := func() *OSV { return &OSV{HTTP: api.Client(), Base: api.URL, CacheDir: cache} }
+	o := func() *OSV { return &OSV{HTTP: api.Client(), Base: api.URL, CacheDir: cacheDir} }
 
 	if r := o().Check(ctx, pkgs); r.Status() != vulns.StatusOK || r.Total != 2 {
 		t.Errorf("all ok: %+v", r)
@@ -222,16 +223,17 @@ func TestOSVStatus(t *testing.T) {
 
 	// Past the TTL with the API down: stale copies, so partial.
 	for _, dir := range []string{"packagist", "vulns"} {
-		ents, _ := os.ReadDir(filepath.Join(cache, dir))
+		ents, _ := os.ReadDir(filepath.Join(cacheDir, dir))
 		for _, e := range ents {
-			p := filepath.Join(cache, dir, e.Name())
-			var c cached[json.RawMessage]
-			b, _ := os.ReadFile(p)
-			if err := json.Unmarshal(b, &c); err != nil {
+			p := filepath.Join(cacheDir, dir, e.Name())
+			var c cache.Entry[json.RawMessage]
+			if err := cache.ReadJSON(p, &c); err != nil {
 				t.Fatal(err)
 			}
 			c.Fetched = c.Fetched.Add(-48 * time.Hour)
-			writeCache(p, c)
+			if err := cache.WriteJSON(p, c); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	api.down.Store(true)
@@ -261,15 +263,15 @@ func TestOSVStatus(t *testing.T) {
 
 func TestOSVRefresh(t *testing.T) {
 	api := newFakeOSV(t)
-	cache := t.TempDir()
+	cacheDir := t.TempDir()
 	ctx := context.Background()
-	o := &OSV{HTTP: api.Client(), Base: api.URL, CacheDir: cache}
+	o := &OSV{HTTP: api.Client(), Base: api.URL, CacheDir: cacheDir}
 	if ok, failed, err := o.Refresh(ctx); ok+failed != 0 || err != nil {
 		t.Errorf("empty cache: %d %d %v", ok, failed, err)
 	}
 
 	// An entry from before keys were stored: the file name is enough.
-	p := filepath.Join(cache, "packagist", "laravel_framework@8.0.0.json")
+	p := filepath.Join(cacheDir, "packagist", "laravel_framework@8.0.0.json")
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -281,17 +283,20 @@ func TestOSVRefresh(t *testing.T) {
 	if ok != 3 || failed != 0 || err != nil || api.hits.Load()-hits != 3 {
 		t.Errorf("refresh: ok %d failed %d err %v, %d requests", ok, failed, err, api.hits.Load()-hits)
 	}
-	var e cached[[]string]
-	if !readCache(p, &e) || len(e.Data) != 2 || e.Key != "laravel/framework@8.0.0" {
+	store := &cache.Store{Dir: cacheDir, Format: osvCacheFormat}
+	if e, ok, _ := cache.Read[[]string](store, "packagist", "laravel/framework@8.0.0"); !ok || len(e.Data) != 2 || e.Key != "laravel/framework@8.0.0" {
 		t.Errorf("refreshed entry: %+v", e)
 	}
 
 	// The API down: failures are counted, the cached copies kept.
 	api.down.Store(true)
-	if ok, failed, _ := o.Refresh(ctx); ok != 0 || failed != 3 || !readCache(p, &e) {
+	if ok, failed, _ := o.Refresh(ctx); ok != 0 || failed != 3 {
 		t.Errorf("down: ok %d failed %d", ok, failed)
 	}
-	if _, _, err := (&OSV{CacheDir: cache, Offline: true}).Refresh(ctx); err == nil {
+	if _, ok, _ := cache.Read[[]string](store, "packagist", "laravel/framework@8.0.0"); !ok {
+		t.Error("down: cached copy lost")
+	}
+	if _, _, err := (&OSV{CacheDir: cacheDir, Offline: true}).Refresh(ctx); err == nil {
 		t.Error("offline refresh should fail")
 	}
 }

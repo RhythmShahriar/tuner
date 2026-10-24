@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/RhythmShahriar/tuner/engine"
+	"github.com/RhythmShahriar/tuner/vulns/cache"
 )
 
 // When a site hides its PHP version, critical or actively exploited PHP
@@ -38,8 +39,13 @@ func (b Branch) Supported(now time.Time) bool {
 
 // PHPBranches returns every PHP release branch php.net knows, oldest first.
 func (c *Client) PHPBranches(ctx context.Context) (branches []Branch, stale bool, err error) {
+	branches, info, err := c.phpBranches(ctx)
+	return branches, info.Stale, err
+}
+
+func (c *Client) phpBranches(ctx context.Context) ([]Branch, cache.Info, error) {
 	c.init()
-	return load(c, ctx, "php.net/releases", "states", func(ctx context.Context) ([]Branch, error) {
+	return cache.Load(c.store, ctx, "php.net/releases", "states", func(ctx context.Context) ([]Branch, error) {
 		// {"8": {"8.4": {"state": "stable", "security_support_end": "2028-12-31T00:00:00+00:00"}}};
 		// ancient branches have a null state.
 		var raw map[string]map[string]struct {
