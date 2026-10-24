@@ -206,6 +206,20 @@ func TestReportExtensionNotifyFirstRun(t *testing.T) {
 			t.Errorf("%v: %v %+v", args, err, msg)
 		}
 	}
+	// -q drops the first-run line, and --fail-on-new doesn't fail a first
+	// run: with nothing to compare, every finding would count as new.
+	e, err := notifyPlanned(t, srv, "--since", missing, "--notify-all-first", "--fail-on-new", "low", "--notify", hookURL(srv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &scanPlan{}
+	p.o.quiet = true
+	var errs bytes.Buffer
+	if code, _ := e.Finished(p, thisWeek(), &errs); code != exitOK || errs.String() != "" {
+		t.Errorf("quiet first run: exit %d:\n%s", code, errs.String())
+	}
+	<-bodies
+
 	// Without --notify-all-first a missing report is still an error (exit 3).
 	var ue usageError
 	if _, err := notifyPlanned(t, srv, "--since", missing, "--notify", hookURL(srv)); err == nil || errors.As(err, &ue) {
@@ -261,5 +275,55 @@ func TestReportExtensionNotifyPlanErrors(t *testing.T) {
 	t.Setenv("TUNER_SMTP_PASSWORD", "hunter2")
 	if _, err := notifyPlanned(t, nil, "--since", old, "--notify", "smtp://me@mail.test?to=a@b.test&from=t@b.test"); err != nil {
 		t.Errorf("smtp with password: %v", err)
+	}
+}
+
+// review: a scan that stopped early says so next to the diff, even with
+// -q, and lists what it didn't reach as not seen rather than fixed.
+func TestReportExtensionIncompleteScan(t *testing.T) {
+	old, _ := diffFixtures(t)
+	e, err := planned(t, "--since", old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := thisWeek()
+	now[0].SetStatus(report.Status{StoppedBy: "max-time"})
+	var errs bytes.Buffer
+	if code, err := e.Finished(&scanPlan{}, now, &errs); err != nil || code != exitOK {
+		t.Fatalf("exit %d, %v", code, err)
+	}
+	want := "1 new, 0 fixed since " + old + "; 1 not seen (scan incomplete)\n" +
+		"  Incomplete: stopped by --max-time\n" +
+		"  new: [HIGH] leak-git-config - https://a.test/.git/config\n" +
+		"  not seen: [CRITICAL] leak-dotenv - https://a.test/.env\n"
+	if errs.String() != want {
+		t.Errorf("got:\n%s\nwant:\n%s", errs.String(), want)
+	}
+	errs.Reset()
+	p := &scanPlan{}
+	p.o.quiet = true
+	if _, _ = e.Finished(p, now, &errs); !strings.Contains(errs.String(), "Incomplete: stopped by --max-time") {
+		t.Errorf("quiet dropped the note:\n%s", errs.String())
+	}
+}
+
+// A blocked scan with nothing new still notifies, so a schedule doesn't
+// go quiet while the firewall keeps it out.
+func TestReportExtensionNotifyIncomplete(t *testing.T) {
+	srv, bodies := hookReceiver(t, http.StatusOK)
+	cur := saveReport(t, "same.json", finding("xmlrpc", "/xmlrpc.php", engine.Low), finding("leak-git-config", "/.git/config", engine.High))
+	e, err := notifyPlanned(t, srv, "--since", cur, "--notify", hookURL(srv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := thisWeek()
+	now[0].SetStatus(report.Status{StoppedBy: "waf", BlockedBy: "sucuri"})
+	if code, err := e.Finished(&scanPlan{}, now, io.Discard); err != nil || code != exitOK {
+		t.Fatalf("exit %d, %v", code, err)
+	}
+	var msg notify.Message
+	if err := json.Unmarshal(<-bodies, &msg); err != nil || len(msg.Findings) != 0 ||
+		len(msg.Incomplete) != 1 || msg.Incomplete[0] != "Incomplete: blocked by Sucuri challenge" {
+		t.Errorf("%v: %+v", err, msg)
 	}
 }

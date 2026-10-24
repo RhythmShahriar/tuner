@@ -59,7 +59,8 @@ func (e *reportExtension) Help() string {
                            is new and what was fixed
       --fail-on-new <level>
                            exit 1 if a new finding is at or above this
-                           severity (needs --since)
+                           severity (needs --since; not applied on a
+                           first run with --notify-all-first)
       --notify <url>       send new findings to Slack, Discord, a webhook or
                            email (repeatable; needs --since): slack://...,
                            discord://..., webhook+https://... or
@@ -191,9 +192,16 @@ func (e *reportExtension) Finished(p *scanPlan, reports []report.Report, stderr 
 	since := e.since
 	if e.firstRun {
 		since = ""
-		fmt.Fprintln(stderr, "no previous report; sending all findings")
+		if !p.o.quiet {
+			fmt.Fprintln(stderr, "no previous report; sending all findings")
+		}
 	} else {
 		fmt.Fprintln(stderr, res.Summary(e.since))
+		// The notes stay under -q: without them "0 new, 12 fixed" from a
+		// blocked scan reads like good news.
+		for _, n := range res.Incomplete {
+			fmt.Fprintln(stderr, "  "+n)
+		}
 		if !p.o.quiet {
 			for _, n := range res.New {
 				fmt.Fprintln(stderr, "  new: "+n.Line())
@@ -201,10 +209,15 @@ func (e *reportExtension) Finished(p *scanPlan, reports []report.Report, stderr 
 			for _, f := range res.Fixed {
 				fmt.Fprintln(stderr, "  fixed: "+f.Line())
 			}
+			for _, f := range res.NotSeen {
+				fmt.Fprintln(stderr, "  not seen: "+f.Line())
+			}
 		}
 	}
 	code := exitOK
-	if e.level != "" && res.NewAtOrAbove(e.level) {
+	// On a first run nothing is new yet: everything would fail the build
+	// the first time a schedule runs, before there is anything to compare.
+	if e.level != "" && !e.firstRun && res.NewAtOrAbove(e.level) {
 		code = exitFindings
 	}
 	if len(e.notifiers) > 0 && !e.send(res, since, reports, p.o.quiet, stderr) && e.notifyStrict {
@@ -221,7 +234,9 @@ func (e *reportExtension) send(res diff.Result, since string, reports []report.R
 		version = reports[0].Version
 	}
 	msg := notify.Build(res, since, e.minLevel, version)
-	if len(msg.Findings) == 0 {
+	// A scan that didn't finish still notifies, with its notes: a blocked
+	// weekly scan that stays silent looks like a clean week.
+	if len(msg.Findings) == 0 && len(msg.Incomplete) == 0 {
 		if !quiet {
 			fmt.Fprintf(stderr, "nothing new at %s or above, so no notification\n", e.minLevel)
 		}
