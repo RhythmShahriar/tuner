@@ -44,8 +44,11 @@ class Downloader {
 	/** @var bool verify checksums.txt's cosign signature when cosign is present. */
 	private $verifySignature;
 
+	/** @var callable (string $message): void: tells the user about a weaker check. */
+	private $warn;
+
 	/**
-	 * @param array $opts version, cache_dir, platform, fetch, run, base_url, verify_signature.
+	 * @param array $opts version, cache_dir, platform, fetch, run, base_url, verify_signature, warn.
 	 */
 	public function __construct( array $opts = array() ) {
 		$this->version         = isset( $opts['version'] ) ? ltrim( (string) $opts['version'], 'v' ) : 'latest';
@@ -55,6 +58,14 @@ class Downloader {
 		$this->run             = isset( $opts['run'] ) ? $opts['run'] : array( $this, 'execv' );
 		$this->baseUrl         = isset( $opts['base_url'] ) ? rtrim( $opts['base_url'], '/' ) : '';
 		$this->verifySignature = isset( $opts['verify_signature'] ) ? (bool) $opts['verify_signature'] : true;
+		$this->warn            = isset( $opts['warn'] ) ? $opts['warn'] : array( __CLASS__, 'cliWarning' );
+	}
+
+	/** cliWarning prints a WP-CLI warning, or nothing outside WP-CLI. */
+	public static function cliWarning( $message ) {
+		if ( class_exists( 'WP_CLI' ) ) {
+			\WP_CLI::warning( $message );
+		}
 	}
 
 	/**
@@ -91,8 +102,15 @@ class Downloader {
 			$checksums = $this->must( "$base/checksums.txt", 'checksums.txt' );
 		}
 
-		if ( $this->verifySignature && $this->cosignAvailable() ) {
-			$this->verifyCosign( $base, $version, $dir, $checksums );
+		if ( $this->verifySignature ) {
+			if ( $this->cosignAvailable() ) {
+				$this->verifyCosign( $base, $version, $dir, $checksums );
+			} else {
+				// Most WordPress hosts have no cosign, and checksums.txt comes
+				// from the same server as the archive, so say how little was
+				// checked.
+				call_user_func( $this->warn, 'cosign not found; checked the SHA-256 against checksums.txt only.' );
+			}
 		}
 
 		$this->verifyChecksum( $archive, $archiveB, $checksums );

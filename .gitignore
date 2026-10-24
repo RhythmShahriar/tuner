@@ -18,6 +18,8 @@ coverage.*
 # WP-CLI package dependencies (a library: no composer.lock either)
 /wp-cli/vendor/
 /wp-cli/composer.lock
+/wp-cli/.phpunit.result.cache
+/wp-cli/.phpunit.cache/
 
 # Testbed: generated plugin tree and local release packaging
 /testbed/wp/content/

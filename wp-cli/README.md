@@ -39,6 +39,8 @@ wp tuner scan --format=json > tuner.json
    downloaded from the GitHub release.
 2. When `cosign` is on PATH, `checksums.txt`'s keyless signature is
    verified first, pinned to `RhythmShahriar/tuner` and the release tag.
+   Without cosign the command warns `cosign not found; checked the
+   SHA-256 against checksums.txt only.` and goes on.
 3. The archive's SHA-256 is checked against `checksums.txt`.
 4. The one binary is written to a temporary file in the WP-CLI cache,
    renamed into place and its SHA-256 recorded beside it. Later runs
@@ -46,7 +48,8 @@ wp tuner scan --format=json > tuner.json
    damaged install is downloaded again.
 
 The exit code is Tuner's own: 0 ok, 1 findings at `--fail-on`, 2 a usage
-error, 3 a target could not be scanned.
+error, 3 a target could not be scanned. When Tuner stops with 2 or 3
+before writing a report, its own error is shown and its code kept.
 
 `TUNER_DOWNLOAD_URL` overrides the download base for a mirror or a test
 (an `https://` or `file://` URL). It must hold the archive and

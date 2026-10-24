@@ -96,6 +96,16 @@ class ScanCommand {
 		$scanArgs = self::buildScanArgs( $target, $assoc_args );
 		$result   = self::runBinary( $binary, $scanArgs );
 
+		// A usage or scan error (2, 3) often leaves no report. Show Tuner's
+		// own reason and keep its code, instead of failing on the missing
+		// report with exit 1, which reads as "findings at --fail-on".
+		$failure = self::scanFailure( $result );
+		if ( null !== $failure ) {
+			WP_CLI::error( $failure, false );
+			WP_CLI::halt( $result['code'] );
+			return;
+		}
+
 		if ( 'json' === $format ) {
 			try {
 				WP_CLI::line( self::jsonReport( $result['stdout'] ) );
@@ -150,6 +160,23 @@ class ScanCommand {
 			throw new \RuntimeException( 'Tuner produced no readable report.' );
 		}
 		return $json;
+	}
+
+	/**
+	 * scanFailure returns the message to show when Tuner exited with a
+	 * usage or scan error (2 or more) and wrote no report, or null when
+	 * there is a report to render. The message is Tuner's stderr, or its
+	 * exit code when stderr is empty.
+	 */
+	public static function scanFailure( array $result ) {
+		if ( $result['code'] < 2 || is_array( json_decode( trim( (string) $result['stdout'] ), true ) ) ) {
+			return null;
+		}
+		$stderr = trim( (string) $result['stderr'] );
+		if ( '' === $stderr ) {
+			return sprintf( 'Tuner exited with code %d and wrote no report.', $result['code'] );
+		}
+		return $stderr;
 	}
 
 	/**

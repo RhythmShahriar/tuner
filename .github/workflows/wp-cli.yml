@@ -126,6 +126,14 @@ jobs:
           [ "$code" -eq 1 ] || fail "--fail-on=low exited $code, want 1"
           grep -q local-dotenv table.txt || fail "the table lacks local-dotenv"
 
+          # A scan error with no report keeps Tuner's code and reason
+          # instead of exit 1 ("findings") and a generic message.
+          wp --path=/site/missing tuner scan --no-verify-signature > error.txt 2>&1
+          code=$?
+          cat error.txt
+          [ "$code" -eq 2 ] || fail "scanning a missing folder exited $code, want Tuner's 2"
+          grep -q 'no such directory' error.txt || fail "Tuner's reason is not shown"
+
           # --integrity is refused clearly while Tuner has no such flag
           # (local-server L7) and passed on once it does.
           if wp --path=/site tuner scan --integrity --fail-on=none --no-verify-signature > integrity.txt 2>&1; then

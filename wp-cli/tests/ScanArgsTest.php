@@ -61,4 +61,25 @@ class ScanArgsTest extends TestCase {
 		$this->assertFalse( ScanCommand::helpHasFlag( "      --integrity-only  x\n", 'integrity' ) );
 		$this->assertFalse( ScanCommand::helpHasFlag( "      --json   JSON report\n", 'integrity' ) );
 	}
+
+	public function test_scan_error_without_report_shows_tuner_stderr() {
+		$result = array( 'code' => 3, 'stdout' => '', 'stderr' => "rhythm tuner: /srv/site: permission denied\n" );
+		$this->assertSame( 'rhythm tuner: /srv/site: permission denied', ScanCommand::scanFailure( $result ) );
+	}
+
+	public function test_scan_error_with_empty_stderr_names_the_code() {
+		$result = array( 'code' => 2, 'stdout' => '', 'stderr' => '' );
+		$this->assertSame( 'Tuner exited with code 2 and wrote no report.', ScanCommand::scanFailure( $result ) );
+	}
+
+	public function test_report_is_rendered_even_on_scan_error() {
+		// Exit 3 with a report (one target failed): render it, then pass 3 on.
+		$result = array( 'code' => 3, 'stdout' => '{"findings":[]}', 'stderr' => 'x' );
+		$this->assertNull( ScanCommand::scanFailure( $result ) );
+	}
+
+	public function test_findings_at_fail_on_are_no_scan_failure() {
+		$this->assertNull( ScanCommand::scanFailure( array( 'code' => 1, 'stdout' => '', 'stderr' => '' ) ) );
+		$this->assertNull( ScanCommand::scanFailure( array( 'code' => 0, 'stdout' => '{}', 'stderr' => '' ) ) );
+	}
 }

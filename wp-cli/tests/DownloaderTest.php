@@ -96,6 +96,7 @@ class DownloaderTest extends TestCase {
 	public function test_signature_skipped_when_cosign_absent() {
 		$release = $this->fakeRelease( 'body' );
 		$ran     = false;
+		$warned  = array();
 		$d       = new Downloader(
 			array(
 				'version'          => '0.4.0',
@@ -108,11 +109,35 @@ class DownloaderTest extends TestCase {
 					$ran = true;
 					return array( 127, 'cosign: not found' ); // cosign missing
 				},
+				'warn'             => function ( $message ) use ( &$warned ) {
+					$warned[] = $message;
+				},
 			)
 		);
 		$bin = $d->ensure();
 		$this->assertFileExists( $bin );
 		$this->assertTrue( $ran, 'cosign presence should have been probed' );
+		$this->assertSame( array( 'cosign not found; checked the SHA-256 against checksums.txt only.' ), $warned );
+	}
+
+	public function test_no_cosign_warning_when_verification_is_off() {
+		$release = $this->fakeRelease( 'body' );
+		$warned  = array();
+		$d       = new Downloader(
+			array(
+				'version'          => '0.4.0',
+				'cache_dir'        => $this->cache,
+				'platform'         => new Platform( 'Linux', 'x86_64' ),
+				'base_url'         => 'https://example.invalid/d',
+				'verify_signature' => false,
+				'fetch'            => $this->fetcher( $release, 'https://example.invalid/d' ),
+				'warn'             => function ( $message ) use ( &$warned ) {
+					$warned[] = $message;
+				},
+			)
+		);
+		$d->ensure();
+		$this->assertSame( array(), $warned, '--no-verify-signature asked for no signature check' );
 	}
 
 	public function test_cached_binary_is_reused_without_a_download() {
