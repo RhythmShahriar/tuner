@@ -112,12 +112,14 @@ func parseTargetURL(raw string) (*url.URL, error) {
 	if raw == "" {
 		return nil, errors.New(`want {"url": "https://example.com"}`)
 	}
-	u, _, err := engine.ParseTarget(raw)
+	// ParseTargetAuth moves user:password@ out of the URL, so it is
+	// rejected by what it returned and never echoed back.
+	u, _, auth, err := engine.ParseTargetAuth(raw)
 	if err != nil {
 		return nil, err
 	}
-	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return nil, fmt.Errorf("%q: give the site's address without a user name, query or fragment", raw)
+	if auth != "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return nil, fmt.Errorf("%q: give the site's address without a user name, query or fragment", u.Redacted())
 	}
 	u.Host = strings.ToLower(u.Host)
 	if u.Path == "/" {

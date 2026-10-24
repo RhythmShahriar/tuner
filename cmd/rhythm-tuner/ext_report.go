@@ -79,7 +79,10 @@ Client report:
                            up to 512 KB)`
 }
 
+// Flags registers the flags and clears what an earlier scan in the same
+// process left behind: repeatable flags append, so --notify would pile up.
 func (e *reportExtension) Flags(fs *flag.FlagSet) {
+	*e = reportExtension{notifyOptions: e.notifyOptions}
 	fs.StringVar(&e.since, "since", "", "")
 	fs.StringVar(&e.failOnNew, "fail-on-new", "", "")
 	fs.Var(&e.notify, "notify", "")

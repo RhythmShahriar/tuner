@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/RhythmShahriar/rhythm/kit/cli"
 	"github.com/RhythmShahriar/tuner/checkpack"
 	"github.com/RhythmShahriar/tuner/engine"
 	"github.com/RhythmShahriar/tuner/fingerprint"
@@ -52,10 +53,10 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("update", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	clear := flags.Bool("clear", false, "")
-	var prefetch repeatFlag
+	var prefetch cli.RepeatFlag
 	flags.Var(&prefetch, "prefetch", "")
 	php := flags.String("php", "", "")
-	pos, err := parseInterspersed(flags, args)
+	pos, err := cli.ParseInterspersed(flags, args)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			fmt.Fprint(stdout, updateUsage)
@@ -179,27 +180,6 @@ func closestFlag(name string, known []string) string {
 		}
 	}
 	return best
-}
-
-// editDistance is the Levenshtein distance between a and b.
-func editDistance(a, b string) int {
-	prev := make([]int, len(b)+1)
-	cur := make([]int, len(b)+1)
-	for j := range prev {
-		prev[j] = j
-	}
-	for i := 1; i <= len(a); i++ {
-		cur[0] = i
-		for j := 1; j <= len(b); j++ {
-			cost := 1
-			if a[i-1] == b[j-1] {
-				cost = 0
-			}
-			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
-		}
-		prev, cur = cur, prev
-	}
-	return prev[len(b)]
 }
 
 // checkPrefetchTarget validates a --prefetch target the way scan does.

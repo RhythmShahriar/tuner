@@ -127,3 +127,18 @@ func TestWatchFlags(t *testing.T) {
 		t.Errorf("usage error: %d\n%s", code, errb.String())
 	}
 }
+
+// scan has --since, so the watch hands each run the previous report.
+func TestWatchPassesSince(t *testing.T) {
+	list := filepath.Join(t.TempDir(), "sites.txt")
+	if err := os.WriteFile(list, []byte("https://example.com\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w, _, err := planWatch([]string{"-l", list, "--every", "1h", "--dir", t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args := w.Args("new.json", "old.json"); !slices.Contains(args, "--since") {
+		t.Errorf("args %q lack --since", args)
+	}
+}

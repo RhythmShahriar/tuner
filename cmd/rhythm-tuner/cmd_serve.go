@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/RhythmShahriar/rhythm/kit/cli"
 	"github.com/RhythmShahriar/tuner/serve"
 )
 
@@ -79,6 +80,10 @@ Examples:
     -d '{"url":"https://example.com"}' localhost:8080/v0/targets
 `
 
+func init() {
+	registerCommand(command{Name: "serve", Summary: "run the HTTP API: ownership checks, queued scans, webhooks", Run: cmdServe})
+}
+
 // cmdServe runs the HTTP API until SIGINT or SIGTERM; see serveUsage.
 func cmdServe(args []string, stdout, stderr io.Writer) int {
 	cfg, listen, err := planServe(args)
@@ -120,7 +125,7 @@ func planServe(args []string) (serve.Config, string, error) {
 	secret := fs.String("webhook-secret", os.Getenv("TUNER_WEBHOOK_SECRET"), "")
 	allowPrivate := fs.Bool("webhook-allow-private", false, "")
 	exe := fs.String("exec", "", "")
-	pos, err := parseInterspersed(fs, args)
+	pos, err := cli.ParseInterspersed(fs, args)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return serve.Config{}, "", err

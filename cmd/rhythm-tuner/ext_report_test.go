@@ -343,3 +343,14 @@ func TestScanOutputHTMLWithBrand(t *testing.T) {
 		t.Errorf("not a branded HTML report:\n%.400s", body)
 	}
 }
+
+// A scan in the same process starts from clean flags: an earlier
+// --notify must not carry over into the next scan's plan.
+func TestReportExtensionForgetsEarlierScan(t *testing.T) {
+	if _, err := planScan([]string{"example.com", "--notify", "slack://hooks.slack.com/services/T0/B0/x", "--notify-all-first"}, strings.NewReader("")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := planScan([]string{"example.com"}, strings.NewReader("")); err != nil {
+		t.Errorf("second scan: %v", err)
+	}
+}

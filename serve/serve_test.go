@@ -239,8 +239,12 @@ func TestUnverifiedTargetForbidden(t *testing.T) {
 		t.Errorf("unknown target: %d %v", code, body)
 	}
 	for _, bad := range []string{"", "ftp://example.com", "https://user:pw@example.com", "https://example.com/?q=1"} {
-		if code, body := h.do("POST", "/v0/targets", map[string]string{"url": bad}); code != http.StatusBadRequest {
+		code, body := h.do("POST", "/v0/targets", map[string]string{"url": bad})
+		if code != http.StatusBadRequest {
 			t.Errorf("url %q: %d %v", bad, code, body)
+		}
+		if msg, _ := body["error"].(string); strings.Contains(msg, "user:pw") {
+			t.Errorf("url %q: the error echoes the credentials: %s", bad, msg)
 		}
 	}
 }

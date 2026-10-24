@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/RhythmShahriar/rhythm/kit/cli"
 	"github.com/RhythmShahriar/tuner/engine"
 	"github.com/RhythmShahriar/tuner/watch"
 )
@@ -82,6 +83,10 @@ const watchKeep = 30
 // watchOwned are the scan flags the watch sets itself. Passing them
 // after -- would break the run-to-run comparison.
 var watchOwned = []string{"o", "output", "json", "jsonl", "sarif", "md", "l", "list", "stdin", "since"}
+
+func init() {
+	registerCommand(command{Name: "watch", Summary: "scan a site list on a schedule and say what changed", Run: cmdWatch})
+}
 
 // cmdWatch runs scans on a schedule; see watchUsage.
 func cmdWatch(args []string, stdout, stderr io.Writer) int {
@@ -149,7 +154,7 @@ func planWatch(args []string) (w *watch.Watcher, once bool, err error) {
 	var list, at, name, dir, exe, notifyMin, failOnNew string
 	var every time.Duration
 	var now, html bool
-	var notify repeatFlag
+	var notify cli.RepeatFlag
 	fs.StringVar(&list, "l", "", "")
 	fs.StringVar(&list, "list", "", "")
 	fs.DurationVar(&every, "every", 0, "")
@@ -164,7 +169,7 @@ func planWatch(args []string) (w *watch.Watcher, once bool, err error) {
 	fs.StringVar(&notifyMin, "notify-min", "", "")
 	fs.StringVar(&failOnNew, "fail-on-new", "", "")
 	fs.BoolVar(&html, "html", false, "")
-	targets, err := parseInterspersed(fs, args)
+	targets, err := cli.ParseInterspersed(fs, args)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil, false, err
@@ -223,7 +228,7 @@ func planWatch(args []string) (w *watch.Watcher, once bool, err error) {
 		if list, err = filepath.Abs(list); err != nil {
 			return nil, false, err
 		}
-		if _, err := os.Stat(list); err != nil {
+		if _, err := os.Stat(list); err != nil { //nolint:gosec // the user's own -l file
 			return nil, false, fmt.Errorf("can't read the site list: %w", err)
 		}
 	}
@@ -249,11 +254,11 @@ func planWatch(args []string) (w *watch.Watcher, once bool, err error) {
 	if len(targets) > 0 {
 		// The scan reads sites from a file either way, so the watch
 		// command line and a list file behave the same.
-		if err := os.MkdirAll(dir, 0o700); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil { //nolint:gosec // the user's own --dir
 			return nil, false, err
 		}
 		list = filepath.Join(dir, "sites.txt")
-		if err := os.WriteFile(list, []byte(strings.Join(targets, "\n")+"\n"), 0o600); err != nil {
+		if err := os.WriteFile(list, []byte(strings.Join(targets, "\n")+"\n"), 0o600); err != nil { //nolint:gosec // inside the user's own --dir
 			return nil, false, err
 		}
 	}
@@ -271,6 +276,7 @@ func planWatch(args []string) (w *watch.Watcher, once bool, err error) {
 	return &watch.Watcher{
 		Exe: exe, List: list, Extra: append(pass, extra...), Dir: dir,
 		Schedule: sched, RunNow: now, Keep: *keep, HTML: html,
+		PassSince: true, // scan has --since, so each run marks its own changes
 	}, once, nil
 }
 

@@ -91,15 +91,12 @@ func tunerExact(t *testing.T, args ...string) (code int, stdout, stderr string) 
 	if os.Getenv("XDG_CACHE_HOME") == "" {
 		t.Setenv("XDG_CACHE_HOME", t.TempDir()) // and the vulnerability cache
 	}
-	if os.Getenv("TUNER_VULN_API") == "" {
-		t.Setenv("TUNER_VULN_API", "http://127.0.0.1:1") // never reach the real APIs from tests
-		t.Setenv("TUNER_WPORG_API", "http://127.0.0.1:1")
-		t.Setenv("TUNER_PHPNET_API", "http://127.0.0.1:1")
-		t.Setenv("TUNER_OSV_API", "http://127.0.0.1:1")
-		t.Setenv("TUNER_WPDL_API", "http://127.0.0.1:1") // --integrity checksums, once that lands
-	}
-	if os.Getenv("TUNER_CHECKS_URL") == "" {
-		t.Setenv("TUNER_CHECKS_URL", "http://127.0.0.1:1") // nor the check pack release
+	// Never reach the real APIs or the check pack release from tests. Each
+	// one a test points at its own server is left alone.
+	for _, name := range []string{"TUNER_VULN_API", "TUNER_WPORG_API", "TUNER_PHPNET_API", "TUNER_OSV_API", "TUNER_WORDFENCE_API", "TUNER_WPDL_API", "TUNER_CHECKS_URL"} {
+		if os.Getenv(name) == "" {
+			t.Setenv(name, "http://127.0.0.1:1")
+		}
 	}
 	var out, errb bytes.Buffer
 	code = run(args, &out, &errb)
