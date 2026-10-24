@@ -300,3 +300,28 @@ func TestOSVRefresh(t *testing.T) {
 		t.Error("offline refresh should fail")
 	}
 }
+
+func TestOSVUnreachable(t *testing.T) {
+	var hits atomic.Int32
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(release) })
+
+	root := tree(t, map[string]string{"composer.lock": lockFile})
+	start := time.Now()
+	res := scanTree(t, root, Options{OSV: &OSV{Base: srv.URL, CacheDir: t.TempDir(), Timeout: time.Second}})
+	if d := time.Since(start); d > 4*time.Second {
+		t.Errorf("took %s", d)
+	}
+	want := "Composer vulnerability data unreachable, no cached data; known vulnerabilities not checked"
+	if hits.Load() != 1 || len(res.Warnings) != 1 || res.Warnings[0] != want {
+		t.Errorf("%d requests, warnings %q", hits.Load(), res.Warnings)
+	}
+}

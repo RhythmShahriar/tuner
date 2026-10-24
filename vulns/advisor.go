@@ -17,10 +17,15 @@ import (
 
 	"github.com/RhythmShahriar/tuner/engine"
 	"github.com/RhythmShahriar/tuner/fingerprint"
+	"github.com/RhythmShahriar/tuner/vulns/cache"
 )
 
 // A plugin or theme with no release for this long counts as abandoned.
 const abandonedAfter = 2 * 365 * 24 * time.Hour
+
+// How many components are looked up at once. The pacer still spaces the
+// requests; this bounds the goroutines waiting on a slow data service.
+const lookupConcurrency = 4
 
 var errNoRecord = errors.New("no vulnerability record")
 
@@ -49,10 +54,11 @@ type component struct {
 
 type lookup struct {
 	component
-	rec   *Record
-	rel   *Release
-	stale bool
-	err   error
+	rec     *Record
+	rel     *Release
+	stale   bool
+	staleAt time.Time // when the oldest stale copy used was fetched
+	err     error
 
 	// PHP on an end-of-life branch: advisories inferred from the oldest
 	// supported branch (newerFrom), which will never be fixed on this one.
@@ -124,21 +130,26 @@ func (a *Advisor) AdviseStatus(ctx context.Context, base *url.URL, fp fingerprin
 	if fp.Has("php") && fp.PHP == "" {
 		wg.Go(func() { hidden.flaws, hidden.branches, hidden.stale, hidden.err = a.recentPHPFlaws(ctx, now()) })
 	}
+	sem := make(chan struct{}, lookupConcurrency)
 	for i, c := range comps {
 		l := &lookup{component: c}
 		lookups[i] = l
 		wg.Go(func() {
-			l.rec, l.stale, l.err = a.Client.Advisories(ctx, c.kind, c.key)
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			var info cache.Info
+			l.rec, info, l.err = a.Client.advisories(ctx, c.kind, c.key)
+			l.addStale(info)
 			if c.kind == "core" || c.kind == "plugin" || c.kind == "theme" {
 				key := c.slug
 				if c.kind == "core" {
 					key = "wordpress"
 				}
 				// Release data is a nice-to-have; a failed lookup isn't reported.
-				rel, stale, err := a.Client.Latest(ctx, c.kind, key)
+				rel, info, err := a.Client.latest(ctx, c.kind, key)
 				if err == nil {
 					l.rel = rel
-					l.stale = l.stale || stale
+					l.addStale(info)
 				}
 			}
 			if c.kind == "php" && l.err == nil && l.rec != nil {
@@ -287,8 +298,19 @@ func (a *Advisor) AdviseStatus(ctx context.Context, base *url.URL, fp fingerprin
 		findings = append(findings, f)
 	}
 
+	var oldest time.Time
+	for _, l := range lookups {
+		if !l.staleAt.IsZero() && (oldest.IsZero() || l.staleAt.Before(oldest)) {
+			oldest = l.staleAt
+		}
+	}
+	unreachable := !offline && len(a.Client.Unreachable()) > 0 && (failed > 0 || stale > 0)
+
 	var warnings []string
 	switch {
+	case unreachable:
+		// Cache times are wall-clock times, unlike the advisor's clock.
+		warnings = append(warnings, UnreachableWarning("", failed, looked, stale, oldest, time.Now()))
 	case failed > 0 && offline && old > 0:
 		warnings = append(warnings, fmt.Sprintf("vulnerability data not cached for %d components (%d cached by an older Tuner); run once online to cache it", failed, old))
 	case failed > 0 && offline:
@@ -296,10 +318,61 @@ func (a *Advisor) AdviseStatus(ctx context.Context, base *url.URL, fp fingerprin
 	case failed > 0:
 		warnings = append(warnings, fmt.Sprintf("couldn't fetch vulnerability data for %d components (%s)", failed, firstErr))
 	}
-	if stale > 0 {
+	if stale > 0 && !unreachable {
 		warnings = append(warnings, fmt.Sprintf("used cached vulnerability data older than %s for %d components", a.Client.TTL, stale))
 	}
 	return findings, warnings, DataStatus(looked, failed, stale)
+}
+
+// addStale notes a lookup served from a stale cache.
+func (l *lookup) addStale(info cache.Info) {
+	if !info.Stale {
+		return
+	}
+	l.stale = true
+	if l.staleAt.IsZero() || info.Fetched.Before(l.staleAt) {
+		l.staleAt = info.Fetched
+	}
+}
+
+// UnreachableWarning is the one warning a scan gets when a data service
+// can't be reached: what was used instead and what wasn't checked. what
+// names the data ("" for vulnerability data in general, or e.g. "Composer
+// " with a trailing space); failed of total lookups had no cached copy and
+// stale used one, the oldest fetched at oldest.
+func UnreachableWarning(what string, failed, total, stale int, oldest, now time.Time) string {
+	msg := what + "vulnerability data unreachable"
+	switch {
+	case stale > 0 && failed > 0:
+		msg += fmt.Sprintf(", using %s; no cached data for %d of %d, so their known vulnerabilities were not checked", cacheAge(oldest, now), failed, total)
+	case stale > 0:
+		msg += ", using " + cacheAge(oldest, now)
+	case failed >= total:
+		return msg + ", no cached data; known vulnerabilities not checked"
+	default:
+		return msg + fmt.Sprintf(", no cached data for %d of %d lookups; their known vulnerabilities not checked", failed, total)
+	}
+	return msg + " (use --offline to skip)"
+}
+
+// cacheAge says how old a cached copy is: "cache from 3 days ago".
+func cacheAge(fetched, now time.Time) string {
+	if fetched.IsZero() {
+		return "cached data"
+	}
+	d := now.Sub(fetched)
+	n, unit := int(d/time.Minute), "minute"
+	switch {
+	case d >= 48*time.Hour:
+		n, unit = int(d/(24*time.Hour)), "day"
+	case d >= 2*time.Hour:
+		n, unit = int(d/time.Hour), "hour"
+	}
+	n = max(n, 1)
+	if n != 1 {
+		unit += "s"
+	}
+	return fmt.Sprintf("cache from %d %s ago", n, unit)
 }
 
 // vulnFinding builds the one finding that lists every advisory affecting a

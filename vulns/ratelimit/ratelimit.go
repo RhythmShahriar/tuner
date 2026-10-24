@@ -1,9 +1,11 @@
 // Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package ratelimit spaces requests to the free data services Tuner
-// relies on. Limiter matches rhythm's kit/ratelimit.Limiter, so the two
-// can be swapped once Tuner pins a kit release that has it.
+// Package ratelimit keeps Tuner polite and quick with the free data
+// services it relies on: Limiter spaces requests, Breaker stops asking a
+// host that can't be reached, and FastClient gives up on dead connections
+// early. Limiter matches rhythm's kit/ratelimit.Limiter, so the two can be
+// swapped once Tuner pins a kit release that has it.
 package ratelimit
 
 import (

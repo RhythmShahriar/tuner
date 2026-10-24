@@ -18,6 +18,7 @@ import (
 
 	"github.com/RhythmShahriar/tuner/vulns"
 	"github.com/RhythmShahriar/tuner/vulns/cache"
+	"github.com/RhythmShahriar/tuner/vulns/ratelimit"
 )
 
 const (
@@ -36,9 +37,12 @@ type OSV struct {
 	CacheDir  string        // "" disables the disk cache
 	TTL       time.Duration // 0 means 24h
 	Offline   bool          // never fetch; use cached data however old
+	Timeout   time.Duration // per request, reading the answer included; 0 means vulns.DefaultTimeout
 
-	once  sync.Once
-	store *cache.Store
+	once    sync.Once
+	http    *http.Client
+	breaker ratelimit.Breaker
+	store   *cache.Store
 }
 
 // Package is a Composer package at an installed version.
@@ -78,8 +82,9 @@ var errOffline = errors.New("offline and not cached")
 
 func (o *OSV) init() {
 	o.once.Do(func() {
-		if o.HTTP == nil {
-			o.HTTP = &http.Client{Timeout: 20 * time.Second}
+		o.http = ratelimit.FastClient(o.HTTP) // see vulns.Client: fail fast when firewalled
+		if o.Timeout <= 0 {
+			o.Timeout = vulns.DefaultTimeout
 		}
 		if o.Base == "" {
 			o.Base = DefaultOSVBase
@@ -98,11 +103,24 @@ type OSVResult struct {
 	Failed int                   // packages that couldn't be checked
 	Stale  int                   // packages answered from a cache past its TTL
 	Err    error                 // the first error, explaining Failed
+
+	// Unreachable is set when OSV.dev timed out or refused the connection,
+	// and Oldest is when the oldest stale copy used instead was fetched.
+	Unreachable bool
+	Oldest      time.Time
 }
 
 // Status is the vulnerability data status, one of vulns.StatusOK,
 // StatusPartial or StatusMissing.
 func (r OSVResult) Status() string { return vulns.DataStatus(r.Total, r.Failed, r.Stale) }
+
+// older keeps the earlier of two fetch times, ignoring zero ones.
+func older(a, b time.Time) time.Time {
+	if a.IsZero() || (!b.IsZero() && b.Before(a)) {
+		return b
+	}
+	return a
+}
 
 // Query returns the known vulnerabilities for each package that has any,
 // and how many packages couldn't be checked (the first error explains
@@ -118,25 +136,27 @@ func (o *OSV) Check(ctx context.Context, pkgs []Package) OSVResult {
 
 	// Vulnerability IDs per package: cache first, then one batch query.
 	ids := make(map[Package][]string, len(pkgs))
-	stale := map[Package][]string{}
+	stale := map[Package]cache.Entry[[]string]{}
 	staleUsed := map[Package]bool{}
+	res := OSVResult{Vulns: map[Package][]OSVVuln{}, Total: len(pkgs)}
 	var missing []Package
 	for _, p := range pkgs {
 		e, ok, _ := cache.Read[[]string](o.store, "packagist", packageKey(p))
 		switch {
 		case ok && o.Offline:
 			ids[p] = e.Data
-			staleUsed[p] = time.Since(e.Fetched) > o.TTL
+			if staleUsed[p] = time.Since(e.Fetched) > o.TTL; staleUsed[p] {
+				res.Oldest = older(res.Oldest, e.Fetched)
+			}
 		case ok && time.Since(e.Fetched) < o.TTL:
 			ids[p] = e.Data
 		case ok:
-			stale[p] = e.Data
+			stale[p] = e
 			missing = append(missing, p)
 		default:
 			missing = append(missing, p)
 		}
 	}
-	res := OSVResult{Vulns: map[Package][]OSVVuln{}, Total: len(pkgs)}
 	failedPkg := map[Package]bool{}
 	if len(missing) > 0 {
 		got, err := o.batch(ctx, missing)
@@ -145,9 +165,10 @@ func (o *OSV) Check(ctx context.Context, pkgs []Package) OSVResult {
 			case ok:
 				ids[p] = v
 				_ = cache.Write(o.store, "packagist", packageKey(p), v)
-			case stale[p] != nil:
-				ids[p] = stale[p]
+			case stale[p].Data != nil:
+				ids[p] = stale[p].Data
 				staleUsed[p] = true
+				res.Oldest = older(res.Oldest, stale[p].Fetched)
 			default:
 				failedPkg[p] = true
 			}
@@ -175,11 +196,12 @@ func (o *OSV) Check(ctx context.Context, pkgs []Package) OSVResult {
 			wg.Go(func() {
 				sem <- struct{}{}
 				defer func() { <-sem }()
-				v, wasStale, err := o.vuln(ctx, id, false)
+				v, staleAt, err := o.vuln(ctx, id, false)
 				mu.Lock()
 				defer mu.Unlock()
 				details[id] = v
-				staleIDs[id] = wasStale
+				staleIDs[id] = !staleAt.IsZero()
+				res.Oldest = older(res.Oldest, staleAt)
 				if err != nil && res.Err == nil {
 					res.Err = err
 				}
@@ -199,6 +221,7 @@ func (o *OSV) Check(ctx context.Context, pkgs []Package) OSVResult {
 		}
 	}
 	res.Failed = len(failedPkg)
+	res.Unreachable = len(o.breaker.Down()) > 0
 	for p, s := range staleUsed {
 		if s && !failedPkg[p] {
 			res.Stale++
@@ -334,27 +357,31 @@ func (o *OSV) batch(ctx context.Context, pkgs []Package) (map[Package][]string, 
 	return out, nil
 }
 
-// vuln returns one vulnerability's details, and whether they came from
-// a cache past its TTL. force ignores the TTL and reports a failed fetch
-// instead of falling back to the cached copy.
-func (o *OSV) vuln(ctx context.Context, id string, force bool) (*OSVVuln, bool, error) {
+// vuln returns one vulnerability's details and, when they came from a
+// cache past its TTL, when that copy was fetched. force ignores the TTL
+// and reports a failed fetch instead of falling back to the cached copy.
+func (o *OSV) vuln(ctx context.Context, id string, force bool) (*OSVVuln, time.Time, error) {
 	e, ok, _ := cache.Read[*OSVVuln](o.store, "vulns", id)
 	stale := ok && time.Since(e.Fetched) > o.TTL
+	var staleAt time.Time
+	if stale {
+		staleAt = e.Fetched
+	}
 	if ok && !force && (o.Offline || !stale) {
-		return e.Data, stale, nil
+		return e.Data, staleAt, nil
 	}
 	if o.Offline {
-		return nil, false, errOffline
+		return nil, time.Time{}, errOffline
 	}
 	var v OSVVuln
 	if err := o.do(ctx, http.MethodGet, o.Base+"/v1/vulns/"+url.PathEscape(id), nil, &v); err != nil {
 		if ok && !force {
-			return e.Data, true, nil // stale beats nothing
+			return e.Data, e.Fetched, nil // stale beats nothing
 		}
-		return nil, false, err
+		return nil, time.Time{}, err
 	}
 	_ = cache.Write(o.store, "vulns", id, &v)
-	return &v, false, nil
+	return &v, time.Time{}, nil
 }
 
 func (o *OSV) do(ctx context.Context, method, u string, body, v any) error {
@@ -375,22 +402,26 @@ func (o *OSV) do(ctx context.Context, method, u string, body, v any) error {
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := o.HTTP.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%s: HTTP %d", req.URL.Host, resp.StatusCode)
-	}
-	b, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
-	if err != nil {
-		return err
-	}
-	if err := json.Unmarshal(b, v); err != nil {
-		return fmt.Errorf("%s: unexpected response: %w", req.URL.Host, err)
-	}
-	return nil
+	return o.breaker.Do(ctx, req.URL.Host, func() error {
+		ctx, cancel := context.WithTimeout(ctx, o.Timeout)
+		defer cancel()
+		resp, err := o.http.Do(req.WithContext(ctx))
+		if err != nil {
+			return err
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("%s: HTTP %d", req.URL.Host, resp.StatusCode)
+		}
+		b, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(b, v); err != nil {
+			return fmt.Errorf("%s: unexpected response: %w", req.URL.Host, err)
+		}
+		return nil
+	})
 }
 
 // osvCacheFormat versions the entries on disk; bump it whenever what an

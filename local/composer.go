@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/RhythmShahriar/tuner/engine"
 	"github.com/RhythmShahriar/tuner/vulns"
@@ -130,7 +131,10 @@ func (s *scan) composerStatus(ctx context.Context) ([]engine.Finding, string) {
 	s.checks++
 	res := s.opts.OSV.Check(ctx, pkgs)
 	found, failed, err := res.Vulns, res.Failed, res.Err
-	if failed > 0 {
+	switch {
+	case res.Unreachable && (failed > 0 || res.Stale > 0):
+		s.warn("%s", vulns.UnreachableWarning("Composer ", failed, res.Total, res.Stale, res.Oldest, time.Now()))
+	case failed > 0:
 		if s.opts.OSV.Offline {
 			s.warn("vulnerability data not cached for %d Composer packages; run once online to cache it", failed)
 		} else {

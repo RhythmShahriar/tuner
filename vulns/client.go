@@ -39,6 +39,7 @@ const (
 	DefaultWPOrgBase  = "https://api.wordpress.org"
 	DefaultPHPNetBase = "https://www.php.net"
 	DefaultTTL        = 24 * time.Hour
+	DefaultTimeout    = 10 * time.Second
 
 	// Attribution shown with every vulnerability finding.
 	Source = "WPVulnerability (wpvulnerability.com, CC0)"
@@ -64,13 +65,16 @@ type Client struct {
 	Offline    bool          // never fetch; use cached data however old
 	Force      bool          // always fetch, ignoring the TTL (rhythm tuner update)
 	Pace       time.Duration // gap between requests to the data services; 0 means 200ms, <0 none
+	Timeout    time.Duration // per request, reading the answer included; 0 means DefaultTimeout
 	VulnBase   string
 	WPOrgBase  string
 	PHPNetBase string
 
-	lim   *ratelimit.Limiter
-	store *cache.Store
-	once  sync.Once
+	lim     *ratelimit.Limiter
+	breaker ratelimit.Breaker
+	http    *http.Client
+	store   *cache.Store
+	once    sync.Once
 }
 
 // DefaultCacheDir is ~/.cache/rhythm/tuner/vulns (or the OS equivalent).
@@ -84,8 +88,11 @@ func DefaultCacheDir() string {
 
 func (c *Client) init() {
 	c.once.Do(func() {
-		if c.HTTP == nil {
-			c.HTTP = &http.Client{Timeout: 20 * time.Second}
+		// Connections give up after a few seconds: a firewalled data
+		// service must not hold the scan for the OS connect timeout.
+		c.http = ratelimit.FastClient(c.HTTP)
+		if c.Timeout <= 0 {
+			c.Timeout = DefaultTimeout
 		}
 		if c.TTL <= 0 {
 			c.TTL = DefaultTTL
@@ -252,7 +259,7 @@ func (c *Client) Refresh(ctx context.Context) (ok, failed int, err error) {
 	}
 	force := &Client{
 		HTTP: c.HTTP, UserAgent: c.UserAgent, CacheDir: c.CacheDir, TTL: c.TTL,
-		VulnBase: c.VulnBase, WPOrgBase: c.WPOrgBase, PHPNetBase: c.PHPNetBase, Pace: c.Pace, Force: true,
+		VulnBase: c.VulnBase, WPOrgBase: c.WPOrgBase, PHPNetBase: c.PHPNetBase, Pace: c.Pace, Timeout: c.Timeout, Force: true,
 	}
 	err = c.store.Entries(func(kind, key string) error {
 		var ferr error
@@ -277,32 +284,44 @@ func (c *Client) Refresh(ctx context.Context) (ok, failed int, err error) {
 	return ok, failed, err
 }
 
+// Unreachable lists the data hosts this client gave up on after a timeout
+// or connection error; their lookups fall back to cached data.
+func (c *Client) Unreachable() []string {
+	c.init()
+	return c.breaker.Down()
+}
+
 func (c *Client) getJSON(ctx context.Context, u string, v any) error {
-	if err := c.lim.Wait(ctx); err != nil {
-		return err
-	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("User-Agent", c.UserAgent)
-	req.Header.Set("Accept", "application/json")
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotFound {
-		return fmt.Errorf("%s: HTTP %d", req.URL.Host, resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
-	if err != nil {
-		return err
-	}
-	if err := json.Unmarshal(body, v); err != nil {
-		return fmt.Errorf("%s: unexpected response: %w", req.URL.Host, err)
-	}
-	return nil
+	return c.breaker.Do(ctx, req.URL.Host, func() error {
+		if err := c.lim.Wait(ctx); err != nil {
+			return err
+		}
+		ctx, cancel := context.WithTimeout(ctx, c.Timeout)
+		defer cancel()
+		req := req.WithContext(ctx)
+		req.Header.Set("User-Agent", c.UserAgent)
+		req.Header.Set("Accept", "application/json")
+		resp, err := c.http.Do(req)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotFound {
+			return fmt.Errorf("%s: HTTP %d", req.URL.Host, resp.StatusCode)
+		}
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(body, v); err != nil {
+			return fmt.Errorf("%s: unexpected response: %w", req.URL.Host, err)
+		}
+		return nil
+	})
 }
 
 func parseWPDate(s string) time.Time {
