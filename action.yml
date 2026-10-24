@@ -243,8 +243,12 @@ runs:
         [ -z "$MIN_CONFIDENCE" ] || flags+=(--min-confidence "$MIN_CONFIDENCE")
         base=()
         [ -z "$BASELINE" ] || base=(--baseline "$BASELINE")
+        # Split ARGS on whitespace with globbing off, so a * or ? in a flag
+        # value (a header, a pattern) is passed on as typed.
+        set -f
         # shellcheck disable=SC2206 # ARGS is a flag string to split
         extra=($ARGS)
+        set +f
         # ${a[@]+"${a[@]}"} keeps empty arrays safe under set -u in bash 3.2.
 
         out="$RUNNER_TEMP/rhythm-tuner-report"
