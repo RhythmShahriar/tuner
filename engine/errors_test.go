@@ -79,7 +79,7 @@ func TestRequestTimeoutError(t *testing.T) {
 	if got := (&RequestTimeoutError{Timeout: 10 * time.Second, Tries: 3}).Error(); got != "no response within 10s (tried 3 times)" {
 		t.Errorf("3 tries: %q", got)
 	}
-	if got := (&RequestTimeoutError{Timeout: 10 * time.Second, Tries: 1}).Error(); got != "no response within 10s" {
+	if got := (&RequestTimeoutError{Timeout: 10 * time.Second, Tries: 1}).Error(); got != "no response within 10s (tried once)" {
 		t.Errorf("1 try: %q", got)
 	}
 }

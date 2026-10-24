@@ -791,7 +791,7 @@ type RequestTimeoutError struct {
 
 func (e *RequestTimeoutError) Error() string {
 	if e.Tries <= 1 {
-		return fmt.Sprintf("no response within %s", e.Timeout)
+		return fmt.Sprintf("no response within %s (tried once)", e.Timeout)
 	}
 	return fmt.Sprintf("no response within %s (tried %d times)", e.Timeout, e.Tries)
 }
