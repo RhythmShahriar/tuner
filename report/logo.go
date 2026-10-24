@@ -158,7 +158,7 @@ func sanitizeSVG(data []byte) ([]byte, error) {
 }
 
 // svgFuncs are the functions an attribute value may call besides
-// url(#id): transforms and colours, with plain numbers for arguments.
+// url(#id): transforms and colors, with plain numbers for arguments.
 var svgFuncs = map[string]bool{
 	"matrix": true, "translate": true, "scale": true, "rotate": true, "skewx": true, "skewy": true,
 	"rgb": true, "rgba": true, "hsl": true, "hsla": true,

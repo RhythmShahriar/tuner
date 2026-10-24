@@ -228,7 +228,7 @@ func TestLogo(t *testing.T) {
 		}
 	}
 
-	// Transforms, colours and local references are plain values.
+	// Transforms, colors and local references are plain values.
 	for _, v := range []string{"url(#g)", `url("#g")`, "URL( #g )", "translate(10 20) rotate(-45.5)", "rgb(255, 0, 0)", "matrix(1,0,0,1,0,0)", "#f00", "none"} {
 		if !safeValue(v) {
 			t.Errorf("safeValue(%q) = false", v)
