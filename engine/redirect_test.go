@@ -328,8 +328,8 @@ func TestInternal(t *testing.T) {
 		"::1": true, "fe80::1": true, "fd00::1": true, "0.0.0.0": true, "::ffff:127.0.0.1": true, "64:ff9b::a9fe:a9fe": true,
 		"100.100.100.200": true, "100.64.0.1": true, "0.1.2.3": true, "192.0.0.192": true, "198.18.0.1": true,
 		"::127.0.0.1": true, "2002:7f00:1::": true, "2002:a9fe:a9fe::1": true, "2002:6464:64c8::": true,
-		"2001:0:4136:e378:8000:63bf:80ff:fffe": true, // Teredo, client 127.0.0.1
-		"64:ff9b:1::a9fe:a9fe": true,
+		// Teredo with client 127.0.0.1, then local-use NAT64.
+		"2001:0:4136:e378:8000:63bf:80ff:fffe": true, "64:ff9b:1::a9fe:a9fe": true,
 		"203.0.113.7": false, "8.8.8.8": false, "2606:4700::1111": false, "100.128.0.1": false,
 		"::8.8.8.8": false, "2002:808:808::": false, "2001:0:4136:e378:8000:63bf:f7f7:f7f7": false,
 	} {
