@@ -36,7 +36,7 @@ func TestReadJSONRoundTrip(t *testing.T) {
 }
 
 func TestReadJSONRejectsOtherJSON(t *testing.T) {
-	for _, doc := range []string{`{"name": "x"}`, `[{"schema": "other/v1"}]`, `not json`} {
+	for _, doc := range []string{`{"name": "x"}`, `[{"schema": "other/v1"}]`, `not json`, `null`, `[]`, ` [ ] `} {
 		if _, _, err := ReadJSON(strings.NewReader(doc)); err == nil || !strings.Contains(err.Error(), "not a Tuner JSON report") {
 			t.Errorf("%s: err = %v", doc, err)
 		}
@@ -51,5 +51,32 @@ func TestReadJSONCleansText(t *testing.T) {
 	}
 	if got := reports[0].Findings[0].Title; strings.ContainsAny(got, "\x1b\x07") {
 		t.Errorf("title kept control bytes: %q", got)
+	}
+}
+
+// review: a report saved before the complete field existed was a whole
+// scan as far as anyone knew; it must not come back marked incomplete.
+func TestReadJSONOldReportIsComplete(t *testing.T) {
+	doc := `{"schema": "rhythm-tuner/v0", "tool": "rhythm-tuner", "version": "0.3.0", "target": "https://a.test", "findings": []}`
+	reports, _, err := ReadJSON(strings.NewReader(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st := reports[0].Status(); st.Partial() || len(st.Notes()) != 0 {
+		t.Errorf("old report read as %+v, notes %q", st, st.Notes())
+	}
+	var md bytes.Buffer
+	if err := Write("md", &md, reports, WriteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(md.String(), "Incomplete") {
+		t.Errorf("markdown says incomplete:\n%s", md.String())
+	}
+
+	// An explicit false still means incomplete.
+	doc = `{"schema": "rhythm-tuner/v0", "target": "https://a.test", "complete": false, "findings": []}`
+	reports, _, _ = ReadJSON(strings.NewReader(doc))
+	if !reports[0].Status().Partial() {
+		t.Error("complete:false read as complete")
 	}
 }

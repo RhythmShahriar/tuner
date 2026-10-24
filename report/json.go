@@ -251,8 +251,9 @@ func ReadJSON(r io.Reader) ([]Report, []TargetError, error) {
 	)
 	for _, item := range items {
 		var probe struct {
-			Schema string  `json:"schema"`
-			Error  *string `json:"error"`
+			Schema   string  `json:"schema"`
+			Error    *string `json:"error"`
+			Complete *bool   `json:"complete"`
 		}
 		if err := json.Unmarshal(item, &probe); err != nil {
 			return nil, nil, fmt.Errorf("not a Tuner JSON report: %w", err)
@@ -275,6 +276,12 @@ func ReadJSON(r io.Reader) ([]Report, []TargetError, error) {
 		if rep.Result == nil {
 			rep.Result = &engine.Result{}
 		}
+		// Reports saved before the complete field were never marked
+		// partial, so reading one as incomplete would put a false
+		// warning in front of a client.
+		if probe.Complete == nil {
+			rep.Complete = true
+		}
 		rep.Duration = time.Duration(rep.DurationMS) * time.Millisecond
 		// A report from disk is untrusted like a site: clean it as New does.
 		clean := sanitized(*rep.Result)
@@ -282,6 +289,10 @@ func ReadJSON(r io.Reader) ([]Report, []TargetError, error) {
 		rep.Version, rep.CheckSet, rep.CheckPack = SafeText(rep.Version), SafeText(rep.CheckSet), SafeText(rep.CheckPack)
 		rep.SetStatus(rep.Status())
 		reports = append(reports, rep)
+	}
+	if len(reports) == 0 && len(failed) == 0 {
+		// null, [] or {}: comparing with nothing would list every finding as new.
+		return nil, nil, errors.New("not a Tuner JSON report: no report in it")
 	}
 	return reports, failed, nil
 }
