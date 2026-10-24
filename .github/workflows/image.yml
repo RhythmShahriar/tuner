@@ -38,7 +38,7 @@ jobs:
         with:
           version: v2.18.3
           args: release --snapshot --clean --skip=sign,archive,announce,publish
-      # /v0/health answers, and with no TUNER_SERVE_TOKEN the container
+      # /v0/health answers. With no TUNER_SERVE_TOKEN the container
       # refuses to serve on 0.0.0.0. Both need the serve command, which is
       # built in another lane (vulns-service V10); until it lands the
       # image runs `rhythm-tuner serve` and exits with "unknown command",
@@ -56,10 +56,19 @@ jobs:
             exit 0
           fi
 
-          # Without a token the service must refuse to start on 0.0.0.0.
-          out=$(docker run --rm -e TUNER_SERVE_TOKEN= "$image" 2>&1 || true)
-          echo "$out"
-          echo "$out" | grep -qi 'TUNER_SERVE_TOKEN' || { echo "::error::serving with no token was not refused"; exit 1; }
+          # Without a token the service must refuse to start on 0.0.0.0:
+          # it exits non-zero on its own, names the variable and leaves no
+          # container behind. A serve that logs the name and keeps serving
+          # is still running at the timeout and fails here.
+          name=tuner-smoke-notoken
+          timeout 20 docker run --name "$name" -e TUNER_SERVE_TOKEN= "$image" > notoken.log 2>&1
+          code=$?
+          cat notoken.log
+          running=$(docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null || echo false)
+          docker rm -f "$name" >/dev/null 2>&1 || true
+          [ "$code" -ne 124 ] && [ "$running" = false ] || { echo "::error::with no token the container kept running"; exit 1; }
+          [ "$code" -ne 0 ] || { echo "::error::serving with no token exited 0"; exit 1; }
+          grep -qi 'TUNER_SERVE_TOKEN' notoken.log || { echo "::error::the refusal does not name TUNER_SERVE_TOKEN"; exit 1; }
 
           # With a token it answers /v0/health.
           cid=$(docker run -d -p 127.0.0.1:8080:8080 -e TUNER_SERVE_TOKEN=smoke-token "$image")
