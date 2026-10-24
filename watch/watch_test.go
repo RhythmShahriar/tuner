@@ -106,7 +106,7 @@ func fake(t *testing.T) (w *Watcher, argv string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &Watcher{Exe: exe, List: filepath.Join(dir, "sites.txt"), Dir: filepath.Join(dir, "state")}, argv
+	return &Watcher{Exe: exe, List: filepath.Join(dir, "sites.txt"), Dir: filepath.Join(dir, "state"), PassSince: true}, argv
 }
 
 // noRaceExitSleep stops a -race build of the fake binary from pausing a
@@ -466,5 +466,28 @@ func TestDigestIgnoresSitesNotScanned(t *testing.T) {
 	os.WriteFile(cur, []byte("not json"), 0o600)
 	if _, err := digest(cur, ""); err == nil || !strings.Contains(err.Error(), "not a Tuner JSON report") {
 		t.Errorf("bad report: %v", err)
+	}
+}
+
+// TestNoSinceStillCompares covers a scan without --since: the watch
+// never passes it and the digest still compares the runs.
+func TestNoSinceStillCompares(t *testing.T) {
+	w, argv := fake(t)
+	w.PassSince = false
+	ctx := context.Background()
+	t.Setenv("FAKE_TUNER_FINDINGS", "a,b")
+	if _, err := w.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKE_TUNER_FINDINGS", "b,c")
+	run, err := w.RunOnce(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := calls(t, argv)[1]; slices.Contains(got, "--since") {
+		t.Errorf("second run passed --since: %q", got)
+	}
+	if run.Since == "" || !run.Digest.Compared || run.Digest.New != 1 || run.Digest.Fixed != 1 {
+		t.Errorf("not compared: %+v", run)
 	}
 }
