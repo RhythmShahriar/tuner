@@ -341,9 +341,9 @@ func TestIntegrityLinks(t *testing.T) {
 		"shared/login.php":       "<?php // changed login",
 	})
 	links := map[string]string{
-		"wp-includes/load.php":                         filepath.Join(outside, "evil.php"),
-		"wp-admin/index.php":                           filepath.Join("..", "shared", "admin-index.php"),
-		"wp-login.php":                                 filepath.Join("shared", "login.php"),
+		"wp-includes/load.php": filepath.Join(outside, "evil.php"),
+		"wp-admin/index.php":   filepath.Join("..", "shared", "admin-index.php"),
+		"wp-login.php":         filepath.Join("shared", "login.php"),
 		"wp-content/plugins/akismet/class.akismet.php": filepath.Join(outside, "evil.php"),
 	}
 	for p, target := range links {
