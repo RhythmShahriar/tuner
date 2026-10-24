@@ -258,7 +258,7 @@ func TestIndexWordfenceRanges(t *testing.T) {
 }
 
 // TestWordfenceWeeklyInScans checks that a scan reuses a feed up to a
-// week old rather than wait on a download, and fetches an older one.
+// week old rather than wait on a download. It fetches an older one.
 func TestWordfenceWeeklyInScans(t *testing.T) {
 	wf := newFakeWordfence(t)
 	dir := t.TempDir()

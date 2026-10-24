@@ -882,7 +882,7 @@ func TestFileVerificationPlainHTTP(t *testing.T) {
 }
 
 // TestWebhookPrivateRefused covers a scan's webhook_url on a private or
-// local address: refused up front when literal, and at the dial when a
+// local address: refused up front when literal and at the dial when a
 // name resolves to one, so the receiver never hears from the server.
 func TestWebhookPrivateRefused(t *testing.T) {
 	var hits atomic.Int32

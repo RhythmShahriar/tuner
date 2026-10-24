@@ -19,14 +19,14 @@ const (
 // merge combines WPVulnerability's record with Wordfence's advisories for
 // the same component. An advisory both list is kept once: they are the
 // same when they share a CVE or, without one, have the same title and
-// affected range, and their ranges overlap. The merged advisory keeps
+// affected range. Their ranges must also overlap. The merged advisory keeps
 // WPVulnerability's ID, widens its range to cover both, gains the other's
 // CVEs and references, takes the higher CVSS score and credits both
 // sources. rec is not changed: it may be a cached copy.
 //
 // The feed lists one advisory per affected range, all with the same ID
 // and CVE. Each is matched against WPVulnerability's advisories only, never
-// against another range of the same record, and a range that doesn't
+// against another range of the same record. A range that doesn't
 // overlap stays its own advisory: folding it in would hide the versions
 // only the feed lists.
 func merge(rec *Record, wf []Vuln) *Record {
