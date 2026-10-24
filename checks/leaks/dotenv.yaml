@@ -24,5 +24,12 @@ fix: |
   Deny access to dotfiles, then rotate every secret in the file.
   nginx:  location ~ /\.(?!well-known) { deny all; }
   apache: <FilesMatch "^\."> Require all denied </FilesMatch>
+fix_server:
+  nginx: |
+    location ~ /\.(?!well-known) { deny all; }
+  apache: |
+    <FilesMatch "^\.">
+      Require all denied
+    </FilesMatch>
 references:
   - https://owasp.org/Top10/A05_2021-Security_Misconfiguration/

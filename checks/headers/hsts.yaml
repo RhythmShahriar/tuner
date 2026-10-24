@@ -17,3 +17,8 @@ impact: Visitors can be downgraded to plain HTTP on hostile networks.
 fix: |
   nginx:  add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
   apache: Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+fix_server:
+  nginx: |
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+  apache: |
+    Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"

@@ -15,3 +15,8 @@ match:
 impact: Full URLs, including query strings, may leak to third-party sites.
 fix: |
   nginx:  add_header Referrer-Policy strict-origin-when-cross-origin always;
+fix_server:
+  nginx: |
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+  apache: |
+    Header always set Referrer-Policy strict-origin-when-cross-origin

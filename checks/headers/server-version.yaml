@@ -15,3 +15,6 @@ impact: Reveals the exact web server version, making known vulnerabilities easy 
 fix: |
   nginx:  server_tokens off;
   apache: ServerTokens Prod
+fix_server:
+  nginx: |
+    server_tokens off;

@@ -20,3 +20,10 @@ fix: |
   Turn off WP_DEBUG_LOG on production or point it outside the web root:
   define( 'WP_DEBUG_LOG', '/var/log/wordpress/debug.log' );
   Then delete wp-content/debug.log.
+fix_server:
+  nginx: |
+    location ~* (\.log|/error_log)$ { deny all; }
+  apache: |
+    <FilesMatch "(\.log|^error_log)$">
+      Require all denied
+    </FilesMatch>

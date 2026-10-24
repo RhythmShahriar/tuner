@@ -19,3 +19,8 @@ fix: |
   Deny access to .svn, or deploy without it.
   nginx:  location ~ /\.svn { deny all; }
   apache: RedirectMatch 404 /\.svn
+fix_server:
+  nginx: |
+    location ~ /\.svn { deny all; }
+  apache: |
+    RedirectMatch 404 /\.svn

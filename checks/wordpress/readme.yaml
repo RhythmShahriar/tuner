@@ -14,3 +14,10 @@ match:
     - regex: '(?i)<title>WordPress[^<]*ReadMe'
 impact: Confirms WordPress and can hint at the installed version.
 fix: Delete readme.html after each core update, or deny it in the web server.
+fix_server:
+  nginx: |
+    location = /readme.html { deny all; }
+  apache: |
+    <Files "readme.html">
+      Require all denied
+    </Files>

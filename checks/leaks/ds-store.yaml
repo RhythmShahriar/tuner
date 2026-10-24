@@ -15,3 +15,10 @@ impact: macOS folder metadata lists file names in the directory, including hidde
 fix: |
   Delete .DS_Store files from the server and deny dotfiles.
   nginx:  location ~ /\.(?!well-known) { deny all; }
+fix_server:
+  nginx: |
+    location ~ /\.(?!well-known) { deny all; }
+  apache: |
+    <FilesMatch "^\.">
+      Require all denied
+    </FilesMatch>

@@ -30,3 +30,10 @@ match:
     - magic: "526172211a07" # rar
 impact: A full copy of the site, usually including configuration and secrets, can be downloaded.
 fix: Move backups out of the web root and store them somewhere private.
+fix_server:
+  nginx: |
+    # Add your own domain, e.g. example\.com, to the list of names.
+    location ~* ^/(backup|site|www|html|public_html|wordpress|wp-content)\.(zip|tar\.gz|tgz|sql\.gz)$ { deny all; }
+  apache: |
+    # Add your own domain, e.g. example\.com, to the list of names.
+    RedirectMatch 404 (?i)^/(backup|site|www|html|public_html|wordpress|wp-content)\.(zip|tar\.gz|tgz|sql\.gz)$

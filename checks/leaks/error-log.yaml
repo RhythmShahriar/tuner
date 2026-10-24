@@ -18,3 +18,10 @@ impact: Error logs reveal server paths, plugin names and sometimes credentials.
 fix: |
   Write logs outside the web root (php.ini: error_log = /var/log/php/error.log)
   and delete the exposed file.
+fix_server:
+  nginx: |
+    location ~* (\.log|/error_log)$ { deny all; }
+  apache: |
+    <FilesMatch "(\.log|^error_log)$">
+      Require all denied
+    </FilesMatch>

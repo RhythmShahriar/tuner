@@ -19,3 +19,10 @@ impact: Stack traces reveal source paths, queries and often credentials from exc
 fix: |
   Point the web server at public/, not the project root, so storage/ is never served.
   nginx:  root /var/www/app/public;
+fix_server:
+  nginx: |
+    location ~* (\.log|/error_log)$ { deny all; }
+  apache: |
+    <FilesMatch "(\.log|^error_log)$">
+      Require all denied
+    </FilesMatch>

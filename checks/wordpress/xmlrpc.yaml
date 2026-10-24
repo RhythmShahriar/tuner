@@ -17,3 +17,10 @@ fix: |
   Disable it unless Jetpack or a mobile app needs it.
   nginx:  location = /xmlrpc.php { deny all; }
   wp:     add_filter( 'xmlrpc_enabled', '__return_false' );
+fix_server:
+  nginx: |
+    location = /xmlrpc.php { deny all; }
+  apache: |
+    <Files "xmlrpc.php">
+      Require all denied
+    </Files>

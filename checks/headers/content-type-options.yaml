@@ -16,3 +16,8 @@ impact: Browsers may MIME-sniff uploads and run them as scripts.
 fix: |
   nginx:  add_header X-Content-Type-Options nosniff always;
   apache: Header always set X-Content-Type-Options nosniff
+fix_server:
+  nginx: |
+    add_header X-Content-Type-Options nosniff always;
+  apache: |
+    Header always set X-Content-Type-Options nosniff

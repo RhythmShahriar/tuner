@@ -16,3 +16,8 @@ impact: Exact package versions are visible, which makes known vulnerabilities ea
 fix: |
   Keep composer files and vendor/ outside the web root, or deny them.
   nginx:  location ~ ^/(composer\.(json|lock)|vendor/) { deny all; }
+fix_server:
+  nginx: |
+    location ~ ^/(composer\.(json|lock)|vendor/) { deny all; }
+  apache: |
+    RedirectMatch 404 ^/(composer\.(json|lock)|vendor/)
