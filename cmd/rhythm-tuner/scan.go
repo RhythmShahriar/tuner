@@ -397,6 +397,9 @@ const (
 	localRate   = 50
 )
 
+// maxLookups is how many DNS lookups ownNetworkTargets runs at once.
+const maxLookups = 16
+
 // lookupIP resolves a host for ownNetworkTargets. Tests replace it so
 // they never send a DNS query.
 var lookupIP = net.DefaultResolver.LookupIPAddr
@@ -413,6 +416,10 @@ func ownNetworkTargets(targets []string, proxied bool) map[string]bool {
 	fast := map[string]bool{}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
+	// A list of thousands of sites would otherwise send thousands of
+	// lookups at once, which resolvers drop: those sites would quietly
+	// get the public rate.
+	sem := make(chan struct{}, maxLookups)
 	for _, t := range targets {
 		if isLocalPath(t) {
 			continue
@@ -427,6 +434,8 @@ func ownNetworkTargets(targets []string, proxied bool) map[string]bool {
 		}
 		host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
 		wg.Go(func() {
+			sem <- struct{}{}
+			defer func() { <-sem }()
 			if ownNetworkHost(ctx, host, viaProxy) {
 				mu.Lock()
 				fast[t] = true

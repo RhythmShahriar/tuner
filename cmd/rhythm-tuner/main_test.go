@@ -1425,6 +1425,32 @@ func TestConfigHeadersAndErrors(t *testing.T) {
 
 // U12: targets on the user's own machine or network get 50 requests a
 // second unless --rate or the config sets one; public sites keep 5.
+// A long target list resolves at most maxLookups names at once.
+func TestOwnNetworkLookupsBounded(t *testing.T) {
+	old := lookupIP
+	defer func() { lookupIP = old }()
+	var now, peak atomic.Int32
+	lookupIP = func(context.Context, string) ([]net.IPAddr, error) {
+		n := now.Add(1)
+		for p := peak.Load(); n > p && !peak.CompareAndSwap(p, n); p = peak.Load() {
+		}
+		time.Sleep(5 * time.Millisecond)
+		now.Add(-1)
+		return []net.IPAddr{{IP: net.ParseIP("10.0.0.1")}}, nil
+	}
+	var targets []string
+	for i := range 100 {
+		targets = append(targets, fmt.Sprintf("https://site%d.internal", i))
+	}
+	fast := ownNetworkTargets(targets, false)
+	if len(fast) != len(targets) {
+		t.Errorf("%d of %d targets on the own network", len(fast), len(targets))
+	}
+	if p := peak.Load(); p > maxLookups || p < 2 {
+		t.Errorf("peak of %d lookups at once, want 2 to %d", p, maxLookups)
+	}
+}
+
 func TestOwnNetworkRate(t *testing.T) {
 	old := lookupIP
 	defer func() { lookupIP = old }()
