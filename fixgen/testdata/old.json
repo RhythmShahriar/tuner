@@ -1,0 +1,56 @@
+{
+  "schema": "rhythm-tuner/v0",
+  "tool": "rhythm-tuner",
+  "version": "0.4.0",
+  "duration_ms": 1200,
+  "summary": {},
+  "target": "https://shop.example.test",
+  "fingerprint": {},
+  "soft_404": false,
+  "score": 40,
+  "checks": 36,
+  "requests": 60,
+  "errors": 0,
+  "throttled": 0,
+  "findings": [
+    {
+      "id": "leak-git",
+      "title": ".git exposed",
+      "severity": "high",
+      "confidence": "high",
+      "target": "https://shop.example.test",
+      "url": "https://shop.example.test/.git/HEAD",
+      "path": "/.git/HEAD",
+      "evidence": {
+        "request": "GET /.git/HEAD",
+        "status": 200
+      }
+    },
+    {
+      "id": "wp-dir-listing",
+      "title": "Listing",
+      "severity": "medium",
+      "confidence": "high",
+      "target": "https://shop.example.test",
+      "url": "https://shop.example.test/wp-content/uploads/",
+      "path": "/wp-content/uploads/",
+      "evidence": {
+        "request": "GET /wp-content/uploads/",
+        "status": 200
+      }
+    },
+    {
+      "id": "php-phpinfo",
+      "title": "phpinfo",
+      "severity": "medium",
+      "confidence": "high",
+      "target": "https://shop.example.test",
+      "url": "https://shop.example.test/info.php",
+      "path": "/info.php",
+      "evidence": {
+        "request": "GET /info.php",
+        "status": 200
+      }
+    }
+  ]
+}

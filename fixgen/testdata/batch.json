@@ -1,0 +1,233 @@
+[
+  {
+    "schema": "rhythm-tuner/v0",
+    "tool": "rhythm-tuner",
+    "version": "0.4.0",
+    "duration_ms": 1200,
+    "summary": {},
+    "target": "https://shop.example.test",
+    "fingerprint": {},
+    "soft_404": false,
+    "score": 40,
+    "checks": 36,
+    "requests": 60,
+    "errors": 0,
+    "throttled": 0,
+    "findings": [
+      {
+        "id": "leak-dotenv",
+        "title": ".env file exposed",
+        "severity": "critical",
+        "confidence": "high",
+        "target": "https://shop.example.test",
+        "url": "https://shop.example.test/.env",
+        "path": "/.env",
+        "evidence": {
+          "request": "GET /.env",
+          "status": 200
+        },
+        "fixes": {
+          "nginx": "location ~ /\\.(?!well-known) { deny all; }\n",
+          "apache": "<FilesMatch \"^\\.\">\n  Require all denied\n</FilesMatch>\n"
+        }
+      },
+      {
+        "id": "leak-ds-store",
+        "title": ".DS_Store exposed",
+        "severity": "low",
+        "confidence": "high",
+        "target": "https://shop.example.test",
+        "url": "https://shop.example.test/.DS_Store",
+        "path": "/.DS_Store",
+        "evidence": {
+          "request": "GET /.DS_Store",
+          "status": 200
+        },
+        "fixes": {
+          "nginx": "location ~ /\\.(?!well-known) { deny all; }\n",
+          "apache": "<FilesMatch \"^\\.\">\n  Require all denied\n</FilesMatch>\n"
+        }
+      },
+      {
+        "id": "hdr-hsts-missing",
+        "title": "HSTS header missing",
+        "severity": "medium",
+        "confidence": "high",
+        "target": "https://shop.example.test",
+        "url": "https://shop.example.test/",
+        "path": "/",
+        "evidence": {
+          "request": "GET /",
+          "status": 200
+        },
+        "fixes": {
+          "nginx": "add_header Strict-Transport-Security \"max-age=31536000; includeSubDomains\" always;\n",
+          "apache": "Header always set Strict-Transport-Security \"max-age=31536000; includeSubDomains\"\n"
+        }
+      },
+      {
+        "id": "wp-xmlrpc",
+        "title": "XML-RPC enabled",
+        "severity": "low",
+        "confidence": "high",
+        "target": "https://shop.example.test",
+        "url": "https://shop.example.test/xmlrpc.php",
+        "path": "/xmlrpc.php",
+        "evidence": {
+          "request": "GET /xmlrpc.php",
+          "status": 200
+        },
+        "fixes": {
+          "nginx": "location = /xmlrpc.php { deny all; }\n",
+          "apache": "<Files \"xmlrpc.php\">\n  Require all denied\n</Files>\n"
+        }
+      },
+      {
+        "id": "tls-legacy-protocol",
+        "title": "Legacy TLS",
+        "severity": "medium",
+        "confidence": "high",
+        "target": "https://shop.example.test",
+        "url": "https://shop.example.test/",
+        "path": "/",
+        "evidence": {
+          "request": "GET /",
+          "status": 200
+        },
+        "fixes": {
+          "nginx": "ssl_protocols TLSv1.2 TLSv1.3;\n",
+          "apache": "SSLProtocol -all +TLSv1.2 +TLSv1.3\n"
+        }
+      },
+      {
+        "id": "hdr-server-version",
+        "title": "Server version",
+        "severity": "low",
+        "confidence": "high",
+        "target": "https://shop.example.test",
+        "url": "https://shop.example.test/",
+        "path": "/",
+        "evidence": {
+          "request": "GET /",
+          "status": 200
+        },
+        "fixes": {
+          "nginx": "server_tokens off;\n"
+        }
+      }
+    ],
+    "complete": true
+  },
+  {
+    "schema": "rhythm-tuner/v0",
+    "tool": "rhythm-tuner",
+    "version": "0.4.0",
+    "duration_ms": 1200,
+    "summary": {},
+    "target": "https://blog.example.test",
+    "fingerprint": {},
+    "soft_404": false,
+    "score": 40,
+    "checks": 36,
+    "requests": 60,
+    "errors": 0,
+    "throttled": 0,
+    "findings": [
+      {
+        "id": "leak-dotenv",
+        "title": ".env file exposed",
+        "severity": "critical",
+        "confidence": "high",
+        "target": "https://blog.example.test",
+        "url": "https://blog.example.test/.env.production",
+        "path": "/.env.production",
+        "evidence": {
+          "request": "GET /.env.production",
+          "status": 200
+        },
+        "fixes": {
+          "nginx": "location ~ /\\.(?!well-known) { deny all; }\n",
+          "apache": "<FilesMatch \"^\\.\">\n  Require all denied\n</FilesMatch>\n"
+        }
+      },
+      {
+        "id": "wp-user-enum-rest",
+        "title": "Users listed",
+        "severity": "medium",
+        "confidence": "high",
+        "target": "https://blog.example.test",
+        "url": "https://blog.example.test/wp-json/wp/v2/users",
+        "path": "/wp-json/wp/v2/users",
+        "evidence": {
+          "request": "GET /wp-json/wp/v2/users",
+          "status": 200
+        }
+      },
+      {
+        "id": "vuln-plugin-akismet",
+        "title": "Akismet vuln",
+        "severity": "high",
+        "confidence": "high",
+        "target": "https://blog.example.test",
+        "url": "https://blog.example.test/",
+        "path": "/",
+        "evidence": {
+          "request": "GET /",
+          "status": 200
+        }
+      },
+      {
+        "id": "hdr-hsts-missing",
+        "title": "HSTS header missing",
+        "severity": "medium",
+        "confidence": "high",
+        "target": "https://blog.example.test",
+        "url": "https://blog.example.test/",
+        "path": "/",
+        "evidence": {
+          "request": "GET /",
+          "status": 200
+        },
+        "fixes": {
+          "nginx": "add_header Strict-Transport-Security \"max-age=31536000; includeSubDomains\" always;\n",
+          "apache": "Header always set Strict-Transport-Security \"max-age=31536000; includeSubDomains\"\n"
+        }
+      },
+      {
+        "id": "wp-debug-log",
+        "title": "debug.log",
+        "severity": "high",
+        "confidence": "high",
+        "target": "https://blog.example.test",
+        "url": "https://blog.example.test/wp-content/debug.log",
+        "path": "/wp-content/debug.log",
+        "evidence": {
+          "request": "GET /wp-content/debug.log",
+          "status": 200
+        },
+        "fixes": {
+          "nginx": "location ~* (\\.log|/error_log)$ { deny all; }\n",
+          "apache": "<FilesMatch \"(\\.log|^error_log)$\">\n  Require all denied\n</FilesMatch>\n"
+        }
+      },
+      {
+        "id": "laravel-log",
+        "title": "laravel.log",
+        "severity": "high",
+        "confidence": "high",
+        "target": "https://blog.example.test",
+        "url": "https://blog.example.test/storage/logs/laravel.log",
+        "path": "/storage/logs/laravel.log",
+        "evidence": {
+          "request": "GET /storage/logs/laravel.log",
+          "status": 200
+        },
+        "fixes": {
+          "nginx": "location ~* (\\.log|/error_log)$ { deny all; }\n",
+          "apache": "<FilesMatch \"(\\.log|^error_log)$\">\n  Require all denied\n</FilesMatch>\n"
+        }
+      }
+    ],
+    "complete": true
+  }
+]
