@@ -85,7 +85,7 @@ func (c Case) server() (*httptest.Server, *http.Client, error) {
 
 // pin returns a copy of client that connects only to addr, the fixture
 // server's listener. Fixtures come from pull requests and third-party
-// checks directories, and the engine follows the home page's redirect, so
+// checks directories and the engine follows the home page's redirect, so
 // without this a fixture answering / with a redirect could make CI or a
 // contributor's machine send requests to any host, internal ones included.
 // An off-host redirect is an error, so the case fails and says why.

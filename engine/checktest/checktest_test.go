@@ -220,7 +220,7 @@ negative:
 	}
 }
 
-// A fixture that redirects the home page to another host fails, and no
+// A fixture that redirects the home page to another host fails and no
 // request reaches that host.
 func TestFixtureStaysOnItsServer(t *testing.T) {
 	var outside atomic.Int32
