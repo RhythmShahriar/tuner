@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"slices"
@@ -202,8 +203,9 @@ func (r *Result) Worst() Severity {
 }
 
 type Scanner struct {
-	checks []*Check
-	opts   Options
+	checks  []*Check
+	opts    Options
+	resolve resolver // host lookups for the address guard; tests stub it
 }
 
 func New(checks []*Check, opts Options) *Scanner {
@@ -213,7 +215,7 @@ func New(checks []*Check, opts Options) *Scanner {
 	if opts.Timeout <= 0 {
 		opts.Timeout = 10 * time.Second
 	}
-	return &Scanner{checks: checks, opts: opts}
+	return &Scanner{checks: checks, opts: opts, resolve: defaultResolve}
 }
 
 // Scan fingerprints target, learns its soft-404 behavior, then runs every
@@ -226,7 +228,7 @@ func (s *Scanner) Scan(ctx context.Context, target string, h Hooks) (*Result, er
 	}
 
 	home.TLS = ss.tlsInfo(ctx, home)
-	res := &Result{Target: ss.base.String(), Fingerprint: fingerprint.Detect(home), TLS: home.TLS}
+	res := &Result{Target: ss.base.String(), Fingerprint: fingerprint.Detect(home), TLS: home.TLS, Warnings: ss.warnings}
 	// The PHP probe runs in every profile: it costs at most three requests,
 	// and without it quick scans would report the version as hidden behind
 	// a page cache.
@@ -377,21 +379,29 @@ func (ss *session) run(ctx context.Context, c *Check, p string) (Finding, bool) 
 
 // session is the state of one scan against one target.
 type session struct {
-	opts      Options
-	hooks     Hooks
-	hookMu    sync.Mutex
-	follow    *http.Client // follows redirects, used for the home page
-	client    *http.Client // never follows redirects, used for checks
-	base      *url.URL
-	lim       *limiter
-	token     string         // random path segment for soft-404 probes
-	roots     *x509.CertPool // trust store for the TLS probe; nil means the system's
-	proxied   bool           // requests go through a proxy, so raw TLS dials would bypass it
-	mu        sync.Mutex
-	cache     map[string]*fetch
-	requests  atomic.Int64
-	errors    atomic.Int64
-	throttled atomic.Int64
+	opts     Options
+	hooks    Hooks
+	hookMu   sync.Mutex
+	follow   *http.Client // follows redirects, used for the home page
+	client   *http.Client // never follows redirects, used for checks
+	origin   *url.URL     // scheme and host the user asked for; user headers only go here
+	base     *url.URL     // where checks are sent: origin, or where its home page led
+	headers  http.Header  // the user's headers
+	resolve  resolver
+	dial     dialFunc // guarded raw dialer for the TLS probe
+	warnings []string
+	lim      *limiter
+	token    string         // random path segment for soft-404 probes
+	roots    *x509.CertPool // trust store for the TLS probe; nil means the system's
+	proxied  bool           // requests go through a proxy, so raw TLS dials would bypass it
+	// internalOK is set when the target itself is loopback, link-local or
+	// private; otherwise connections to such addresses are refused.
+	internalOK bool
+	mu         sync.Mutex
+	cache      map[string]*fetch
+	requests   atomic.Int64
+	errors     atomic.Int64
+	throttled  atomic.Int64
 }
 
 type fetch struct {
@@ -411,6 +421,10 @@ func (s *Scanner) open(ctx context.Context, target string, h Hooks) (*session, *
 	u, explicit, err := ParseTarget(target)
 	if err != nil {
 		return nil, nil, err
+	}
+	headers := s.opts.Headers.Clone()
+	if headers == nil {
+		headers = http.Header{}
 	}
 	base := s.opts.HTTPClient
 	if base == nil {
@@ -435,33 +449,56 @@ func (s *Scanner) open(ctx context.Context, target string, h Hooks) (*session, *
 			proxied = p != nil
 		}
 	}
-	follow, noFollow := *base, *base
-	follow.Timeout, noFollow.Timeout = s.opts.Timeout, s.opts.Timeout
-	noFollow.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-
 	ss := &session{
 		opts:    s.opts,
 		hooks:   h,
-		follow:  &follow,
-		client:  &noFollow,
+		headers: headers,
+		resolve: s.resolve,
 		roots:   roots,
 		proxied: proxied,
 		lim:     newLimiter(s.opts.Rate),
 		token:   "rhythm-tuner-" + randHex(6),
 		cache:   map[string]*fetch{},
 	}
+	ss.internalOK = ss.internalHost(ctx, u.Hostname())
+	ss.dial = ss.guardDial((&net.Dialer{Timeout: s.opts.Timeout}).DialContext)
+	follow, noFollow := *base, *base
+	follow.Transport = ss.guardTransport(base.Transport)
+	noFollow.Transport = follow.Transport
+	follow.Timeout, noFollow.Timeout = s.opts.Timeout, s.opts.Timeout
+	follow.CheckRedirect = ss.checkRedirect
+	noFollow.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	ss.follow, ss.client = &follow, &noFollow
 
+	ss.origin = &url.URL{Scheme: u.Scheme, Host: u.Host}
 	home, err := ss.do(ctx, ss.follow, "GET", u.String())
-	if err != nil && !explicit && ctx.Err() == nil {
+	if err != nil && !explicit && ctx.Err() == nil && !errors.As(err, new(*RedirectError)) {
 		u.Scheme = "http"
+		ss.origin.Scheme = "http"
 		home, err = ss.do(ctx, ss.follow, "GET", u.String())
 	}
 	if err != nil {
 		var cv *tls.CertificateVerificationError
-		if errors.As(err, &cv) {
+		var re *RedirectError
+		switch {
+		case errors.As(err, &re):
+			return nil, nil, re
+		case errors.As(err, &cv):
 			return nil, nil, fmt.Errorf("can't reach %s: invalid TLS certificate: %w (rerun with --insecure to scan anyway)", u.Host, cv.Err)
 		}
 		return nil, nil, fmt.Errorf("can't reach %s: %w", u.Host, err)
+	}
+	// checkRedirect already refused other hosts; this guards against a
+	// caller's client that bypassed it.
+	if !sameSite(ss.origin, home.URL) {
+		if !s.opts.FollowHost {
+			return nil, nil, &RedirectError{From: ss.origin, To: home.URL}
+		}
+		w := fmt.Sprintf("%s redirects to %s; scanning %s because of --follow-host", ss.origin.Host, home.URL.Host, home.URL.Host)
+		if len(ss.headers) > 0 {
+			w += ", without your headers and cookies"
+		}
+		ss.warnings = append(ss.warnings, w)
 	}
 	// Keep the scheme and host we were redirected to (http→https, apex→www)
 	// but the path the user asked for, so /blog scans stay under /blog.
@@ -530,13 +567,8 @@ func (ss *session) attempt(ctx context.Context, c *http.Client, method, u string
 	if err != nil {
 		return nil, 0, err
 	}
-	req.Header.Set("User-Agent", ss.opts.UserAgent)
-	for k, vs := range ss.opts.Headers {
-		if strings.EqualFold(k, "Host") {
-			req.Host = vs[0]
-			continue
-		}
-		req.Header[k] = vs
+	if host := ss.setHeaders(req.Header, req.URL); host != "" {
+		req.Host = host
 	}
 
 	ss.requests.Add(1)

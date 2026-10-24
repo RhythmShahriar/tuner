@@ -60,20 +60,29 @@ func (ss *session) legacyVersions(ctx context.Context, u *url.URL) []string {
 			return out
 		}
 		ss.requests.Add(1)
-		d := tls.Dialer{
-			NetDialer: &net.Dialer{Timeout: ss.opts.Timeout},
-			Config: &tls.Config{
-				ServerName:         u.Hostname(),
-				MinVersion:         v, //nolint:gosec // probing whether obsolete versions are accepted
-				MaxVersion:         v,
-				CipherSuites:       suites,
-				InsecureSkipVerify: true, //nolint:gosec // only the protocol version matters here
-			},
-		}
-		if conn, err := d.DialContext(ctx, "tcp", addr); err == nil {
-			_ = conn.Close()
+		if ss.legacyHandshake(ctx, addr, &tls.Config{
+			ServerName:         u.Hostname(),
+			MinVersion:         v, //nolint:gosec // probing whether obsolete versions are accepted
+			MaxVersion:         v,
+			CipherSuites:       suites,
+			InsecureSkipVerify: true, //nolint:gosec // only the protocol version matters here
+		}) {
 			out = append(out, tls.VersionName(v))
 		}
 	}
 	return out
+}
+
+// legacyHandshake reports whether a TLS handshake with cfg succeeds. It
+// dials through the session's address guard like every other request.
+func (ss *session) legacyHandshake(ctx context.Context, addr string, cfg *tls.Config) bool {
+	ctx, cancel := context.WithTimeout(ctx, ss.opts.Timeout)
+	defer cancel()
+	raw, err := ss.dial(ctx, "tcp", addr)
+	if err != nil {
+		return false
+	}
+	conn := tls.Client(raw, cfg)
+	defer func() { _ = conn.Close() }()
+	return conn.HandshakeContext(ctx) == nil
 }
