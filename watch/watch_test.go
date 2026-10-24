@@ -101,11 +101,20 @@ func fake(t *testing.T) (w *Watcher, argv string) {
 	t.Setenv("FAKE_TUNER_FINDINGS", "")
 	t.Setenv("FAKE_TUNER_SLEEP", "")
 	t.Setenv("FAKE_TUNER_NO_REPORT", "")
+	noRaceExitSleep(t)
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
 	return &Watcher{Exe: exe, List: filepath.Join(dir, "sites.txt"), Dir: filepath.Join(dir, "state")}, argv
+}
+
+// noRaceExitSleep stops a -race build of the fake binary from pausing a
+// second at exit (the race runtime's atexit_sleep_ms), which every run
+// would otherwise wait for.
+func noRaceExitSleep(t *testing.T) {
+	t.Helper()
+	t.Setenv("GORACE", strings.TrimSpace(os.Getenv("GORACE")+" atexit_sleep_ms=0"))
 }
 
 func calls(t *testing.T, argv string) [][]string {

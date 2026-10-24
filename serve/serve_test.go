@@ -698,6 +698,8 @@ func TestRestartAndClose(t *testing.T) {
 func TestExecRunner(t *testing.T) {
 	exe, _ := os.Executable()
 	t.Setenv("FAKE_SCAN", "1")
+	// A -race build otherwise pauses a second at exit (atexit_sleep_ms).
+	t.Setenv("GORACE", strings.TrimSpace(os.Getenv("GORACE")+" atexit_sleep_ms=0"))
 	t.Setenv("TUNER_SERVE_TOKEN", "server-token")
 	t.Setenv("TUNER_WEBHOOK_SECRET", "hook-secret")
 	var out, errb bytes.Buffer
