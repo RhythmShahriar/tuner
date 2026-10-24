@@ -1,6 +1,7 @@
 GOLANGCI := go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
 ACTIONLINT := go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 GORELEASER := go run github.com/goreleaser/goreleaser/v2@v2.18.3
+GOVULNCHECK := go run golang.org/x/vuln/cmd/govulncheck@v1.8.0
 
 # Files whose uses: lines must name a full commit SHA with a version
 # comment, e.g. uses: actions/checkout@<40 hex> # v7.0.1.
@@ -11,7 +12,7 @@ PIN_FILES ?= $(wildcard .github/workflows/*.yml .github/workflows/*.yaml action.
 #   checks-pack.yml        maintained with the check pack; remove once pinned
 PIN_EXEMPT := release-go\.yml@master$$|^\.github/workflows/checks-pack\.yml:
 
-.PHONY: build test lint fmt check hooks pack pins actionlint release-check
+.PHONY: build test test-all vuln checks-lint lint fmt check hooks pack pins actionlint release-check
 
 build: ## build bin/rhythm-tuner
 	go build -o bin/rhythm-tuner ./cmd/rhythm-tuner
@@ -19,13 +20,29 @@ build: ## build bin/rhythm-tuner
 test: ## run tests, including every check's fixtures
 	go test -race ./...
 
+test-all: test ## test, then compile every package and test for Windows and macOS
+	GOOS=windows go vet ./...
+	GOOS=darwin go vet ./...
+
+vuln: ## report known vulnerabilities in the code paths Tuner calls
+	$(GOVULNCHECK) ./...
+
+# Until the checks command has a lint subcommand, say so instead of
+# failing: older builds ignore "lint" and would just list the checks.
+checks-lint: ## lint every built-in check (IDs, methods, fixtures, budgets)
+	@if go run ./cmd/rhythm-tuner checks --help | grep -q 'checks lint'; then \
+		go run ./cmd/rhythm-tuner checks lint checks; \
+	else \
+		echo "checks lint: not in this build yet; skipped"; \
+	fi
+
 lint:
 	$(GOLANGCI) run ./...
 
 fmt:
 	gofmt -w .
 
-check: lint test ## everything CI runs
+check: lint test-all pins ## what CI runs, short of other platforms and govulncheck
 
 pack: ## build the check pack into dist/checks-pack, byte for byte as CI publishes it
 	go run ./internal/packbuild -commit "$$(git rev-parse HEAD)" -time "$$(git log -1 --format=%cI)"
