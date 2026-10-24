@@ -9,14 +9,31 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"text/tabwriter"
 
+	"github.com/RhythmShahriar/tuner/checks"
 	"github.com/RhythmShahriar/tuner/engine"
+	"github.com/RhythmShahriar/tuner/engine/checktest"
 )
 
-// listChecks prints the checks a scan with the same flags would run.
+// listChecks prints the checks a scan with the same flags would run, or
+// runs one of the contributor subcommands: new, test and lint.
 func listChecks(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 {
+		switch args[0] {
+		case "new":
+			return checksNew(args[1:], stdout, stderr)
+		case "test":
+			return checksTest(args[1:], stdout, stderr)
+		case "lint":
+			return checksLint(args[1:], stdout, stderr)
+		}
+	}
 	var (
 		profile, severity, dir             string
 		tags, excludeTags, ids, excludeIDs listFlag
@@ -103,9 +120,13 @@ func listChecks(args []string, stdout, stderr io.Writer) int {
 
 const checksUsage = `Usage:
   rhythm tuner checks [flags]
+  rhythm tuner checks new <id> [dir]   write a new check and its fixtures
+  rhythm tuner checks test [dir]       run checks against their fixtures
+  rhythm tuner checks lint [dir]       check checks against the house rules
 
 Lists the checks a scan with the same flags would run. Unlike scan, the
-profile defaults to deep, so every check is listed.
+profile defaults to deep, so every check is listed. test and lint read the
+built-in checks when no directory is given; neither needs Go.
 
 Flags:
       --profile <name>     quick, default or deep (default "deep")
@@ -118,4 +139,220 @@ Flags:
       --json               machine-readable output
       --offline            use only a cached check pack
       --no-check-updates   ignore check packs; list the built-in checks
+`
+
+// checksDir is the checks test and lint read: dir, or the built-in
+// checks when dir is empty.
+func checksDir(dir string) (fs.FS, string) {
+	if dir == "" {
+		return checks.FS, "built-in checks"
+	}
+	return os.DirFS(dir), dir
+}
+
+// oneDir parses a subcommand's arguments: at most one directory, no flags
+// but --help.
+func oneDir(name string, args []string, usage string, stdout, stderr io.Writer) (dir string, exit int, ok bool) {
+	for _, a := range args {
+		switch {
+		case a == "-h" || a == "--help":
+			fmt.Fprint(stdout, usage)
+			return "", exitOK, false
+		case strings.HasPrefix(a, "-"):
+			fmt.Fprintf(stderr, "rhythm tuner: checks %s: unknown flag %s\n\n%s", name, a, usage)
+			return "", exitUsage, false
+		}
+	}
+	if len(args) > 1 {
+		fmt.Fprintf(stderr, "rhythm tuner: checks %s takes at most one directory\n\n%s", name, usage)
+		return "", exitUsage, false
+	}
+	if len(args) == 1 {
+		dir = args[0]
+	}
+	return dir, exitOK, true
+}
+
+// checksTest runs every check in a directory against its fixtures with
+// the same runner as go test, so pack and fork contributors need no Go.
+func checksTest(args []string, stdout, stderr io.Writer) int {
+	dir, exit, ok := oneDir("test", args, checksTestUsage, stdout, stderr)
+	if !ok {
+		return exit
+	}
+	fsys, name := checksDir(dir)
+	results := checktest.Run(fsys)
+
+	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
+	var checksSeen, failed, cases int
+	for i := 0; i < len(results); {
+		// Results come grouped by check, in check order.
+		j := i
+		for j < len(results) && results[j].Check == results[i].Check {
+			j++
+		}
+		group := results[i:j]
+		i = j
+		if group[0].Check == "" { // the set itself failed to load
+			failed++
+			fmt.Fprintf(tw, "FAIL\t%s\n", strings.Join(group[0].Problems, "; "))
+			continue
+		}
+		checksSeen++
+		var pos, neg int
+		var lines []string
+		for _, r := range group {
+			if r.Case != "" {
+				cases++
+				if r.Positive {
+					pos++
+				} else {
+					neg++
+				}
+			}
+			for _, p := range r.Problems {
+				lines = append(lines, fmt.Sprintf("\t  %s: %s", r, p))
+			}
+			for _, l := range r.Leaks {
+				note := " (not yet enforced)"
+				if checktest.StrictOutput {
+					note = ""
+				}
+				lines = append(lines, fmt.Sprintf("\t  %s: %s%s", r, l, note))
+			}
+		}
+		status := "ok"
+		if slices.ContainsFunc(group, func(r checktest.Result) bool { return r.Failed(checktest.StrictOutput) }) {
+			status = "FAIL"
+			failed++
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%d positive, %d negative\n", status, group[0].Check, pos, neg)
+		for _, l := range lines {
+			fmt.Fprintln(tw, l)
+		}
+	}
+	if err := tw.Flush(); err != nil {
+		return exitError
+	}
+	if failed > 0 {
+		fmt.Fprintf(stdout, "\n%d of %d checks in %s failed.\n", failed, max(checksSeen, failed), name)
+		return exitFindings
+	}
+	fmt.Fprintf(stdout, "\nAll %d checks in %s passed (%d cases).\n", checksSeen, name, cases)
+	return exitOK
+}
+
+const checksTestUsage = `Usage:
+  rhythm tuner checks test [dir]
+
+Runs every check in dir (default: the built-in checks) against its
+fixtures, <name>_test.yaml next to each check: mock sites on 127.0.0.1 it
+must fire on (positive) and stay quiet on (negative). Exits 1 when a check
+fails. No request leaves this machine.
+`
+
+// checksLint reports checks that break the rules built-in checks follow.
+func checksLint(args []string, stdout, stderr io.Writer) int {
+	dir, exit, ok := oneDir("lint", args, checksLintUsage, stdout, stderr)
+	if !ok {
+		return exit
+	}
+	fsys, name := checksDir(dir)
+	issues := checktest.Lint(fsys)
+	for _, i := range issues {
+		fmt.Fprintln(stdout, i)
+	}
+	if len(issues) > 0 {
+		noun := "issues"
+		if len(issues) == 1 {
+			noun = "issue"
+		}
+		fmt.Fprintf(stdout, "\n%d %s in %s.\n", len(issues), noun, name)
+		return exitFindings
+	}
+	fmt.Fprintf(stdout, "No issues in %s.\n", name)
+	return exitOK
+}
+
+const checksLintUsage = `Usage:
+  rhythm tuner checks lint [dir]
+
+Checks every check in dir (default: the built-in checks) against the rules
+built-in checks follow: a lower-case ID with a known prefix (leak-, wp-,
+php-, laravel-, hdr-, tls-, srv-), GET or HEAD requests only, no payloads
+in paths or query strings, not_baseline or a regex, words or magic matcher
+on any path but /, an https reference, positive and negative fixtures,
+balanced fix_server snippets and at most 30 distinct paths in the quick
+profile. Exits 1 when a rule is broken.
+`
+
+// checksNew scaffolds a check and its fixtures that pass test and lint
+// as they are.
+func checksNew(args []string, stdout, stderr io.Writer) int {
+	var pos []string
+	for _, a := range args {
+		switch {
+		case a == "-h" || a == "--help":
+			fmt.Fprint(stdout, checksNewUsage)
+			return exitOK
+		case strings.HasPrefix(a, "-"):
+			fmt.Fprintf(stderr, "rhythm tuner: checks new: unknown flag %s\n\n%s", a, checksNewUsage)
+			return exitUsage
+		}
+		pos = append(pos, a)
+	}
+	if len(pos) < 1 || len(pos) > 2 {
+		fmt.Fprintf(stderr, "rhythm tuner: checks new takes an ID and an optional directory\n\n%s", checksNewUsage)
+		return exitUsage
+	}
+	id, dir := pos[0], "."
+	if len(pos) == 2 {
+		dir = pos[1]
+	}
+	check, fixture, err := checktest.Scaffold(id)
+	if err != nil {
+		fmt.Fprintln(stderr, "rhythm tuner:", err)
+		return exitUsage
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil { //nolint:gosec // checks are source files, readable like the rest of a repository
+		fmt.Fprintln(stderr, "rhythm tuner:", err)
+		return exitError
+	}
+	checkPath, fixturePath := filepath.Join(dir, id+".yaml"), filepath.Join(dir, id+"_test.yaml")
+	for _, p := range []string{checkPath, fixturePath} {
+		if _, err := os.Lstat(p); err == nil { //nolint:gosec // the directory the user named
+			fmt.Fprintf(stderr, "rhythm tuner: %s already exists; nothing written\n", p)
+			return exitError
+		}
+	}
+	for _, f := range []struct {
+		path string
+		data []byte
+	}{{checkPath, check}, {fixturePath, fixture}} {
+		// O_EXCL: never replace a file that appeared since the check above.
+		out, err := os.OpenFile(f.path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644) //nolint:gosec // as for MkdirAll
+		if err == nil {
+			_, err = out.Write(f.data)
+			if cerr := out.Close(); err == nil {
+				err = cerr
+			}
+		}
+		if err != nil {
+			fmt.Fprintln(stderr, "rhythm tuner:", err)
+			return exitError
+		}
+	}
+	fmt.Fprintf(stdout, "Wrote %s and %s.\nReplace the TODOs, then run:\n  rhythm tuner checks test %s\n  rhythm tuner checks lint %s\n",
+		checkPath, fixturePath, dir, dir)
+	return exitOK
+}
+
+const checksNewUsage = `Usage:
+  rhythm tuner checks new <id> [dir]
+
+Writes <dir>/<id>.yaml, a check to fill in, and <dir>/<id>_test.yaml, its
+fixtures (default dir: the current folder). Both pass checks test and
+checks lint as written. It never replaces a file. The ID is lower-case
+words joined by hyphens and starts with leak-, wp-, php-, laravel-, hdr-,
+tls- or srv-, e.g. leak-old-backup.
 `
