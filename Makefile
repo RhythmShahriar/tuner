@@ -12,7 +12,7 @@ PIN_FILES ?= $(wildcard .github/workflows/*.yml .github/workflows/*.yaml action.
 #   checks-pack.yml        maintained with the check pack; remove once pinned
 PIN_EXEMPT := release-go\.yml@master$$|^\.github/workflows/checks-pack\.yml:
 
-.PHONY: build test test-all testbed-fast vuln checks-lint lint fmt check hooks pack pins actionlint init-ci-lint release-check
+.PHONY: build test test-all testbed-fast testbed testbed-down testbed-config benchmark benchmark-test vuln checks-lint lint fmt check hooks pack pins actionlint init-ci-lint release-check
 
 build: ## build bin/rhythm-tuner
 	go build -o bin/rhythm-tuner ./cmd/rhythm-tuner
@@ -29,6 +29,29 @@ test-all: test ## test, then compile every package and test for Windows and macO
 # names a file.
 testbed-fast: ## run the scenario suite: loopback fixtures for QA's failure modes
 	go test -count=1 ./testbed/scenarios/
+
+testbed: ## build the plugin tree and start the WordPress testbed (needs Docker)
+	sh testbed/wp/make-plugins.sh
+	docker compose -f testbed/docker-compose.yml up -d --wait
+
+testbed-down: ## stop and remove the testbed, database and volumes
+	docker compose -f testbed/docker-compose.yml down -v
+
+benchmark: ## run Tuner, WPScan, wpprobe and Nuclei on the testbed and write docs/benchmark.md
+	go run -tags testbed ./testbed/bench
+
+benchmark-test: ## test the benchmark scoring without Docker or the network
+	go test -tags testbed ./testbed/bench/
+
+# Validates the server-config bundles from `rhythm-tuner fix` (checks-pack
+# C6) against the testbed's nginx and Apache with `nginx -t` and
+# `apachectl -t`. Skips cleanly until C6 ships the fix subcommand.
+testbed-config: ## validate C6 server-config bundles with nginx -t and apachectl -t
+	@if go run ./cmd/rhythm-tuner fix --help >/dev/null 2>&1; then \
+		sh testbed/validate-config.sh; \
+	else \
+		echo "testbed-config: rhythm-tuner fix is not in this build yet (checks-pack C6); skipped"; \
+	fi
 
 vuln: ## report known vulnerabilities in the code paths Tuner calls
 	$(GOVULNCHECK) ./...

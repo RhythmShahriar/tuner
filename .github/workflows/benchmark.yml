@@ -1,0 +1,66 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# The public benchmark. It starts the WordPress testbed, runs Tuner,
+# WPScan, wpprobe and Nuclei against it at pinned versions and uploads the
+# scoreboard (docs/benchmark.md). PRs do not run this; they run the
+# scenario suite in ci.yml. Every uses: is pinned by SHA (make pins).
+name: benchmark
+on:
+  schedule:
+    - cron: "41 5 * * *" # nightly, after most timezones' working day
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # The scoring logic, without Docker: fast and always run, so a broken
+  # harness is caught even on a day the live tools misbehave.
+  score:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: benchmark scoring tests
+        run: make benchmark-test
+
+  benchmark:
+    needs: score
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # wpprobe and Nuclei at the versions the harness names (see
+      # testbed/bench/tools.go). WPScan runs from its pinned image, pulled
+      # by docker on first use.
+      - name: Install wpprobe and Nuclei
+        run: |
+          go install github.com/Chocapikk/wpprobe@v0.12.12
+          go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@v3.11.1
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Start the testbed
+        run: make testbed
+      - name: Run the benchmark
+        run: make benchmark
+      - name: Add the scoreboard to the job summary
+        if: always()
+        run: cat docs/benchmark.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the scoreboard
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: benchmark
+          path: docs/benchmark.md
+      - name: Stop the testbed
+        if: always()
+        run: make testbed-down

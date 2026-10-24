@@ -1,0 +1,104 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+# Ground truth for the Tuner WordPress testbed (testbed/docker-compose.yml).
+# The benchmark (testbed/bench) scores Tuner, WPScan, wpprobe and Nuclei
+# against this: what is really installed and really exposed. Change the
+# testbed and change this in the same commit, so the benchmark stays
+# honest.
+#
+# Nothing here is a real secret and no plugin holds a working exploit. The
+# "vulnerable" plugins carry only a version and a readme at a version that
+# public advisories flag, which is what a detection-only scan reads.
+
+sites:
+  # The main site: WordPress behind nginx, old core, broken files on show.
+  main:
+    url: http://127.0.0.1:20280
+    front: nginx
+    wordpress: 6.4.1          # old on purpose; a core update is expected
+    # Files reachable over HTTP that must be reported. type is the
+    # finding id Tuner uses; tools that don't look for files simply can't
+    # score these.
+    exposed:
+      - path: /.env
+        finding: leak-dotenv
+        severity: critical
+      - path: /wp-content/debug.log
+        finding: wp-debug-log
+        severity: high
+      - path: /backup.zip
+        finding: leak-archive-backup
+        severity: high
+      - path: /composer.lock
+        finding: leak-composer
+        severity: medium
+      - path: /.git/config
+        finding: leak-git
+        severity: high
+    # On disk, reachable only in a local scan (--integrity, the bind
+    # mount). These are L7/L8 ground truth and don't count against the
+    # remote tools.
+    local:
+      - kind: modified-core
+        path: /wp-includes/pluggable.php
+        note: one line added to a core file
+      - kind: webshell
+        path: /wp-content/uploads/2026/01/thumbs.php
+        note: a planted PHP file in uploads
+  # The same WordPress served by Apache, to prove the C6 server-config
+  # bundles validate against both front ends.
+  apache:
+    url: http://127.0.0.1:20281
+    front: apache
+    wordpress: 6.4.1
+  # A subfolder install, to prove discovery keeps the /blog base.
+  blog:
+    url: http://127.0.0.1:20282/blog
+    front: nginx
+    wordpress: 6.4.1
+  # A WAF challenge front: every path answers with a Cloudflare-style
+  # challenge. The expected result is "blocked", not a score.
+  waf:
+    url: http://127.0.0.1:20283
+    front: challenge
+    blocked: true
+
+# Installed plugins. discoverable says how an outside scan can find each
+# one: readme (a readable readme.txt with Stable tag), rest (listed by the
+# REST API) or asset (only a wp-content asset URL in the HTML). vulnerable
+# marks the ones public advisories flag at this version, so recall counts
+# only those. active plugins render an asset on the home page.
+plugins:
+  - {slug: akismet, version: 4.1.1, discoverable: readme, vulnerable: false, active: true}
+  - {slug: contact-form-7, version: 5.3.1, discoverable: readme, vulnerable: true, active: true}
+  - {slug: wordpress-seo, version: 19.7, discoverable: readme, vulnerable: true, active: true}
+  - {slug: elementor, version: 3.5.0, discoverable: readme, vulnerable: true, active: true}
+  - {slug: woocommerce, version: 6.5.0, discoverable: readme, vulnerable: true, active: true}
+  - {slug: jetpack, version: 10.0, discoverable: readme, vulnerable: true, active: false}
+  - {slug: wpforms-lite, version: 1.7.0, discoverable: readme, vulnerable: true, active: true}
+  - {slug: all-in-one-seo-pack, version: 4.1.5, discoverable: readme, vulnerable: true, active: false}
+  - {slug: wordfence, version: 7.5.9, discoverable: readme, vulnerable: true, active: true}
+  - {slug: updraftplus, version: 1.22.3, discoverable: readme, vulnerable: true, active: false}
+  - {slug: duplicate-post, version: 3.2.6, discoverable: readme, vulnerable: true, active: false}
+  - {slug: redirection, version: 5.3.0, discoverable: readme, vulnerable: true, active: true}
+  - {slug: wp-super-cache, version: 1.7.9, discoverable: readme, vulnerable: true, active: true}
+  - {slug: ninja-forms, version: 3.6.0, discoverable: readme, vulnerable: true, active: false}
+  - {slug: really-simple-ssl, version: 5.1.0, discoverable: readme, vulnerable: true, active: true}
+  - {slug: mailchimp-for-wp, version: 4.8.0, discoverable: readme, vulnerable: true, active: false}
+  - {slug: tablepress, version: 1.14, discoverable: readme, vulnerable: false, active: false}
+  - {slug: autoptimize, version: 2.9.0, discoverable: readme, vulnerable: true, active: true}
+  - {slug: loginizer, version: 1.7.0, discoverable: readme, vulnerable: true, active: false}
+  - {slug: wp-mail-smtp, version: 3.3.0, discoverable: readme, vulnerable: true, active: false}
+  # REST-only: no readable readme, but the plugin appears in the REST API.
+  - {slug: advanced-custom-fields, version: 5.11.0, discoverable: rest, vulnerable: true, active: true}
+  - {slug: classic-editor, version: 1.6.2, discoverable: rest, vulnerable: false, active: true}
+  - {slug: wp-fastest-cache, version: 0.9.5, discoverable: rest, vulnerable: true, active: false}
+  - {slug: litespeed-cache, version: 4.4.0, discoverable: rest, vulnerable: true, active: false}
+  - {slug: seo-by-rank-math, version: 1.0.90, discoverable: rest, vulnerable: true, active: false}
+  # Asset-only: discoverable just from a script or style URL on the page.
+  - {slug: slider-revolution, version: 6.5.8, discoverable: asset, vulnerable: true, active: true}
+  - {slug: js-composer, version: 6.7.0, discoverable: asset, vulnerable: true, active: true}
+  - {slug: layerslider, version: 6.11.0, discoverable: asset, vulnerable: true, active: false}
+  - {slug: essential-grid, version: 3.0.0, discoverable: asset, vulnerable: true, active: false}
+  - {slug: booster-for-woocommerce, version: 5.6.0, discoverable: asset, vulnerable: true, active: false}
