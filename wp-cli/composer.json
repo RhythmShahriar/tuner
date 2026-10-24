@@ -1,0 +1,44 @@
+{
+    "name": "rhythm-shahriar/tuner-wp-cli",
+    "description": "Run Tuner's local WordPress and PHP scan from WP-CLI: wp tuner scan.",
+    "type": "wp-cli-package",
+    "license": "AGPL-3.0-only",
+    "homepage": "https://github.com/RhythmShahriar/tuner",
+    "authors": [
+        {
+            "name": "Rhythm Shahriar",
+            "email": "me@rhy.io"
+        }
+    ],
+    "require": {
+        "php": ">=7.4"
+    },
+    "require-dev": {
+        "wp-cli/wp-cli": ">=2.5",
+        "phpunit/phpunit": "^9.6 || ^10.5"
+    },
+    "autoload": {
+        "psr-4": {
+            "RhythmShahriar\\Tuner\\": "src/"
+        },
+        "files": [
+            "command.php"
+        ]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "RhythmShahriar\\Tuner\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit"
+    },
+    "extra": {
+        "commands": [
+            "tuner scan"
+        ]
+    },
+    "suggest": {
+        "wp-cli/wp-cli": "Provided by the WP-CLI runtime; needed only to run the command."
+    }
+}

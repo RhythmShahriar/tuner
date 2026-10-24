@@ -1,0 +1,96 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# Tests the WP-CLI bridge package (wp-cli/): PHPUnit for the download,
+# verification and argument building, then a smoke test that installs the
+# package in a real WP-CLI container and runs `wp tuner scan` against a
+# fixture WordPress and a local release of this commit. Every uses: is
+# pinned by SHA (make pins).
+name: wp-cli
+on:
+  push:
+    branches: [master]
+    paths: [wp-cli/**, .github/workflows/wp-cli.yml]
+  pull_request:
+    paths: [wp-cli/**, .github/workflows/wp-cli.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: wp-cli
+
+jobs:
+  phpunit:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ["7.4", "8.1", "8.3"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: mbstring, zip, phar, json
+          coverage: none
+      - uses: ramsey/composer-install@3cf229dc2919194e9e36783941438d17239e8520 # 3.1.1
+        with:
+          working-directory: wp-cli
+      - name: PHPUnit
+        run: composer test
+
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # Build this commit and package it exactly as a release does, then
+      # serve it so the package downloads and verifies a real binary.
+      - name: Package a local release
+        working-directory: .
+        run: |
+          set -euo pipefail
+          mkdir -p release/dl
+          GOOS=linux GOARCH=amd64 go build -o rhythm-tuner ./cmd/rhythm-tuner
+          tar -czf "release/dl/rhythm-tuner_linux_amd64.tar.gz" rhythm-tuner
+          ( cd release/dl && sha256sum rhythm-tuner_linux_amd64.tar.gz > checksums.txt )
+          nohup python3 -m http.server 20290 --directory release/dl --bind 127.0.0.1 >/dev/null 2>&1 &
+          for _ in $(seq 1 20); do curl -fsS http://127.0.0.1:20290/checksums.txt >/dev/null && break; sleep 0.3; done
+      # A throwaway WordPress tree for the local scan. The package never
+      # runs the site's PHP, so WordPress need not be installed or served.
+      - name: Fixture WordPress
+        working-directory: .
+        run: |
+          set -euo pipefail
+          mkdir -p site/wp-includes site/wp-content/plugins
+          printf "<?php \$wp_version = '6.4.1';\n" > site/wp-includes/version.php
+          printf "<?php\ndefine('DB_PASSWORD', 'smoke-not-a-secret');\n" > site/wp-config.php
+          printf 'DB_PASSWORD=smoke-not-a-secret\n' > site/.env
+      - name: Install WP-CLI and the package
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /usr/local/bin/wp https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+          chmod +x /usr/local/bin/wp
+          wp --allow-root --version
+          wp --allow-root package install "$GITHUB_WORKSPACE/wp-cli"
+      - name: wp tuner scan --format=json
+        working-directory: .
+        env:
+          TUNER_DOWNLOAD_URL: http://127.0.0.1:20290
+        run: |
+          set -uo pipefail
+          wp --allow-root tuner scan \
+            --path="$PWD/site" --format=json --fail-on=none --no-verify-signature > out.json
+          code=$?
+          echo "exit $code"
+          jq -e '.findings | map(.id) | index("leak-dotenv")' out.json
+          test "$code" -eq 0

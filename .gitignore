@@ -14,3 +14,11 @@ coverage.*
 !.env.example
 # ...except the fake leak the Action tests scan for
 !/testbed/action/site/.env
+
+# WP-CLI package dependencies (a library: no composer.lock either)
+/wp-cli/vendor/
+/wp-cli/composer.lock
+
+# Testbed: generated plugin tree and local release packaging
+/testbed/wp/content/
+/release/
