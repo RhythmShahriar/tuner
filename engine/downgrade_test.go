@@ -153,8 +153,9 @@ func TestRefusedDialIsNotHTTPS(t *testing.T) {
 	}
 	addr := ln.Addr().String()
 	_ = ln.Close()
-	_, err = (&http.Client{}).Get("https://" + addr + "/")
+	resp, err := (&http.Client{}).Get("https://" + addr + "/")
 	if err == nil {
+		resp.Body.Close()
 		t.Skip("something listens on the closed port")
 	}
 	if !connRefused(err) || !notHTTPS(err) || !plainHTTPOnly(err) {

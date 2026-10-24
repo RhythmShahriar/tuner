@@ -114,7 +114,7 @@ var internalV4 = []netip.Prefix{
 }
 
 // embeddedV4 returns the IPv4 address that a carries for a translation
-// or tunnelling scheme, if any.
+// or tunneling scheme, if any.
 func embeddedV4(a netip.Addr) (netip.Addr, bool) {
 	if !a.Is6() {
 		return netip.Addr{}, false

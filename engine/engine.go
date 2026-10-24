@@ -192,7 +192,7 @@ type Result struct {
 	Soft404     bool               `json:"soft_404"`
 	// Soft404Unknown is set when the soft-404 probe hit a block page or
 	// the home page failed: Soft404 is then false but says nothing about
-	// the site, whose 404 behaviour could not be measured.
+	// the site, whose 404 behavior could not be measured.
 	Soft404Unknown bool              `json:"soft_404_unknown,omitempty"`
 	TLS            *matchers.TLSInfo `json:"tls,omitempty"`
 	Score          int               `json:"score"`

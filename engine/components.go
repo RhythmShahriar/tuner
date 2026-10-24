@@ -199,7 +199,7 @@ func (ss *session) discoverPlugins(ctx context.Context, fp *fingerprint.Result, 
 	// An advisor can know thousands of plugins. With the default budget
 	// probe as many as fit after the popular ones (two requests go to the
 	// REST index and the baseline) instead of ending every deep scan
-	// partial; an explicit --request-budget is honoured as given.
+	// partial; an explicit --request-budget is kept as given.
 	var trimmed string
 	if room := max(top, budget-2); ss.opts.RequestBudget <= 0 && len(slugs) > room {
 		trimmed = fmt.Sprintf("plugin discovery probed %d of %d plugins with known advisories; raise --request-budget to probe the rest",
