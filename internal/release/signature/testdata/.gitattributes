@@ -1,0 +1,4 @@
+# These files are signed release fixtures: the tests hash their exact
+# bytes, so git must never convert line endings (core.autocrlf=true on
+# Windows runners would turn LF into CRLF and break the digest).
+* -text
