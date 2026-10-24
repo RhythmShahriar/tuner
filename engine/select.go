@@ -18,12 +18,14 @@ import (
 // Profile trades coverage for request count.
 type Profile string
 
+// Scan profiles, from cheapest.
 const (
 	ProfileQuick   Profile = "quick"   // the highest-value checks, about 30 requests
 	ProfileDefault Profile = "default" // everything polite and non-intrusive
 	ProfileDeep    Profile = "deep"    // for checks that send many requests (none yet)
 )
 
+// Profiles lists every profile, cheapest first; Rank is the index here.
 var Profiles = []Profile{ProfileQuick, ProfileDefault, ProfileDeep}
 
 // Rank orders profiles from cheapest; -1 if unknown.
@@ -33,15 +35,12 @@ func (p Profile) Rank() int { return slices.Index(Profiles, p) }
 // findings (vuln-*) may still apply.
 var ErrNoChecks = errors.New("no checks match the selection; list them with: rhythm tuner checks")
 
-// IsAdvisorID reports whether an ID pattern names advisor findings
-// (vulnerability matching) or local-scan findings rather than YAML checks.
+// IsAdvisorID reports whether an ID pattern names findings that Go code
+// emits (vulnerability matching, local scans) rather than YAML checks. It
+// asks the rule registry (RegisterRules), so a new provider's IDs work
+// once it registers them.
 func IsAdvisorID(pattern string) bool {
-	for _, p := range []string{"vuln", "local-", "wp-core-", "wp-components-", "wp-plugin-closed", "wp-theme-closed", "php-eol", "php-version-hidden", "nginx-eol", "apache-eol"} {
-		if strings.HasPrefix(pattern, p) || strings.HasPrefix(p, strings.TrimSuffix(pattern, "*")) && strings.HasSuffix(pattern, "*") && pattern != "*" {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(allRules(), func(r Rule) bool { return r.mayMatch(pattern) })
 }
 
 // Selector narrows the checks a scan runs. Zero values select everything
@@ -55,8 +54,35 @@ type Selector struct {
 	MinSeverity Severity // skip checks below this severity
 }
 
-// Select applies s to all.
+// ParseSeverity reads a severity name in any case, e.g. "HIGH".
+func ParseSeverity(name string) (Severity, error) {
+	s := Severity(strings.ToLower(strings.TrimSpace(name)))
+	if s.Rank() < 0 {
+		return "", fmt.Errorf("unknown severity %q: want one of %v", name, Severities)
+	}
+	return s, nil
+}
+
+// ParseProfile reads a profile name in any case, e.g. "Quick".
+func ParseProfile(name string) (Profile, error) {
+	p := Profile(strings.ToLower(strings.TrimSpace(name)))
+	if p.Rank() < 0 {
+		return "", fmt.Errorf("unknown profile %q: want one of %v", name, Profiles)
+	}
+	return p, nil
+}
+
+// normalize lower-cases the selector's profile and severity, so "HIGH"
+// and "Quick" work like "high" and "quick".
+func (s Selector) normalize() Selector {
+	s.Profile = Profile(strings.ToLower(strings.TrimSpace(string(s.Profile))))
+	s.MinSeverity = Severity(strings.ToLower(strings.TrimSpace(string(s.MinSeverity))))
+	return s
+}
+
+// Select applies s to all. Profile and MinSeverity may be in any case.
 func Select(all []*Check, s Selector) ([]*Check, error) {
+	s = s.normalize()
 	if s.Profile == "" {
 		s.Profile = ProfileDefault
 	}
@@ -74,6 +100,9 @@ func Select(all []*Check, s Selector) ([]*Check, error) {
 			return nil, fmt.Errorf("bad check pattern %q: %w", id, err)
 		}
 		if !IsAdvisorID(id) && !slices.ContainsFunc(all, func(c *Check) bool { return globMatch(id, c.ID) }) {
+			if near := closestID(all, id); near != "" {
+				return nil, fmt.Errorf("no check matches %q; did you mean %q? list them with: rhythm tuner checks", id, near)
+			}
 			return nil, fmt.Errorf("no check matches %q; list them with: rhythm tuner checks", id)
 		}
 	}
@@ -95,6 +124,43 @@ func Select(all []*Check, s Selector) ([]*Check, error) {
 		return nil, ErrNoChecks
 	}
 	return out, nil
+}
+
+// closestID returns the check ID nearest to a mistyped one, at most two
+// edits away, or "" if none is that close. Globs get no suggestion.
+func closestID(all []*Check, id string) string {
+	if strings.ContainsAny(id, "*?[") {
+		return ""
+	}
+	best, bestD := "", 3
+	for _, c := range all {
+		if d := editDistance(strings.ToLower(id), c.ID); d < bestD {
+			best, bestD = c.ID, d
+		}
+	}
+	return best
+}
+
+// editDistance is the Levenshtein distance between a and b, by byte:
+// check IDs are ASCII.
+func editDistance(a, b string) int {
+	prev := make([]int, len(b)+1)
+	cur := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+		}
+		prev, cur = cur, prev
+	}
+	return prev[len(b)]
 }
 
 func globMatch(pattern, id string) bool {
@@ -120,7 +186,7 @@ func Score(findings []Finding) int {
 	}
 	byID := map[string]*agg{}
 	for _, f := range findings {
-		low := f.Confidence == "low"
+		low := !f.Confidence.Confirmed()
 		a, ok := byID[f.ID]
 		if !ok {
 			byID[f.ID] = &agg{f.Severity, low}
@@ -151,16 +217,26 @@ type filtered struct {
 	sel Selector
 }
 
+// PluginSlugs passes PluginLister through the filter, so deep discovery
+// still sees the advisor's slugs.
+func (f filtered) PluginSlugs(ctx context.Context) []string {
+	if l, ok := f.Advisor.(PluginLister); ok {
+		return l.PluginSlugs(ctx)
+	}
+	return nil
+}
+
 func (f filtered) Advise(ctx context.Context, base *url.URL, fp fingerprint.Result) ([]Finding, []string) {
 	findings, warnings := f.Advisor.Advise(ctx, base, fp)
+	sel := f.sel.normalize()
 	var kept []Finding
 	for _, x := range findings {
 		switch {
-		case f.sel.MinSeverity != "" && x.Severity.Rank() > f.sel.MinSeverity.Rank():
-		case len(f.sel.IDs) > 0 && !slices.ContainsFunc(f.sel.IDs, func(id string) bool { return globMatch(id, x.ID) }):
-		case slices.ContainsFunc(f.sel.ExcludeIDs, func(id string) bool { return globMatch(id, x.ID) }):
-		case len(f.sel.Tags) > 0 && !hasAny(x.Tags, f.sel.Tags):
-		case hasAny(x.Tags, f.sel.ExcludeTags):
+		case sel.MinSeverity != "" && x.Severity.Rank() > sel.MinSeverity.Rank():
+		case len(sel.IDs) > 0 && !slices.ContainsFunc(sel.IDs, func(id string) bool { return globMatch(id, x.ID) }):
+		case slices.ContainsFunc(sel.ExcludeIDs, func(id string) bool { return globMatch(id, x.ID) }):
+		case len(sel.Tags) > 0 && !hasAny(x.Tags, sel.Tags):
+		case hasAny(x.Tags, sel.ExcludeTags):
 		default:
 			kept = append(kept, x)
 		}

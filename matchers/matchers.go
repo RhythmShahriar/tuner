@@ -31,6 +31,12 @@ type Response struct {
 
 	// TLSState is the raw handshake, kept for the engine's TLS probe.
 	TLSState *tls.ConnectionState
+
+	// Size and SHA256 describe Body as it was read, up to the engine's
+	// 1 MiB cap. They stay set when the engine drops Body from its cache
+	// to bound memory.
+	Size   int
+	SHA256 [32]byte
 }
 
 // TLSInfo describes the target's certificate and protocol support.
@@ -80,6 +86,7 @@ type TLSMatch struct {
 // Ints accepts either a single int or a list in YAML.
 type Ints []int
 
+// UnmarshalYAML reads 200 as well as [200, 206].
 func (i *Ints) UnmarshalYAML(n *yaml.Node) error {
 	if n.Kind == yaml.ScalarNode {
 		var v int
@@ -182,14 +189,16 @@ func (m *Matcher) Match(r *Response, isBaseline func() bool) (bool, string) {
 		if loc == nil {
 			return false, ""
 		}
-		ev = Snippet(r.Body[loc[0]:loc[1]])
+		// Redact the whole match before Snippet cuts it: a token cut short
+		// no longer looks like a secret and would leak in part.
+		ev = Snippet([]byte(Redact(string(r.Body[loc[0]:loc[1]]))))
 	}
 	for name, re := range m.header {
 		v, ok := headerMatch(r.Header, name, re)
 		if !ok {
 			return false, ""
 		}
-		ev = name + ": " + v
+		ev = name + ": " + Redact(CleanText(v))
 	}
 	for name, re := range m.notHeader {
 		if _, ok := headerMatch(r.Header, name, re); ok {
@@ -288,13 +297,16 @@ func headerMatch(h http.Header, name string, re *regexp.Regexp) (string, bool) {
 	return "", false
 }
 
-// Block combines matchers: every one in All must hold, and if Any is set,
-// at least one of those too.
+// Block combines matchers: every one in All must hold. If Any is set, at
+// least one of those must hold too.
 type Block struct {
 	All []Matcher `yaml:"all"`
 	Any []Matcher `yaml:"any"`
 }
 
+// Compile checks the block and prepares its matchers (regexes, magic
+// bytes) for Match. ParseCheck calls it; a Block built in code needs it
+// before use.
 func (b *Block) Compile() error {
 	if len(b.All)+len(b.Any) == 0 {
 		return errors.New("match needs at least one condition in all or any")
@@ -312,13 +324,31 @@ func (b *Block) Compile() error {
 	return nil
 }
 
+// Content reports whether the block tests what the body holds (regex,
+// words or magic), so a hit proves more than a status code. The soft-404
+// filter trusts such a hit unless the server's page for a missing path
+// passes the same tests. not_regex does not count: it only rules bodies out.
+func (b *Block) Content() bool {
+	content := func(m Matcher) bool { return m.re != nil || len(m.Words) > 0 || m.magic != nil }
+	return slices.ContainsFunc(b.All, content) || slices.ContainsFunc(b.Any, content)
+}
+
+// NeedsBaseline reports whether any matcher in the block uses not_baseline,
+// so matching it may fetch a soft-404 probe.
+func (b *Block) NeedsBaseline() bool {
+	nb := func(m Matcher) bool { return m.NotBaseline }
+	return slices.ContainsFunc(b.All, nb) || slices.ContainsFunc(b.Any, nb)
+}
+
 // Match evaluates the block. Baseline comparisons run last so a soft-404
 // probe is only requested when everything else already matched.
 func (b *Block) Match(r *Response, isBaseline func() bool) (bool, []string) {
 	var ev []string
 	add := func(e string) {
 		if e != "" {
-			ev = append(ev, e)
+			// Evidence can quote the site (TLS errors name certificate
+			// hosts), so no matcher may pass control bytes through.
+			ev = append(ev, CleanText(e))
 		}
 	}
 	never := func() bool { return false }
@@ -350,11 +380,26 @@ func (b *Block) Match(r *Response, isBaseline func() bool) (bool, []string) {
 	return true, ev
 }
 
-// Snippet turns matched bytes into a short single-line string.
+// Snippet turns matched bytes into a short single-line string, safe to
+// print: runs of whitespace become one space and control bytes become
+// U+FFFD (see CleanText).
 func Snippet(b []byte) string {
-	s := strings.Join(strings.Fields(strings.ToValidUTF8(string(b), "�")), " ")
+	s := CleanText(strings.Join(strings.Fields(strings.ToValidUTF8(string(b), "\uFFFD")), " "))
 	if utf8.RuneCountInString(s) > 120 {
 		s = string([]rune(s)[:119]) + "…"
 	}
 	return s
+}
+
+// CleanText replaces control characters in text copied from a site with
+// U+FFFD, so a page can't move the cursor, rewrite earlier output or set
+// the clipboard (OSC 52) when a finding is printed. It replaces C0
+// controls other than tab, DEL, C1 controls and invalid UTF-8.
+func CleanText(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 && r != '\t' || r >= 0x7f && r <= 0x9f {
+			return utf8.RuneError
+		}
+		return r
+	}, s)
 }

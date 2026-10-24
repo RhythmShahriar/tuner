@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -20,6 +21,7 @@ import (
 // Severity of a finding, from info to critical.
 type Severity string
 
+// Severities, as checks and JSON spell them.
 const (
 	Critical Severity = "critical"
 	High     Severity = "high"
@@ -39,7 +41,7 @@ type Check struct {
 	ID         string         `yaml:"id"`
 	Name       string         `yaml:"name"`
 	Severity   Severity       `yaml:"severity"`
-	Confidence string         `yaml:"confidence"`
+	Confidence Confidence     `yaml:"confidence"`
 	Profile    Profile        `yaml:"profile"` // cheapest scan profile that runs this check
 	Tags       []string       `yaml:"tags"`
 	Requires   []string       `yaml:"requires"` // tech the fingerprint must find, e.g. wordpress
@@ -49,17 +51,44 @@ type Check struct {
 	Impact     string         `yaml:"impact"`
 	Fix        string         `yaml:"fix"`
 	References []string       `yaml:"references"`
+	FixServer  FixServer      `yaml:"fix_server"`
 
 	// File is the check's path inside the checks filesystem.
 	File string `yaml:"-"`
 }
 
+// FixServer holds web server config snippets that fix a finding. They
+// reach the finding as Finding.Fixes, keyed nginx and apache.
+type FixServer struct {
+	Nginx  string `yaml:"nginx"`
+	Apache string `yaml:"apache"`
+}
+
+// fixes returns the non-empty snippets by server name, or nil.
+func (f FixServer) fixes() map[string]string {
+	var m map[string]string
+	for name, v := range map[string]string{"nginx": f.Nginx, "apache": f.Apache} {
+		if v = strings.TrimSpace(v); v != "" {
+			if m == nil {
+				m = map[string]string{}
+			}
+			m[name] = v
+		}
+	}
+	return m
+}
+
+// Request is what a check fetches: one request per path, GET unless
+// Method says HEAD.
 type Request struct {
 	Method string   `yaml:"method"`
 	Path   []string `yaml:"path"` // {{host}} expands to the target hostname
 }
 
+// Extract lists what a check pulls out of a matching response.
 type Extract struct {
+	// Secrets adds the masked credentials found in the body to the
+	// finding's evidence.
 	Secrets bool `yaml:"secrets"`
 }
 
@@ -101,6 +130,11 @@ func LoadChecks(fsys fs.FS) ([]*Check, error) {
 	return checks, nil
 }
 
+// safeQuery is the only query string a check path may carry: plain
+// name=value pairs. Percent escapes, quotes, parentheses, semicolons and
+// spaces are refused, so a check can never send an injection payload.
+var safeQuery = regexp.MustCompile(`^[A-Za-z0-9_.~-]+=[A-Za-z0-9_.~/-]*(&[A-Za-z0-9_.~-]+=[A-Za-z0-9_.~/-]*)*$`)
+
 // ParseCheck decodes and validates a single check. Unknown keys are errors,
 // so a typo in a check fails loudly instead of silently matching nothing.
 func ParseCheck(data []byte) (*Check, error) {
@@ -124,9 +158,19 @@ func ParseCheck(data []byte) (*Check, error) {
 		if !strings.HasPrefix(p, "/") {
 			return nil, fmt.Errorf("request.path %q must start with /", p)
 		}
+		if _, q, ok := strings.Cut(p, "?"); ok && !safeQuery.MatchString(q) {
+			return nil, fmt.Errorf("request.path %q: the query may only hold plain name=value pairs (letters, digits, _ . ~ - and / in values)", p)
+		}
 	}
-	if c.Request.Method == "" {
+	// Checks only read: a write method such as DELETE or POST could change
+	// the site, which Tuner never does.
+	switch m := strings.ToUpper(c.Request.Method); m {
+	case "":
 		c.Request.Method = "GET"
+	case "GET", "HEAD":
+		c.Request.Method = m
+	default:
+		return nil, fmt.Errorf("request.method %q: checks may only use GET or HEAD", c.Request.Method)
 	}
 	if c.Profile == "" {
 		c.Profile = ProfileDefault
@@ -135,7 +179,7 @@ func ParseCheck(data []byte) (*Check, error) {
 		return nil, fmt.Errorf("profile %q: want one of %v", c.Profile, Profiles)
 	}
 	if c.Confidence == "" {
-		c.Confidence = "high"
+		c.Confidence = ConfidenceHigh
 	}
 	if err := c.Match.Compile(); err != nil {
 		return nil, fmt.Errorf("match: %w", err)

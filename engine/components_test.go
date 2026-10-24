@@ -5,11 +5,18 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/RhythmShahriar/tuner/fingerprint"
 )
 
 // A page cache strips X-Powered-By from the home page; uncacheable PHP
@@ -37,7 +44,7 @@ func TestProbePHP(t *testing.T) {
 			probed: []string{"/xmlrpc.php", "/wp-admin/admin-ajax.php"},
 		},
 		{
-			name:    "quick profile probes too, and reads Server",
+			name:    "quick profile probes too and reads Server",
 			home:    func(w http.ResponseWriter) { w.Write([]byte(`<script src="/wp-includes/js/x.js"></script>`)) },
 			headers: map[string]http.Header{"/xmlrpc.php": {"Server": {"Apache/2.4.41 (Ubuntu) PHP/7.4.3-4ubuntu2.19"}}},
 			profile: ProfileQuick,
@@ -65,6 +72,15 @@ func TestProbePHP(t *testing.T) {
 		{
 			name: "not PHP: no probe",
 			home: func(w http.ResponseWriter) { w.Write([]byte("<html>static</html>")) },
+		},
+		{
+			name: "wordpress, PHP session cookie on a probe",
+			home: func(w http.ResponseWriter) { w.Write([]byte(`<link href="/wp-content/plugins/x/y.css">`)) },
+			headers: map[string]http.Header{
+				"/wp-admin/admin-ajax.php": {"Set-Cookie": {"PHPSESSID=abc; path=/"}},
+			},
+			source: "probe",
+			probed: []string{"/xmlrpc.php", "/wp-admin/admin-ajax.php", "/wp-login.php"},
 		},
 		{
 			name:   "hidden everywhere",
@@ -105,5 +121,91 @@ func TestProbePHP(t *testing.T) {
 				t.Errorf("probed %v, want %v", probed, tc.probed)
 			}
 		})
+	}
+}
+
+type phpSpy struct{ fp fingerprint.Result }
+
+func (s *phpSpy) Advise(_ context.Context, _ *url.URL, fp fingerprint.Result) ([]Finding, []string) {
+	s.fp = fp
+	return nil, nil
+}
+
+// A static server never shows PHP; a WordPress page with no PHP header
+// shows PHP with no version, so the advisor cannot match PHP CVEs.
+func TestRemotePHPNeedsEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		has        bool
+		str        string
+	}{
+		{"static", "<html>static</html>", false, "unknown"},
+		{"wordpress", `<meta name="generator" content="WordPress 6.4.3" />`, true, "WordPress 6.4.3 · PHP (version unknown)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/" {
+					w.Write([]byte(tc.body))
+					return
+				}
+				http.NotFound(w, r)
+			}))
+			defer srv.Close()
+			spy := &phpSpy{}
+			res, err := New(nil, Options{HTTPClient: srv.Client(), Advisor: spy}).Scan(context.Background(), srv.URL, Hooks{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			fp := res.Fingerprint
+			if fp.Has("php") != tc.has || fp.PHP != "" || fp.PHPSource != "" || fp.String() != tc.str {
+				t.Errorf("fingerprint %+v, string %q", fp, fp.String())
+			}
+			if spy.fp.PHP != "" {
+				t.Errorf("advisor saw PHP %q", spy.fp.PHP)
+			}
+		})
+	}
+}
+
+func TestConcurrencyCapsEveryRequest(t *testing.T) {
+	var home strings.Builder
+	for i := range 50 {
+		fmt.Fprintf(&home, `<link href="/wp-content/plugins/plugin-%d/a.css?ver=1.0">`, i)
+	}
+	var now, peak, total atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := now.Add(1)
+		defer now.Add(-1)
+		total.Add(1)
+		for p := peak.Load(); n > p && !peak.CompareAndSwap(p, n); p = peak.Load() {
+		}
+		if r.URL.Path == "/" {
+			w.Write([]byte(home.String()))
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	c := mustParse(t, `
+id: t-many
+name: many
+severity: low
+request: {path: ["/a", "/b", "/c", "/d", "/e", "/f"]}
+match: {all: [{status: 200}, {not_baseline: true}]}
+`)
+	for _, limit := range []int32{1, 4} {
+		peak.Store(0)
+		total.Store(0)
+		_, err := New([]*Check{c}, Options{Concurrency: int(limit), HTTPClient: srv.Client()}).Scan(context.Background(), srv.URL, Hooks{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if total.Load() < 50 {
+			t.Fatalf("-c %d: only %d requests, want the 50 readme lookups", limit, total.Load())
+		}
+		if p := peak.Load(); p > limit {
+			t.Errorf("-c %d: %d requests in flight", limit, p)
+		}
 	}
 }
