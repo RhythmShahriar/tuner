@@ -715,7 +715,7 @@ func stampFindings(*engine.Result, string) {}
 // runStatus says how much of a target one run saw. It mirrors
 // report.Status from the report writer work: until engine.Result and
 // report.Report carry these fields, the CLI fills them in from the run
-// context and the vulnerability advisor, and statusJSON adds them to JSON.
+// context and the vulnerability advisor; statusJSON adds them to JSON.
 type runStatus struct {
 	Complete  bool   `json:"complete"`
 	StoppedBy string `json:"stopped_by,omitempty"` // interrupted or max-time
@@ -946,8 +946,8 @@ func wantsVulns(s engine.Selector) bool {
 }
 
 // httpClient builds a client for Tuner's own requests (vulnerability
-// data, OSV.dev, the check pack). It goes through the scan's proxy, or
-// HTTPS_PROXY and friends when there is none, and sends ua on every
+// data, OSV.dev, the check pack). It goes through the scan's proxy (or
+// HTTPS_PROXY and friends when there is none) and sends ua on every
 // request that doesn't set its own User-Agent.
 func httpClient(ua string, proxy *url.URL, timeout time.Duration) *http.Client {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
