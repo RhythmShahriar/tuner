@@ -80,7 +80,7 @@ func scanStatus(ctx context.Context, root string, opts Options, h engine.Hooks) 
 	if err != nil {
 		return nil, status{}, err
 	}
-	s := &scan{opts: opts, root: abs, base: &url.URL{Scheme: "file", Path: filepath.ToSlash(abs)}}
+	s := &scan{opts: opts, root: abs, base: fileURL(abs)}
 	if s.opts.MaxEntries <= 0 {
 		s.opts.MaxEntries = defaultMaxEntries
 	}
@@ -154,15 +154,12 @@ func scanStatus(ctx context.Context, root string, opts Options, h engine.Hooks) 
 }
 
 // Root resolves a local target to an absolute directory, expanding a
-// leading ~. It errors if the target isn't a directory.
+// leading ~, ~/ or ~\ to the home folder on every OS. It errors if the
+// target isn't a directory.
 func Root(target string) (string, error) {
-	p := target
-	if p == "~" || strings.HasPrefix(p, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		p = filepath.Join(home, p[1:])
+	p, err := expandHome(target, os.UserHomeDir)
+	if err != nil {
+		return "", err
 	}
 	abs, err := filepath.Abs(p)
 	if err != nil {
@@ -178,6 +175,49 @@ func Root(target string) (string, error) {
 		return "", fmt.Errorf("%s: not a directory; point Tuner at the site's root folder", target)
 	}
 	return abs, nil
+}
+
+// expandHome replaces a leading ~ with the home folder. Both separators
+// count after it: Windows users type ~\site, and a script written there
+// may still be run on Linux or macOS.
+func expandHome(p string, home func() (string, error)) (string, error) {
+	if p != "~" && !strings.HasPrefix(p, "~/") && !strings.HasPrefix(p, `~\`) {
+		return p, nil
+	}
+	h, err := home()
+	if err != nil {
+		return "", err
+	}
+	rest := p[1:]
+	if strings.HasPrefix(rest, `\`) {
+		rest = strings.ReplaceAll(rest, `\`, "/") // Windows style throughout
+	}
+	return filepath.Join(h, filepath.FromSlash(rest)), nil
+}
+
+// fileURL is the file:// URL of an absolute local path.
+func fileURL(abs string) *url.URL { return fileURLSep(abs, filepath.Separator) }
+
+// fileURLSep builds the file URL of a path that uses sep, so tests can
+// cover Windows paths on any OS. A drive letter gets a leading slash
+// (file:///C:/inetpub/wwwroot/.env, not file://C:/… with C: as the host),
+// and a UNC path \\server\share\x becomes file://server/share/x.
+func fileURLSep(abs string, sep byte) *url.URL {
+	p := abs
+	if sep != '/' {
+		p = strings.ReplaceAll(p, string(sep), "/")
+	}
+	u := &url.URL{Scheme: "file"}
+	switch {
+	case strings.HasPrefix(p, "//"):
+		host, rest, _ := strings.Cut(p[2:], "/")
+		u.Host, u.Path = host, "/"+rest
+	case len(p) >= 2 && p[1] == ':' && (p[0]|0x20 >= 'a' && p[0]|0x20 <= 'z'):
+		u.Path = "/" + p
+	default:
+		u.Path = p
+	}
+	return u
 }
 
 // scan is the state of one local scan.
@@ -201,14 +241,12 @@ func (s *scan) warn(format string, a ...any) {
 
 // finding builds a finding about the file at abs.
 func (s *scan) finding(id string, sev engine.Severity, abs, title string, ev []string, impact, fix string, tags ...string) engine.Finding {
-	u := *s.base
-	u.Path = filepath.ToSlash(abs)
 	return engine.Finding{
 		ID:         id,
 		Title:      title,
 		Severity:   sev,
 		Confidence: "high",
-		URL:        u.String(),
+		URL:        fileURL(abs).String(),
 		Path:       s.rel(abs),
 		Evidence:   engine.Evidence{Request: "read " + s.rel(abs), Matched: ev},
 		Impact:     impact,
