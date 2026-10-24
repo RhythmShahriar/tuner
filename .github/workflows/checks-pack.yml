@@ -3,8 +3,13 @@
 
 # Publishes checks/ as a check pack on the rolling checks-latest release,
 # so new checks reach users without a new binary. rhythm-tuner downloads
-# the pack (see checkpack/ and https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Check-Packs), verifies its checksums and
-# uses it when it's newer than the checks compiled into the binary.
+# the pack (see checkpack/ and https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Check-Packs), verifies the signature on
+# its checksums and uses it when it's newer than the checks compiled into
+# the binary.
+#
+# The signing key is the TUNER_PACK_SIGNING_KEY secret, a base64 Ed25519
+# private key whose public half is in checkpack/keys.go. Actions are pinned
+# by commit SHA because this job can publish to every user.
 #
 # The release is a prerelease and is never marked latest: `rhythm update`
 # and the installers read /releases/latest, which per GitHub's docs only
@@ -35,20 +40,28 @@ jobs:
     if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
         with:
           go-version-file: go.mod
 
       # Every check must pass its positive and negative fixtures.
       - name: Test checks
-        run: go test ./engine ./checkpack
+        run: go test ./engine/... ./checkpack ./internal/packbuild
 
-      # The same command as a local `make pack`, so the assets can be
-      # rebuilt and compared byte for byte.
-      - name: Build pack
-        run: make pack
+      # The same command as a local `make pack`, plus the signature, so the
+      # assets can be rebuilt and compared byte for byte. packbuild refuses
+      # to run when the secret is empty, so an unsigned pack is never
+      # published.
+      - name: Build and sign pack
+        env:
+          TUNER_PACK_SIGNING_KEY: ${{ secrets.TUNER_PACK_SIGNING_KEY }}
+        run: >-
+          go run ./internal/packbuild
+          -commit "$(git rev-parse HEAD)"
+          -time "$(git log -1 --format=%cI)"
+          -sign-key-env TUNER_PACK_SIGNING_KEY
 
       - name: Publish
         env:
@@ -60,7 +73,8 @@ jobs:
           notes="Check pack $version, built from $GITHUB_SHA.
 
           This is not a Tuner release. rhythm-tuner downloads these assets
-          automatically, checks them against checks-sha256.txt, and uses them
+          automatically, verifies the signature on checks-sha256.txt and the
+          checksums in it, and uses them
           when they are newer than its built-in checks. See https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Check-Packs"
 
           if ! gh release view "$TAG" --repo "$repo" >/dev/null 2>&1; then
@@ -80,12 +94,14 @@ jobs:
               --title "Check pack" --notes "$notes"
           fi
 
-          # Clients verify all three files together, so a client that reads
-          # them mid-upload sees a checksum mismatch and keeps its cached pack.
+          # Clients verify all four files together, so a client that reads
+          # them mid-upload sees a signature or checksum mismatch and keeps
+          # its cached pack.
           gh release upload "$TAG" --repo "$repo" --clobber \
             dist/checks-pack/checks.tar.gz \
             dist/checks-pack/checks-manifest.json \
-            dist/checks-pack/checks-sha256.txt
+            dist/checks-pack/checks-sha256.txt \
+            dist/checks-pack/checks-sha256.txt.sig
           gh release edit "$TAG" --repo "$repo" --prerelease --latest=false \
             --title "Check pack" --notes "$notes"
 
