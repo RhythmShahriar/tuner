@@ -92,6 +92,8 @@ That's it. Tuner fingerprints the site, learns how it answers "not found", runs 
 | Write a client-ready HTML report with your agency's name | `rhythm tuner scan yoursite.com --html client.html --brand-name "Your Agency"` |
 | Compare two saved reports: what is new and what was fixed | `rhythm tuner diff before.json after.json` |
 | Turn saved JSON reports into HTML, Markdown or SARIF | `rhythm tuner report scan.json -o client.html` |
+| Read a finding's full explanation and fix, offline | `rhythm tuner explain leak-dotenv` |
+| Turn a report's findings into one nginx or Apache config | `rhythm tuner fix report.json --server nginx` |
 | Find WordPress plugins the home page does not load | `rhythm tuner scan yoursite.com --plugins deep` |
 | Scan your clients' sites every night and see what changed | `rhythm tuner watch -l clients.txt --at 02:00 --fail-on-new high --html` |
 | Run scans from your own app over an HTTP API | `TUNER_SERVE_TOKEN=… rhythm tuner serve --listen 127.0.0.1:8080` |

@@ -164,14 +164,6 @@ func checksDir(dir string) (fs.FS, string, error) {
 	return os.DirFS(dir), dir, nil
 }
 
-// plural is "1 check" or "n checks".
-func plural(n int, noun string) string {
-	if n == 1 {
-		return "1 " + noun
-	}
-	return fmt.Sprintf("%d %ss", n, noun)
-}
-
 // oneDir parses a subcommand's arguments: at most one directory, no flags
 // but --help.
 func oneDir(name string, args []string, usage string, stdout, stderr io.Writer) (dir string, exit int, ok bool) {
@@ -261,14 +253,14 @@ func checksTest(args []string, stdout, stderr io.Writer) int {
 		return exitError
 	}
 	if failed > 0 {
-		fmt.Fprintf(stdout, "\n%d of %s in %s failed.\n", failed, plural(max(checksSeen, failed), "check"), name)
+		fmt.Fprintf(stdout, "\n%d of %s in %s failed.\n", failed, plural(max(checksSeen, failed), "check", "checks"), name)
 		return exitFindings
 	}
 	if checksSeen == 1 {
-		fmt.Fprintf(stdout, "\nThe check in %s passed (%s).\n", name, plural(cases, "case"))
+		fmt.Fprintf(stdout, "\nThe check in %s passed (%s).\n", name, plural(cases, "case", "cases"))
 		return exitOK
 	}
-	fmt.Fprintf(stdout, "\nAll %s in %s passed (%s).\n", plural(checksSeen, "check"), name, plural(cases, "case"))
+	fmt.Fprintf(stdout, "\nAll %s in %s passed (%s).\n", plural(checksSeen, "check", "checks"), name, plural(cases, "case", "cases"))
 	return exitOK
 }
 
@@ -476,7 +468,7 @@ func checksExport(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "Wrote %d Nuclei %s and README.md to %s.\n", written, noun, out)
 	if len(skipped) > 0 {
-		fmt.Fprintf(stdout, "Skipped %s a template can't express:\n", plural(len(skipped), "check"))
+		fmt.Fprintf(stdout, "Skipped %s a template can't express:\n", plural(len(skipped), "check", "checks"))
 		tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
 		for _, t := range skipped {
 			fmt.Fprintf(tw, "  %s\t%s\n", t.DisplayID(), t.Skipped)

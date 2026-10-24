@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/RhythmShahriar/rhythm/kit/cli"
 	"github.com/RhythmShahriar/tuner/checks"
 	"github.com/RhythmShahriar/tuner/engine"
 	"github.com/RhythmShahriar/tuner/fixgen"
@@ -21,6 +22,10 @@ var fixStdin io.Reader = os.Stdin
 // maxReport caps a report file; a batch of a few thousand sites is well
 // under it.
 const maxReport = 64 << 20
+
+func init() {
+	registerCommand(command{Name: "fix", Summary: "build one nginx or apache config from reports", Run: cmdFix})
+}
 
 // cmdFix runs `rhythm tuner fix <report.json>... --server nginx|apache`:
 // one config bundle for every finding in the reports that a server rule
@@ -38,7 +43,7 @@ func cmdFix(args []string, stdout, stderr io.Writer) int {
 	flags.SetOutput(io.Discard)
 	flags.StringVar(&server, "server", "", "")
 	flags.BoolVar(&dryRun, "dry-run", false, "")
-	files, err := parseInterspersed(flags, args)
+	files, err := cli.ParseInterspersed(flags, args)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			fmt.Fprint(stdout, fixUsage)
