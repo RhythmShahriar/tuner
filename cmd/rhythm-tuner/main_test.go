@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1010,5 +1011,45 @@ func TestVulnStatusFromWarnings(t *testing.T) {
 	s.set(vulnOK)
 	if s.get() != vulnPartial {
 		t.Errorf("worst status should win, got %s", s.get())
+	}
+}
+
+func TestHTTPClientUsesProxy(t *testing.T) {
+	var mu sync.Mutex
+	var got struct{ url, ua string }
+	seen := func() struct{ url, ua string } { mu.Lock(); defer mu.Unlock(); return got }
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		got.url, got.ua = r.URL.String(), r.UserAgent() // a proxy sees the absolute URL
+		mu.Unlock()
+		w.Write([]byte("ok"))
+	}))
+	defer proxy.Close()
+	u, _ := url.Parse(proxy.URL)
+	c := httpClient("rhythm-tuner/test", u, 5*time.Second)
+	resp, err := c.Get("http://vulns.example.invalid/plugin/x/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if g := seen(); g.url != "http://vulns.example.invalid/plugin/x/" || g.ua != "rhythm-tuner/test" || c.Timeout != 5*time.Second {
+		t.Errorf("proxy saw %+v, timeout %v", g, c.Timeout)
+	}
+
+	// A caller's own User-Agent wins, and its request is left as it was.
+	req, _ := http.NewRequest(http.MethodGet, "http://vulns.example.invalid/", nil)
+	req.Header.Set("User-Agent", "custom")
+	if resp, err := c.Do(req); err == nil {
+		resp.Body.Close()
+	}
+	if g := seen(); g.ua != "custom" {
+		t.Errorf("User-Agent %q, want custom", g.ua)
+	}
+	req, _ = http.NewRequest(http.MethodGet, "http://vulns.example.invalid/", nil)
+	if resp, err := c.Do(req); err == nil {
+		resp.Body.Close()
+	}
+	if req.Header.Get("User-Agent") != "" {
+		t.Error("the default User-Agent changed the caller's request")
 	}
 }

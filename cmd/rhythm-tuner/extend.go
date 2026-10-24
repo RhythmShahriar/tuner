@@ -33,7 +33,7 @@ type scanExtension interface {
 	// Flags registers the extension's flags on the scan flag set.
 	Flags(fs *flag.FlagSet)
 	// Plan runs after the built-in planning and may edit p.targets,
-	// p.engine, p.local and p.write. Return a usageError for bad flags.
+	// p.engine, p.local and p.write. Return a usageError (usagef) for bad flags.
 	Plan(p *scanPlan) error
 	// Finished runs after the report is written. The highest exit code
 	// among the scan and every extension wins; an error is printed and

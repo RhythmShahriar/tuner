@@ -27,9 +27,9 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/term"
 	"github.com/muesli/termenv"
 
+	"github.com/RhythmShahriar/rhythm/kit/cli"
 	"github.com/RhythmShahriar/rhythm/kit/config"
 	"github.com/RhythmShahriar/tuner/engine"
 	"github.com/RhythmShahriar/tuner/fingerprint"
@@ -38,25 +38,15 @@ import (
 	"github.com/RhythmShahriar/tuner/vulns"
 )
 
-// listFlag collects comma-separated values across repeated flags.
-type listFlag []string
+// Short names for the kit's flag and error helpers, which every command
+// in this package shares.
+type (
+	listFlag   = cli.ListFlag   // comma-separated values across repeated flags
+	usageError = cli.UsageError // a bad command line: exit 2
+)
 
-func (l *listFlag) String() string { return strings.Join(*l, ",") }
-
-func (l *listFlag) Set(v string) error {
-	for _, p := range strings.Split(v, ",") {
-		if p = strings.TrimSpace(p); p != "" {
-			*l = append(*l, p)
-		}
-	}
-	return nil
-}
-
-// repeatFlag collects each use of a flag verbatim.
-type repeatFlag []string
-
-func (r *repeatFlag) String() string     { return strings.Join(*r, "; ") }
-func (r *repeatFlag) Set(v string) error { *r = append(*r, v); return nil }
+// usagef builds a usageError.
+var usagef = cli.Usagef
 
 type scanOptions struct {
 	json, jsonl, sarif, md         bool
@@ -71,7 +61,7 @@ type scanOptions struct {
 	timeout, maxTime time.Duration
 	retries          int
 	userAgent        string
-	headers          repeatFlag
+	headers          cli.RepeatFlag
 	cookie, proxy    string
 	insecure         bool
 
@@ -139,27 +129,6 @@ func scanFlagSet(o *scanOptions, stderr io.Writer) *flag.FlagSet {
 	return fs
 }
 
-// parseInterspersed lets flags come before or after positional arguments.
-func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
-	var pos []string
-	for {
-		if err := fs.Parse(args); err != nil {
-			return nil, err
-		}
-		if fs.NArg() == 0 {
-			return pos, nil
-		}
-		pos = append(pos, fs.Arg(0))
-		args = fs.Args()[1:]
-	}
-}
-
-type usageError struct{ msg string }
-
-func (e usageError) Error() string { return e.msg }
-
-func usagef(format string, a ...any) error { return usageError{fmt.Sprintf(format, a...)} }
-
 // scanPlan is everything scan needs once flags are validated.
 type scanPlan struct {
 	o        scanOptions
@@ -204,12 +173,12 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 	for _, e := range scanExtensions {
 		e.Flags(flags)
 	}
-	pos, err := parseInterspersed(flags, args)
+	pos, err := cli.ParseInterspersed(flags, args)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil, err
 		}
-		return nil, usageError{err.Error()}
+		return nil, usageError{Msg: err.Error()}
 	}
 
 	// Targets.
@@ -245,13 +214,13 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 		}
 		if isLocal {
 			if _, err := local.Root(t); err != nil {
-				return nil, usageError{err.Error()}
+				return nil, usageError{Msg: err.Error()}
 			}
 			continue
 		}
 		allLocal = false
 		if _, _, err := engine.ParseTarget(t); err != nil {
-			return nil, usageError{err.Error()}
+			return nil, usageError{Msg: err.Error()}
 		}
 	}
 
@@ -306,7 +275,7 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 	vulnsOn := !o.noVulns && wantsVulns(sel)
 	p.checks, err = engine.Select(all, sel)
 	if err != nil && (!errors.Is(err, engine.ErrNoChecks) || !vulnsOn && !allLocal) {
-		return nil, usageError{err.Error()}
+		return nil, usageError{Msg: err.Error()}
 	}
 
 	// CI.
@@ -380,7 +349,7 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 
 func execute(p *scanPlan, stdout, stderr io.Writer) int {
 	o := p.o
-	tty := isTerminal(stdout)
+	tty := cli.IsTerminal(stdout)
 	plain := o.plain || !tty
 	if plain || o.noColor {
 		lipgloss.SetColorProfile(termenv.Ascii)
@@ -970,25 +939,42 @@ func wantsVulns(s engine.Selector) bool {
 		return false
 	}
 	advisorTags := []string{"vuln", "wordpress", "php", "outdated", "abandoned", "nginx", "apache", "core", "plugin", "theme", "composer", "known-exploited"}
-	if len(s.Tags) > 0 && !hasAny(s.Tags, advisorTags) {
+	if len(s.Tags) > 0 && !slices.ContainsFunc(s.Tags, func(t string) bool { return slices.Contains(advisorTags, t) }) {
 		return false
 	}
 	return len(s.IDs) == 0 || slices.ContainsFunc(s.IDs, engine.IsAdvisorID)
 }
 
-func hasAny(have, want []string) bool {
-	return slices.ContainsFunc(want, func(t string) bool { return slices.Contains(have, t) })
-}
-
-// vulnClient builds the vulnerability data client. It goes through the
-// same proxy as the scan.
-func vulnClient(ua string, proxy *url.URL, offline bool) *vulns.Client {
+// httpClient builds a client for Tuner's own requests (vulnerability
+// data, OSV.dev, the check pack). It goes through the scan's proxy, or
+// HTTPS_PROXY and friends when there is none, and sends ua on every
+// request that doesn't set its own User-Agent.
+func httpClient(ua string, proxy *url.URL, timeout time.Duration) *http.Client {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	if proxy != nil {
 		tr.Proxy = http.ProxyURL(proxy)
 	}
+	return &http.Client{Transport: uaTransport{tr, ua}, Timeout: timeout}
+}
+
+// uaTransport fills in a default User-Agent.
+type uaTransport struct {
+	http.RoundTripper
+	ua string
+}
+
+func (t uaTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if t.ua != "" && r.Header.Get("User-Agent") == "" {
+		r = r.Clone(r.Context()) // a RoundTripper must not change the caller's request
+		r.Header.Set("User-Agent", t.ua)
+	}
+	return t.RoundTripper.RoundTrip(r)
+}
+
+// vulnClient builds the vulnerability data client.
+func vulnClient(ua string, proxy *url.URL, offline bool) *vulns.Client {
 	return &vulns.Client{
-		HTTP:      &http.Client{Transport: tr, Timeout: 20 * time.Second},
+		HTTP:      httpClient(ua, proxy, 20*time.Second),
 		UserAgent: ua,
 		CacheDir:  vulns.DefaultCacheDir(),
 		Offline:   offline,
@@ -1107,11 +1093,6 @@ func validHeaderValue(s string) bool {
 		}
 	}
 	return true
-}
-
-func isTerminal(w io.Writer) bool {
-	f, ok := w.(*os.File)
-	return ok && term.IsTerminal(f.Fd())
 }
 
 // isLocalPath reports whether t names a folder to scan in place. Only

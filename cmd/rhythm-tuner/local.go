@@ -5,7 +5,6 @@ package main
 
 import (
 	"context"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -30,16 +29,12 @@ func (p *scanPlan) scanTarget(ctx context.Context, s *engine.Scanner, target str
 // next to the other vulnerability data, so rhythm tuner update --clear
 // clears it too.
 func osvClient(ua string, proxy *url.URL, offline bool) *local.OSV {
-	tr := http.DefaultTransport.(*http.Transport).Clone()
-	if proxy != nil {
-		tr.Proxy = http.ProxyURL(proxy)
-	}
 	cache := vulns.DefaultCacheDir()
 	if cache != "" {
 		cache = filepath.Join(cache, "osv")
 	}
 	return &local.OSV{
-		HTTP:      &http.Client{Transport: tr, Timeout: 20 * time.Second},
+		HTTP:      httpClient(ua, proxy, 20*time.Second),
 		UserAgent: ua,
 		Base:      os.Getenv("TUNER_OSV_API"), // a mirror; default api.osv.dev
 		CacheDir:  cache,
