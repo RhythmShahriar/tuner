@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/RhythmShahriar/tuner/fingerprint"
@@ -38,7 +39,7 @@ const maxRetryWait = 30 * time.Second
 type Options struct {
 	UserAgent   string
 	Headers     http.Header // sent with every request, e.g. Cookie or Authorization; overrides UserAgent
-	Rate        float64     // requests per second to the target; 0 means unlimited
+	Rate        float64     // requests per second to the target; 0 means unlimited until the site answers 429 or 503
 	Timeout     time.Duration
 	Concurrency int // most requests in flight at once, for the whole scan
 	Retries     int // extra attempts after a network error or a 429/503
@@ -217,6 +218,7 @@ func New(checks []*Check, opts Options) *Scanner {
 	if opts.Timeout <= 0 {
 		opts.Timeout = 10 * time.Second
 	}
+	opts.Profile = Profile(strings.ToLower(string(opts.Profile)))
 	return &Scanner{checks: checks, opts: opts, resolve: defaultResolve}
 }
 
@@ -577,7 +579,12 @@ func (s *Scanner) open(ctx context.Context, target string, h Hooks) (*session, *
 	ss.follow, ss.client = &follow, &noFollow
 
 	ss.origin = &url.URL{Scheme: u.Scheme, Host: u.Host}
-	home, err := ss.do(ctx, ss.follow, "GET", u.String())
+	var home *matchers.Response
+	if explicit {
+		home, err = ss.do(ctx, ss.follow, "GET", u.String())
+	} else {
+		home, err = ss.retry(ctx, ss.follow, "GET", u.String(), notHTTPS)
+	}
 	if err != nil && !explicit && ctx.Err() == nil && !errors.As(err, new(*RedirectError)) {
 		u.Scheme = "http"
 		ss.origin.Scheme = "http"
@@ -700,14 +707,52 @@ func (ss *session) get(ctx context.Context, method, p string) (*matchers.Respons
 	return f.resp, f.err
 }
 
+// ErrRequestTimeout matches (with errors.Is) a request that got no
+// response within Options.Timeout on any try. It is a different error
+// from context.DeadlineExceeded, which means the whole scan ran out of
+// time (--max-time).
+var ErrRequestTimeout = errors.New("request timed out")
+
+// RequestTimeoutError is the error for a request that timed out on every
+// try. errors.Is(err, ErrRequestTimeout) reports it.
+type RequestTimeoutError struct {
+	Timeout time.Duration // Options.Timeout
+	Tries   int
+}
+
+func (e *RequestTimeoutError) Error() string {
+	if e.Tries <= 1 {
+		return fmt.Sprintf("no response within %s", e.Timeout)
+	}
+	return fmt.Sprintf("no response within %s (tried %d times)", e.Timeout, e.Tries)
+}
+
+// Is makes errors.Is(err, ErrRequestTimeout) hold. The timeout of the
+// underlying client error is not unwrapped on purpose: it also matches
+// context.DeadlineExceeded, which callers read as --max-time.
+func (e *RequestTimeoutError) Is(target error) bool { return target == ErrRequestTimeout }
+
 // do sends one request, retrying network errors and 429/503 replies. A
 // throttling reply also slows the rate for the rest of the scan.
 func (ss *session) do(ctx context.Context, c *http.Client, method, u string) (*matchers.Response, error) {
+	return ss.retry(ctx, c, method, u, nil)
+}
+
+// retry is do with a way out: an error for which final returns true ends
+// the request at once, without a retry and without counting as an error.
+func (ss *session) retry(ctx context.Context, c *http.Client, method, u string, final func(error) bool) (*matchers.Response, error) {
 	for attempt := 0; ; attempt++ {
 		r, retryIn, err := ss.attempt(ctx, c, method, u, attempt)
+		if err != nil && final != nil && final(err) {
+			return r, err
+		}
 		if retryIn == 0 || attempt >= ss.opts.Retries || ctx.Err() != nil {
 			if err != nil {
 				ss.errors.Add(1)
+				var ne net.Error
+				if ctx.Err() == nil && errors.As(err, &ne) && ne.Timeout() {
+					err = &RequestTimeoutError{Timeout: ss.opts.Timeout, Tries: attempt + 1}
+				}
 			}
 			return r, err
 		}
@@ -715,6 +760,18 @@ func (ss *session) do(ctx context.Context, c *http.Client, method, u string) (*m
 			return nil, err
 		}
 	}
+}
+
+// notHTTPS reports whether err shows that a host given without a scheme
+// does not serve https: the TLS handshake failed (often a plain http
+// server answering) or nothing listens on the port. Open then falls back
+// to http, so retrying would only add noise and an error to the count.
+func notHTTPS(err error) bool {
+	var rh tls.RecordHeaderError
+	var alert tls.AlertError
+	var cv *tls.CertificateVerificationError
+	return errors.Is(err, http.ErrSchemeMismatch) || errors.As(err, &rh) || errors.As(err, &alert) || errors.As(err, &cv) ||
+		errors.Is(err, syscall.ECONNREFUSED)
 }
 
 // attempt returns a non-zero retryIn when the request is worth repeating.
@@ -826,18 +883,25 @@ type limiter struct {
 // Slowest pace the limiter backs off to after repeated throttling.
 const slowest = 2 * time.Second
 
+// Pace a scan without a rate limit (--rate 0) drops to on its first 429
+// or 503: four requests a second, halved again on each one after.
+const throttledPace = 250 * time.Millisecond
+
+// newLimiter returns a limiter for rps requests per second. With rps 0 it
+// lets everything through until the site first throttles.
 func newLimiter(rps float64) *limiter {
 	if rps <= 0 {
-		return nil
+		return &limiter{}
 	}
 	return &limiter{every: time.Duration(float64(time.Second) / rps)}
 }
 
 func (l *limiter) wait(ctx context.Context) error {
-	if l == nil {
+	l.mu.Lock()
+	if l.every == 0 {
+		l.mu.Unlock()
 		return nil
 	}
-	l.mu.Lock()
 	now := time.Now()
 	at := l.next
 	if at.Before(now) {
@@ -849,11 +913,15 @@ func (l *limiter) wait(ctx context.Context) error {
 }
 
 // slow halves the request rate, down to one request every two seconds.
+// An unlimited scan starts pacing at throttledPace, and the next request
+// already waits for it.
 func (l *limiter) slow() {
-	if l == nil {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.every == 0 {
+		l.every = throttledPace
+		l.next = time.Now().Add(l.every)
 		return
 	}
-	l.mu.Lock()
 	l.every = min(l.every*2, slowest)
-	l.mu.Unlock()
 }
