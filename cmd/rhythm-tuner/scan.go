@@ -354,17 +354,19 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 	}
 
 	// Machine output goes to the -o file, else stdout (replacing the live view).
+	// The file is created now, before any request, so an unwritable folder
+	// fails fast instead of after a long scan.
 	var out io.Writer
-	var file *os.File
+	var file *reportFile
 	if p.format != "" {
 		out = stdout
 		if o.output != "" {
 			var err error
-			if file, err = os.Create(o.output); err != nil {
+			if file, err = createReport(o.output); err != nil {
 				fmt.Fprintln(stderr, "rhythm tuner:", err)
 				return exitError
 			}
-			defer func() { _ = file.Close() }() // on early return; checked below otherwise
+			defer file.discard() // on early return; does nothing after commit
 			out = file
 		}
 	}
@@ -480,18 +482,31 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 			p.write.Failed = append(p.write.Failed, targetError{Target: p.targets[i], Error: why})
 		}
 	}
+	// A file keeps its previous report unless this run has a better one.
+	keep := ""
+	switch {
+	case file == nil:
+	case errors.Is(ctx.Err(), context.Canceled):
+		keep = "scan canceled"
+	case len(reports) == 0 && len(p.write.Failed) > 0:
+		keep = "every target failed"
+	}
 	var werr error
-	if p.format != "" && p.format != "jsonl" {
+	if keep == "" && p.format != "" && p.format != "jsonl" {
 		werr = writeReport(p.format, out, reports, p.write)
 	}
-	if werr == nil && file != nil {
-		werr = file.Close()
+	switch {
+	case keep != "":
+		file.discard()
+		fmt.Fprintln(stderr, "rhythm tuner: no report written:", keep)
+	case werr == nil && file != nil:
+		werr = file.commit()
 	}
 	if werr != nil {
 		fmt.Fprintln(stderr, "rhythm tuner: writing report:", werr)
 		return exitError
 	}
-	if o.output != "" && !o.quiet && len(reports) > 0 {
+	if keep == "" && o.output != "" && !o.quiet && len(reports) > 0 {
 		fmt.Fprintf(stderr, "Report written to %s\n", o.output)
 	}
 
@@ -528,6 +543,66 @@ func scanExit(ctx context.Context, p *scanPlan, reports []report.Report, failed 
 		return exitError
 	}
 	return exitOK
+}
+
+// reportFile is a report being written next to its destination. It
+// replaces the destination only once complete, so a killed, canceled or
+// failed run never leaves the previous report truncated, and two cron
+// runs writing the same path never interleave.
+type reportFile struct {
+	*os.File
+	dest string
+	done bool
+}
+
+func createReport(dest string) (*reportFile, error) {
+	if fi, err := os.Stat(dest); err == nil && fi.IsDir() {
+		return nil, fmt.Errorf("can't write the report to %s: it is a directory", dest)
+	}
+	dir := filepath.Dir(dest)
+	f, err := os.CreateTemp(dir, "."+filepath.Base(dest)+".*.tmp")
+	if err != nil {
+		var pe *os.PathError
+		if errors.As(err, &pe) {
+			err = pe.Err // the temporary name means nothing to the user
+		}
+		return nil, fmt.Errorf("can't write the report to %s: %w", dir, err)
+	}
+	return &reportFile{File: f, dest: dest}, nil
+}
+
+// commit flushes the report to disk and moves it into place. A report
+// that replaces another keeps its permissions; a new one gets 0644, as
+// os.Create gives under the usual umask.
+func (r *reportFile) commit() error {
+	mode := os.FileMode(0o644)
+	if fi, err := os.Stat(r.dest); err == nil {
+		mode = fi.Mode().Perm()
+	}
+	err := r.Chmod(mode)
+	if err == nil {
+		err = r.Sync()
+	}
+	if cerr := r.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(r.Name(), r.dest)
+	}
+	if err != nil {
+		_ = os.Remove(r.Name())
+	}
+	r.done = true
+	return err
+}
+
+// discard drops an unfinished report and leaves the destination alone.
+func (r *reportFile) discard() {
+	if !r.done {
+		r.done = true
+		_ = r.Close()
+		_ = os.Remove(r.Name())
+	}
 }
 
 // targetError and writeOptions mirror report.TargetError and

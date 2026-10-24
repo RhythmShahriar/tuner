@@ -6,14 +6,19 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
+	"time"
 )
 
 const rawSecret = "supersecret-db-pass"
@@ -420,5 +425,150 @@ func TestFolderNamedLikeHost(t *testing.T) {
 	p, err := planScan([]string{"https://example.com", "--no-vulns", "--no-check-updates"}, nil)
 	if err != nil || isLocalPath(p.targets[0]) {
 		t.Errorf("https://example.com: %v", err)
+	}
+}
+
+// hangingSite answers the home page, then holds every other request until
+// the test ends, so a scan is reliably still running when the test stops it.
+func hangingSite(t *testing.T) (srv *httptest.Server, started <-chan struct{}) {
+	t.Helper()
+	release, start := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			w.Write([]byte("<html>home</html>"))
+			return
+		}
+		once.Do(func() { close(start) })
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(release) }) // runs first
+	return srv, start
+}
+
+const oldReport = `{"previous": "report"}`
+
+func writeOld(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "report.json")
+	if err := os.WriteFile(path, []byte(oldReport), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func assertOld(t *testing.T, path string) {
+	t.Helper()
+	if data, err := os.ReadFile(path); err != nil || string(data) != oldReport {
+		t.Errorf("previous report changed: %q, %v", data, err)
+	}
+}
+
+func TestReportReplacedOnlyWhenComplete(t *testing.T) {
+	path := writeOld(t)
+	if code, _, errs := tuner(t, "scan", leakySite(t).URL, "-o", path, "-q"); code != exitOK {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	data, _ := os.ReadFile(path)
+	fi, _ := os.Stat(path)
+	if !strings.Contains(string(data), "leak-dotenv") || fi.Mode().Perm() != 0o640 {
+		t.Errorf("report not replaced (mode %v):\n%.200s", fi.Mode(), data)
+	}
+	if left, _ := filepath.Glob(filepath.Join(filepath.Dir(path), ".*.tmp")); len(left) > 0 {
+		t.Errorf("temporary files left: %v", left)
+	}
+}
+
+func TestReportKeptWhenEveryTargetFails(t *testing.T) {
+	dead := httptest.NewServer(http.NotFoundHandler())
+	dead.Close()
+	for _, name := range []string{"report.json", "report.jsonl"} {
+		path := filepath.Join(t.TempDir(), name)
+		os.WriteFile(path, []byte(oldReport), 0o600)
+		code, _, errs := tuner(t, "scan", dead.URL, "-o", path, "--retries", "0")
+		if code != exitError || !strings.Contains(errs, "rhythm tuner: no report written: every target failed") {
+			t.Errorf("%s: exit %d, stderr %q", name, code, errs)
+		}
+		if data, _ := os.ReadFile(path); string(data) != oldReport {
+			t.Errorf("%s replaced: %q", name, data)
+		}
+		if left, _ := filepath.Glob(filepath.Join(filepath.Dir(path), ".*.tmp")); len(left) > 0 {
+			t.Errorf("temporary files left: %v", left)
+		}
+	}
+}
+
+func TestReportKeptOnCancel(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("sends SIGINT to the test process")
+	}
+	srv, started := hangingSite(t)
+	path := writeOld(t)
+	go func() {
+		<-started
+		syscall.Kill(os.Getpid(), syscall.SIGINT) // execute catches it as a cancel
+	}()
+	code, _, errs := tuner(t, "scan", srv.URL, "-o", path, "--jsonl")
+	if code != exitCanceled || !strings.Contains(errs, "no report written: scan canceled") {
+		t.Errorf("exit %d, stderr %q", code, errs)
+	}
+	assertOld(t, path)
+	if left, _ := filepath.Glob(filepath.Join(filepath.Dir(path), ".*.tmp")); len(left) > 0 {
+		t.Errorf("temporary files left: %v", left)
+	}
+}
+
+// TestHelperProcess runs the CLI in a child process for tests that kill it.
+func TestHelperProcess(t *testing.T) {
+	if os.Getenv("TUNER_HELPER_ARGS") == "" {
+		t.Skip("only runs as a child process")
+	}
+	os.Exit(run(strings.Split(os.Getenv("TUNER_HELPER_ARGS"), "\n"), io.Discard, io.Discard))
+}
+
+func TestReportSurvivesSIGKILL(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no SIGKILL")
+	}
+	srv, started := hangingSite(t)
+	path := writeOld(t)
+	cmd := exec.Command(os.Args[0], "-test.run=^TestHelperProcess$")
+	cmd.Env = append(os.Environ(),
+		"TUNER_HELPER_ARGS="+strings.Join([]string{"scan", srv.URL, "-o", path, "--rate", "0", "--no-vulns", "--no-check-updates"}, "\n"),
+		"XDG_CONFIG_HOME="+t.TempDir(), "XDG_CACHE_HOME="+t.TempDir())
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-time.After(20 * time.Second):
+		cmd.Process.Kill()
+		t.Fatal("the child never started scanning")
+	}
+	cmd.Process.Kill()
+	cmd.Wait()
+	assertOld(t, path) // a stray temporary file may stay behind; the report is intact
+}
+
+func TestReportFolderNotWritable(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs POSIX permissions that apply to this user")
+	}
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits.Add(1) }))
+	defer srv.Close()
+	dir := t.TempDir()
+	os.Chmod(dir, 0o500)
+	defer os.Chmod(dir, 0o700)
+	code, _, errs := tuner(t, "scan", srv.URL, "-o", filepath.Join(dir, "r.json"))
+	if code != exitError || !strings.Contains(errs, "can't write the report to "+dir+": permission denied") || hits.Load() != 0 {
+		t.Errorf("exit %d, %d requests, stderr %q", code, hits.Load(), errs)
+	}
+	if code, _, errs := tuner(t, "scan", srv.URL, "--json", "-o", t.TempDir()); code != exitError || !strings.Contains(errs, "it is a directory") {
+		t.Errorf("-o a directory: exit %d, stderr %q", code, errs)
 	}
 }
