@@ -19,8 +19,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"regexp"
-	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
@@ -34,9 +32,10 @@ import (
 	"github.com/RhythmShahriar/rhythm/kit/cli"
 	"github.com/RhythmShahriar/rhythm/kit/config"
 	"github.com/RhythmShahriar/tuner/engine"
-	"github.com/RhythmShahriar/tuner/fingerprint"
 	"github.com/RhythmShahriar/tuner/local"
 	"github.com/RhythmShahriar/tuner/report"
+	// The package is run; main already has a func run.
+	scanrun "github.com/RhythmShahriar/tuner/run"
 	"github.com/RhythmShahriar/tuner/tunerconfig"
 	"github.com/RhythmShahriar/tuner/vulns"
 )
@@ -364,7 +363,7 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 	if vulnsOn {
 		// The tracker sits inside the filter so it sees every lookup,
 		// including ones whose findings the selection drops.
-		p.engine.Advisor = engine.Filtered(vulnTracker{&vulns.Advisor{Client: vulnClient(ua, p.engine.Proxy, o.offline)}}, sel)
+		p.engine.Advisor = engine.Filtered(scanrun.TrackVulns(&vulns.Advisor{Client: vulnClient(ua, p.engine.Proxy, o.offline)}), sel)
 	}
 	p.sel = sel
 	if vulnsOn {
@@ -560,33 +559,6 @@ func (p *scanPlan) applyConfig(set map[string]bool, haveTargets bool) error {
 	return nil
 }
 
-// ignored reports whether a config ignore entry hides f.
-func (p *scanPlan) ignored(f engine.Finding) bool {
-	return slices.ContainsFunc(p.ignores, func(ig tunerconfig.Ignore) bool { return ig.Matches(f.ID, f.Path) })
-}
-
-// hidden reports whether f is left out of the report: it is in the
-// baseline or a config ignore entry covers it.
-func (p *scanPlan) hidden(f engine.Finding) bool { return p.baseline.Has(f) || p.ignored(f) }
-
-// filterIgnored drops the findings config ignore entries cover, recomputes
-// the score and returns how many it dropped.
-func (p *scanPlan) filterIgnored(res *engine.Result) int {
-	if len(p.ignores) == 0 {
-		return 0
-	}
-	kept := res.Findings[:0]
-	for _, f := range res.Findings {
-		if !p.ignored(f) {
-			kept = append(kept, f)
-		}
-	}
-	n := len(res.Findings) - len(kept)
-	res.Findings = kept
-	res.Score = engine.Score(kept)
-	return n
-}
-
 // checkValues validates and normalises the flags that take one of a few
 // values or a number, before anything slow runs. Names of levels and
 // profiles are accepted in any case.
@@ -755,40 +727,19 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 		printErr(stderr, "scan", "stopping... press Ctrl+C again to quit now")
 		outMu.Unlock()
 	})
-	ctx := sigCtx
-	if o.maxTime > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, o.maxTime)
-		defer cancel()
-	}
+	notice := checkForUpdate(sigCtx, p.engine.UserAgent, o.offline)
 
-	notice := checkForUpdate(ctx, p.engine.UserAgent, o.offline)
-
-	scanner := engine.New(p.checks, p.engine)
-	var fastScanner *engine.Scanner // for the targets in p.fast
-	if len(p.fast) > 0 {
-		fo := p.engine
-		fo.Rate = localRate
-		fastScanner = engine.New(p.checks, fo)
-	}
 	single := len(p.targets) == 1
-	results := make([]*engine.Result, len(p.targets))
-	statuses := make([]runStatus, len(p.targets))
-	failed := make([]string, len(p.targets)) // why each target failed, or ""
-	var jsonlErr error                       // the first failed --jsonl write, guarded by outMu
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, p.o.parallel)
-
-	for i, target := range p.targets {
-		wg.Go(func() {
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			// With several targets, buffer each one's view and print it whole.
-			var buf bytes.Buffer
+	views := make([]*report.Pretty, len(p.targets))
+	bufs := make([]bytes.Buffer, len(p.targets)) // with several targets, each view is printed whole
+	failed := make([]string, len(p.targets))     // why each target failed, or ""
+	var jsonlErr error                           // the first failed --jsonl write, guarded by outMu
+	rp := p.runPlan()
+	outcome := scanrun.Run(sigCtx, rp, scanrun.Hooks{
+		Start: func(i int, target string) engine.Hooks {
 			w := stdout
 			if !single {
-				w = &buf
+				w = &bufs[i]
 			}
 			var view *report.Pretty
 			if live {
@@ -803,9 +754,6 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 				h.Fingerprint, h.Baseline, h.Progress = view.Fingerprint, view.Baseline, view.Progress
 			}
 			h.Finding = func(f engine.Finding) {
-				if p.hidden(f) {
-					return
-				}
 				if view != nil {
 					view.Finding(f)
 				}
@@ -823,53 +771,32 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 				}
 				h.Request = view.Request
 			}
-
-			slot := &vulnSlot{}
-			s := scanner
-			if p.fast[target] {
-				s = fastScanner
-			}
-			res, err := p.safeScan(context.WithValue(ctx, vulnSlotKey{}, slot), s, target, h)
-			statuses[i] = p.status(ctx, err, slot)
-			if res != nil {
-				stampFindings(res, target)
-				// Ignored findings count with the baselined ones.
-				suppressed := p.baseline.Filter(res) + p.filterIgnored(res)
-				if live {
-					view.Summary(res, target, suppressed)
-				}
-				results[i] = res
+			views[i] = view
+			return h
+		},
+		Done: func(i int, t *scanrun.Target) {
+			if t.Result != nil && live {
+				views[i].Summary(t.Result, t.Target, t.Suppressed)
 			}
 			outMu.Lock()
 			defer outMu.Unlock()
 			if !single {
-				_, _ = stdout.Write(buf.Bytes())
+				_, _ = stdout.Write(bufs[i].Bytes())
 			}
-			if err != nil && !errors.Is(err, context.Canceled) {
-				failed[i] = describe(ctx, err, o)
-				printErr(stderr, "scan", target+":", failed[i])
-				if ie := (internalError{}); errors.As(err, &ie) && o.verbose {
-					_, _ = stderr.Write(ie.stack)
+			if t.Failed() {
+				failed[i] = describe(t, o)
+				printErr(stderr, "scan", t.Target+":", failed[i])
+				if ie := (scanrun.InternalError{}); errors.As(t.Err, &ie) && o.verbose {
+					_, _ = stderr.Write(ie.Stack)
 				}
 			}
-		})
-	}
-	wg.Wait()
+		},
+	})
 	close(finished)
 	watch.Wait()
 
-	var reports []report.Report
-	for i, res := range results {
-		if res != nil {
-			p.write.Status = append(p.write.Status, statuses[i])
-			r := report.New(res, version)
-			r.CheckSet = p.checkSet.source
-			if p.checkSet.pack != nil {
-				r.CheckPack = p.checkSet.pack.Version
-			}
-			reports = append(reports, r)
-		}
-	}
+	reports := outcome.Reports
+	p.write.Status = outcome.Status
 	for i, why := range failed {
 		if why != "" {
 			p.write.Failed = append(p.write.Failed, targetError{Target: p.targets[i], Error: why})
@@ -879,7 +806,7 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 	keep := ""
 	switch {
 	case file == nil:
-	case errors.Is(ctx.Err(), context.Canceled):
+	case outcome.Canceled:
 		keep = "scan canceled"
 	case len(reports) == 0 && len(p.write.Failed) > 0:
 		keep = "every target failed"
@@ -910,7 +837,10 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 		printUpdateNotice(notice, stderr)
 	}
 
-	exit := scanExit(ctx, p, reports, failed, stderr)
+	exit, why := outcome.Exit(rp)
+	for _, w := range why {
+		printErr(stderr, "scan", w)
+	}
 	for _, e := range scanExtensions {
 		code, err := e.Finished(p, reports, stderr)
 		if err != nil {
@@ -941,52 +871,34 @@ func (p *scanPlan) header(target string) string {
 // scanOne scans one target. Tests swap it to make a target hang or panic.
 var scanOne = (*scanPlan).scanTarget
 
-// safeScan runs scanOne and turns a panic into an error, so one target
-// that trips a bug still lets every other target report. Panics in
-// goroutines the scan starts itself can't be caught here.
-func (p *scanPlan) safeScan(ctx context.Context, s *engine.Scanner, target string, h engine.Hooks) (res *engine.Result, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			res, err = nil, internalError{r, debug.Stack()}
-		}
-	}()
-	return scanOne(p, ctx, s, target, h)
-}
-
-// internalError is a panic caught while scanning one target.
-type internalError struct {
-	value any
-	stack []byte
-}
-
-func (e internalError) Error() string {
-	return fmt.Sprintf("internal error (please report): %v", e.value)
-}
-
-// scanExit picks the built-in exit code once every target is done.
-func scanExit(ctx context.Context, p *scanPlan, reports []report.Report, failed []string, stderr io.Writer) int {
-	if errors.Is(ctx.Err(), context.Canceled) {
-		printErr(stderr, "scan", "scan canceled; results are partial")
-		return exitCanceled
+// runPlan is the plan package run carries out. Extensions have had their
+// say by now, so it reads the targets, engine options and writer
+// settings they may have changed.
+func (p *scanPlan) runPlan() *scanrun.Plan {
+	rp := &scanrun.Plan{
+		Targets:           p.targets,
+		Checks:            p.checks,
+		Engine:            p.engine,
+		Fast:              p.fast,
+		FastRate:          localRate,
+		Parallel:          p.o.parallel,
+		MaxTime:           p.o.maxTime,
+		Baseline:          p.baseline,
+		Ignores:           p.ignores,
+		FailOn:            p.failOn,
+		ConfirmedOnly:     p.confirmedOnly,
+		AllowMissingVulns: p.o.allowMissingVulns,
+		AllowPartial:      p.o.allowPartial,
+		Version:           version,
+		CheckSet:          p.checkSet.source,
+		Scan: func(ctx context.Context, s *engine.Scanner, target string, h engine.Hooks) (*engine.Result, error) {
+			return scanOne(p, ctx, s, target, h)
+		},
 	}
-	if p.failOn != "" {
-		for _, r := range reports {
-			if w := gateWorst(r.Findings, p.confirmedOnly); w != "" && w.Rank() <= p.failOn.Rank() {
-				return exitFindings
-			}
-		}
-		// No findings only means a clean site when the scan saw it all.
-		if why := untrusted(p, reports); len(why) > 0 {
-			for _, w := range why {
-				printErr(stderr, "scan", w)
-			}
-			return exitError
-		}
+	if p.checkSet.pack != nil {
+		rp.CheckPack = p.checkSet.pack.Version
 	}
-	if slices.ContainsFunc(failed, func(why string) bool { return why != "" }) {
-		return exitError
-	}
-	return exitOK
+	return rp
 }
 
 // The --min-confidence values. A finding is likely when its check or the
@@ -996,25 +908,6 @@ const (
 	confidenceConfirmed = "confirmed"
 	confidenceLikely    = "likely"
 )
-
-// confirmed reports whether a finding counts as confirmed. It becomes
-// f.Confidence.Confirmed() once the engine types its confidence.
-func confirmed(f engine.Finding) bool { return f.Confidence != "low" }
-
-// gateWorst is the worst severity --fail-on looks at: among every finding,
-// or only the confirmed ones.
-func gateWorst(findings []engine.Finding, confirmedOnly bool) engine.Severity {
-	var w engine.Severity
-	for _, f := range findings {
-		if confirmedOnly && !confirmed(f) {
-			continue
-		}
-		if w == "" || f.Severity.Rank() < w.Rank() {
-			w = f.Severity
-		}
-	}
-	return w
-}
 
 // reportFile is a report being written next to its destination. It
 // replaces the destination only once complete, so a killed, canceled or
@@ -1111,77 +1004,9 @@ func writeReport(format string, w io.Writer, reports []report.Report, o writeOpt
 	return fmt.Errorf("no writer for %s reports", format)
 }
 
-// stampFindings gives each finding a stable fingerprint before baseline
-// filtering. It is a seam for report.Stamp, which does nothing yet either.
-func stampFindings(*engine.Result, string) {}
-
-// runStatus says how much of a target one run saw. It mirrors
-// report.Status from the report writer work: until engine.Result and
-// report.Report carry these fields, the CLI fills them in from the run
-// context and the vulnerability advisor; statusJSON adds them to JSON.
-type runStatus struct {
-	Complete  bool   `json:"complete"`
-	StoppedBy string `json:"stopped_by,omitempty"` // interrupted or max-time
-	BlockedBy string `json:"blocked_by,omitempty"` // a firewall, once the engine detects them
-	VulnData  string `json:"vuln_data,omitempty"`  // one of the vuln* values below
-}
-
-// How much vulnerability data a scan got, as vulns.Advisor.AdviseStatus
-// names it.
-const (
-	vulnOK      = "ok"      // every lookup worked
-	vulnPartial = "partial" // some lookups failed or used stale data
-	vulnMissing = "missing" // no usable data
-	vulnOff     = "off"     // matching was not part of the scan
-)
-
-// status works out a finished target's runStatus. err is what the scan
-// returned: a target that finished before Ctrl-C is still complete.
-func (p *scanPlan) status(ctx context.Context, err error, slot *vulnSlot) runStatus {
-	s := runStatus{Complete: true, VulnData: vulnOff}
-	switch {
-	case errors.Is(err, context.Canceled):
-		s.Complete, s.StoppedBy = false, "interrupted"
-	case errors.Is(err, context.DeadlineExceeded) && errors.Is(ctx.Err(), context.DeadlineExceeded):
-		s.Complete, s.StoppedBy = false, "max-time"
-	}
-	if p.engine.Advisor != nil {
-		s.VulnData = slot.get()
-	}
-	return s
-}
-
-// untrusted lists why --fail-on can't call these reports clean: the
-// vulnerability data was missing, or the scan was blocked or cut short.
-// --allow-missing-vulns and --allow-partial accept each case.
-func untrusted(p *scanPlan, reports []report.Report) []string {
-	var why []string
-	for i, r := range reports {
-		s := p.write.Status[i]
-		if s.VulnData == vulnMissing && !p.o.allowMissingVulns {
-			why = append(why, fmt.Sprintf("%s: no vulnerability data, so --fail-on %s can't pass it\n"+
-				"  rerun when the data source is back, or add --allow-missing-vulns", r.Target, p.failOn))
-		}
-		if (!s.Complete || s.BlockedBy != "") && !p.o.allowPartial {
-			why = append(why, fmt.Sprintf("%s: the scan is incomplete (%s), so --fail-on %s can't pass it\n"+
-				"  add --allow-partial to accept a partial scan", r.Target, s.reason(), p.failOn))
-		}
-	}
-	return why
-}
-
-// reason says in a few words why a scan is incomplete.
-func (s runStatus) reason() string {
-	switch {
-	case s.BlockedBy != "":
-		return "blocked by " + s.BlockedBy
-	case s.StoppedBy == "max-time":
-		return "stopped by --max-time"
-	case s.StoppedBy != "":
-		return s.StoppedBy
-	}
-	return "the scan did not finish"
-}
+// runStatus says how much of a target one run saw; statusJSON adds it to
+// JSON reports.
+type runStatus = scanrun.Status
 
 // statusJSON is report.JSON with each report's runStatus added. An array
 // ends with one {"target", "error"} entry per target that could not be
@@ -1207,112 +1032,13 @@ func statusJSON(w io.Writer, reports []report.Report, o writeOptions) error {
 	return enc.Encode(all)
 }
 
-// vulnTracker wraps the vulnerability advisor to record how much data each
-// target's lookups got, in the vulnSlot its scan context carries.
-type vulnTracker struct{ engine.Advisor }
-
-// statusAdvisor is the optional advisor method that reports the data
-// status itself, rather than leaving it to be read from warnings.
-type statusAdvisor interface {
-	AdviseStatus(ctx context.Context, base *url.URL, fp fingerprint.Result) ([]engine.Finding, []string, string)
-}
-
-func (v vulnTracker) Advise(ctx context.Context, base *url.URL, fp fingerprint.Result) ([]engine.Finding, []string) {
-	var findings []engine.Finding
-	var warnings []string
-	var status string
-	if sa, ok := v.Advisor.(statusAdvisor); ok {
-		findings, warnings, status = sa.AdviseStatus(ctx, base, fp)
-	} else {
-		findings, warnings = v.Advisor.Advise(ctx, base, fp)
-		status = vulnStatusFromWarnings(advisorLookups(fp), warnings)
-	}
-	if slot, ok := ctx.Value(vulnSlotKey{}).(*vulnSlot); ok {
-		slot.set(status)
-	}
-	return findings, warnings
-}
-
-// vulnStatusFromWarnings reads the status from vulns.Advisor's warnings,
-// for advisors without AdviseStatus. The warning counts the failed
-// lookups; lookups is how many the advisor made for fp.
-func vulnStatusFromWarnings(lookups int, warnings []string) string {
-	failed, stale := 0, false
-	for _, w := range warnings {
-		for _, prefix := range []string{"couldn't fetch vulnerability data for ", "vulnerability data not cached for "} {
-			if rest, ok := strings.CutPrefix(w, prefix); ok {
-				var n int
-				if _, err := fmt.Sscanf(rest, "%d", &n); err != nil {
-					n = lookups // unreadable: assume the worst
-				}
-				failed += n
-			}
-		}
-		stale = stale || strings.HasPrefix(w, "used cached vulnerability data older")
-	}
+// describe explains why a target failed. A --max-time stop and one slow
+// request both wrap DeadlineExceeded; the target's status tells them
+// apart.
+func describe(t *scanrun.Target, o scanOptions) string {
+	err := t.Err
 	switch {
-	case failed > 0 && failed >= lookups:
-		return vulnMissing
-	case failed > 0 || stale:
-		return vulnPartial
-	}
-	return vulnOK
-}
-
-// serverVersion matches a Server header vulns.Advisor looks up.
-var serverVersion = regexp.MustCompile(`(?i)^(nginx|apache)/[0-9]+(\.[0-9]+)+`)
-
-// advisorLookups counts the lookups vulns.Advisor makes for fp: one per
-// component, plus one for recent PHP flaws when PHP runs but hides its
-// version. It goes with vulnStatusFromWarnings once AdviseStatus lands.
-func advisorLookups(fp fingerprint.Result) int {
-	n := len(fp.Components)
-	if fp.Has("wordpress") && fp.WordPress != "" {
-		n++
-	}
-	if fp.PHP != "" || fp.Has("php") {
-		n++
-	}
-	if serverVersion.MatchString(fp.Server) {
-		n++
-	}
-	return n
-}
-
-// vulnSlotKey is the context key for a target's vulnSlot.
-type vulnSlotKey struct{}
-
-// vulnSlot holds one target's vulnerability data status. A scan that never
-// reached the advisor got no data.
-type vulnSlot struct {
-	mu     sync.Mutex
-	status string
-}
-
-// set records a lookup's status; with several lookups the worst one wins.
-func (s *vulnSlot) set(status string) {
-	rank := map[string]int{vulnOK: 1, vulnPartial: 2, vulnMissing: 3}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if rank[status] > rank[s.status] {
-		s.status = status
-	}
-}
-
-func (s *vulnSlot) get() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.status == "" {
-		return vulnMissing
-	}
-	return s.status
-}
-
-// describe explains why a target failed. The run context tells a --max-time
-// stop apart from one slow request, which wraps the same DeadlineExceeded.
-func describe(ctx context.Context, err error, o scanOptions) string {
-	switch {
-	case errors.Is(err, context.DeadlineExceeded) && errors.Is(ctx.Err(), context.DeadlineExceeded):
+	case t.Status.StoppedBy == "max-time":
 		return "stopped by --max-time; results are partial"
 	case isTimeout(err):
 		tries := "once"
