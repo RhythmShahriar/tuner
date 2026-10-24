@@ -115,6 +115,72 @@ class DownloaderTest extends TestCase {
 		$this->assertTrue( $ran, 'cosign presence should have been probed' );
 	}
 
+	public function test_cached_binary_is_reused_without_a_download() {
+		$release = $this->fakeRelease( 'cached body' );
+		$this->downloader( $release, '0.4.0' )->ensure();
+
+		$fetched = 0;
+		$d       = $this->downloader( $release, '0.4.0', $fetched );
+		$bin     = $d->ensure();
+		$this->assertSame( 'cached body', file_get_contents( $bin ) );
+		$this->assertSame( 0, $fetched, 'a verified cache must not download again' );
+	}
+
+	public function test_damaged_cache_is_downloaded_again() {
+		$release = $this->fakeRelease( 'whole body' );
+		$bin     = $this->downloader( $release, '0.4.0' )->ensure();
+
+		// An interrupted write: the binary is cut short.
+		file_put_contents( $bin, 'whole' );
+		$this->assertSame( 'whole body', file_get_contents( $this->downloader( $release, '0.4.0' )->ensure() ) );
+
+		// A binary with no recorded hash, as an older package left it.
+		unlink( $bin . '.sha256' );
+		file_put_contents( $bin, 'stale' );
+		$this->assertSame( 'whole body', file_get_contents( $this->downloader( $release, '0.4.0' )->ensure() ) );
+	}
+
+	public function test_install_leaves_no_temporary_files() {
+		$release = $this->fakeRelease( 'body' );
+		$bin     = $this->downloader( $release, '0.4.0' )->ensure();
+		$names   = array_values( array_diff( scandir( dirname( $bin ) ), array( '.', '..' ) ) );
+		sort( $names );
+		$this->assertSame( array( 'rhythm-tuner', 'rhythm-tuner.sha256' ), $names );
+	}
+
+	public function test_mirror_latest_follows_the_release_it_serves() {
+		$first = $this->fakeRelease( 'release one' );
+		$this->assertSame( 'release one', file_get_contents( $this->downloader( $first, 'latest' )->ensure() ) );
+
+		// The mirror now serves a newer release at the same URL.
+		$second = $this->fakeRelease( 'release two' );
+		$this->assertSame( 'release two', file_get_contents( $this->downloader( $second, 'latest' )->ensure() ) );
+	}
+
+	/**
+	 * downloader serves a fake release from a mirror base without cosign,
+	 * counting the archive downloads in $fetched.
+	 */
+	private function downloader( array $release, $version, &$fetched = null ) {
+		$fetched = 0;
+		$serve   = $this->fetcher( $release, 'https://example.invalid/d' );
+		return new Downloader(
+			array(
+				'version'          => $version,
+				'cache_dir'        => $this->cache,
+				'platform'         => new Platform( 'Linux', 'x86_64' ),
+				'base_url'         => 'https://example.invalid/d',
+				'verify_signature' => false,
+				'fetch'            => function ( $url ) use ( $serve, &$fetched ) {
+					if ( substr( $url, -7 ) === '.tar.gz' ) {
+						$fetched++;
+					}
+					return $serve( $url );
+				},
+			)
+		);
+	}
+
 	/**
 	 * fakeRelease builds a tar.gz holding one rhythm-tuner binary and a
 	 * matching checksums.txt (and a dummy cosign bundle).
@@ -123,7 +189,7 @@ class DownloaderTest extends TestCase {
 	 */
 	private function fakeRelease( $body ) {
 		$archive = 'rhythm-tuner_linux_amd64.tar.gz';
-		$dir     = $this->cache . '/make';
+		$dir     = $this->cache . '/make-' . uniqid(); // phar caches archives by path
 		mkdir( $dir, 0755, true );
 		$tar = $dir . '/rhythm-tuner_linux_amd64.tar';
 		$p   = new \PharData( $tar );

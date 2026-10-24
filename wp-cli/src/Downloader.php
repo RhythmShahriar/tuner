@@ -7,9 +7,14 @@ namespace RhythmShahriar\Tuner;
 /**
  * Downloader fetches a verified rhythm-tuner binary into the WP-CLI cache
  * and returns its path. It downloads the release archive and
- * checksums.txt, checks the archive's SHA-256 against checksums.txt, and
- * when cosign is on PATH verifies checksums.txt's signature first. The
+ * checksums.txt, checks the archive's SHA-256 against checksums.txt and,
+ * when cosign is on PATH, verifies checksums.txt's signature first. The
  * only network call is the GitHub download; it never runs the site's PHP.
+ *
+ * The binary is written to a temporary file and renamed into place only
+ * once it is verified, with its SHA-256 beside it. A cached binary is
+ * reused only while it still matches that hash, so an interrupted
+ * download or a damaged file is fetched again instead of run.
  *
  * A Fetcher and a Runner are injected so the tests can use a fake release
  * server and record the cosign call without a real one.
@@ -27,10 +32,10 @@ class Downloader {
 	/** @var Platform */
 	private $platform;
 
-	/** @var callable (string $url): ?string — body, or null on a miss. */
+	/** @var callable (string $url): ?string: the body, or null on a miss. */
 	private $fetch;
 
-	/** @var callable (array $argv): array{int,string} — exit code and output. */
+	/** @var callable (array $argv): array{int,string}: the exit code and output. */
 	private $run;
 
 	/** @var string base URL for release files; overrides GitHub (tests, mirrors). */
@@ -62,18 +67,29 @@ class Downloader {
 		$archive = $this->platform->archiveName();
 		$binary  = $this->platform->binaryName();
 		$version = $this->resolveVersion();
-		$dir     = $this->cacheDir . '/' . $version;
+		$base    = $this->base( $version );
+
+		// A mirror's "latest" changes under the same URL, so it is keyed by
+		// the checksums.txt it serves now instead of being cached forever.
+		$checksums = null;
+		$key       = $version;
+		if ( 'latest' === $version ) {
+			$checksums = $this->must( "$base/checksums.txt", 'checksums.txt' );
+			$key       = 'latest-' . substr( hash( 'sha256', $checksums ), 0, 16 );
+		}
+		$dir     = $this->cacheDir . '/' . $key;
 		$binPath = $dir . '/' . $binary;
-		if ( is_file( $binPath ) ) {
+		if ( self::cachedOk( $binPath ) ) {
 			return $binPath;
 		}
 		if ( ! is_dir( $dir ) && ! mkdir( $dir, 0755, true ) && ! is_dir( $dir ) ) {
 			throw new \RuntimeException( "can't create the cache folder $dir" );
 		}
 
-		$base      = $this->base( $version );
-		$archiveB  = $this->must( "$base/$archive", $archive );
-		$checksums = $this->must( "$base/checksums.txt", 'checksums.txt' );
+		$archiveB = $this->must( "$base/$archive", $archive );
+		if ( null === $checksums ) {
+			$checksums = $this->must( "$base/checksums.txt", 'checksums.txt' );
+		}
 
 		if ( $this->verifySignature && $this->cosignAvailable() ) {
 			$this->verifyCosign( $base, $version, $dir, $checksums );
@@ -82,6 +98,19 @@ class Downloader {
 		$this->verifyChecksum( $archive, $archiveB, $checksums );
 		$this->extract( $archive, $archiveB, $binary, $binPath );
 		return $binPath;
+	}
+
+	/**
+	 * cachedOk reports whether a cached binary is there and still has the
+	 * SHA-256 recorded when it was installed.
+	 */
+	private static function cachedOk( $binPath ) {
+		if ( ! is_file( $binPath ) || ! is_file( $binPath . '.sha256' ) ) {
+			return false;
+		}
+		$want = trim( (string) file_get_contents( $binPath . '.sha256' ) );
+		$got  = hash_file( 'sha256', $binPath );
+		return '' !== $want && false !== $got && hash_equals( $want, $got );
 	}
 
 	/** base is where the release files live for a version. */
@@ -202,36 +231,53 @@ class Downloader {
 	}
 
 	/**
-	 * extract writes the archive to disk, pulls the one binary out of it
-	 * and makes it executable.
+	 * extract pulls the one binary out of the archive, writes it to a
+	 * temporary file in the cache folder, makes it executable and renames
+	 * it into place, so a reader never sees a half-written binary. Its
+	 * SHA-256 goes beside it for cachedOk.
 	 *
-	 * @throws \RuntimeException when the binary isn't in the archive.
+	 * @throws \RuntimeException when the binary isn't in the archive or
+	 *                           can't be written.
 	 */
 	private function extract( $archive, $archiveBody, $binary, $binPath ) {
 		$dir         = dirname( $binPath );
-		$archivePath = $dir . '/' . $archive;
-		file_put_contents( $archivePath, $archiveBody );
-
-		if ( $this->platform->isWindows() ) {
-			$zip = new \ZipArchive();
-			if ( true !== $zip->open( $archivePath ) ) {
-				throw new \RuntimeException( "couldn't open $archive" );
-			}
-			$data = $zip->getFromName( $binary );
-			$zip->close();
-			if ( false === $data ) {
-				throw new \RuntimeException( "$binary is not in $archive" );
-			}
-			file_put_contents( $binPath, $data );
-		} else {
-			$phar = new \PharData( $archivePath );
-			if ( ! isset( $phar[ $binary ] ) ) {
-				throw new \RuntimeException( "$binary is not in $archive" );
-			}
-			file_put_contents( $binPath, file_get_contents( $phar[ $binary ]->getPathname() ) );
+		$archivePath = $dir . '/' . uniqid( 'download-', true ) . '-' . $archive;
+		if ( false === file_put_contents( $archivePath, $archiveBody ) ) {
+			throw new \RuntimeException( "can't write $archivePath" );
 		}
-		@unlink( $archivePath );
-		@chmod( $binPath, 0755 );
+
+		try {
+			if ( $this->platform->isWindows() ) {
+				$zip = new \ZipArchive();
+				if ( true !== $zip->open( $archivePath ) ) {
+					throw new \RuntimeException( "couldn't open $archive" );
+				}
+				$data = $zip->getFromName( $binary );
+				$zip->close();
+			} else {
+				$phar = new \PharData( $archivePath );
+				$data = isset( $phar[ $binary ] ) ? file_get_contents( $phar[ $binary ]->getPathname() ) : false;
+				unset( $phar );
+			}
+		} finally {
+			@unlink( $archivePath );
+		}
+		if ( false === $data ) {
+			throw new \RuntimeException( "$binary is not in $archive" );
+		}
+
+		$tmp = $binPath . '.' . uniqid( 'tmp', true );
+		if ( false === file_put_contents( $tmp, $data ) ) {
+			@unlink( $tmp );
+			throw new \RuntimeException( "can't write $tmp" );
+		}
+		@chmod( $tmp, 0755 );
+		@unlink( $binPath . '.sha256' ); // stale until the new binary is in place
+		if ( ! @rename( $tmp, $binPath ) ) {
+			@unlink( $tmp );
+			throw new \RuntimeException( "can't move the binary into $binPath" );
+		}
+		file_put_contents( $binPath . '.sha256', hash( 'sha256', $data ) . "\n" );
 	}
 
 	/** httpGet is the default Fetcher. Returns null on a non-200 or error. */
