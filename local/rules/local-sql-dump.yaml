@@ -1,0 +1,16 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+id: local-sql-dump
+name: Database dump in the web root
+severity: high
+confidence: high
+tags: [leak, database]
+scope: web
+files: ["**"]
+# Plugins and themes ship schema files.
+exclude: ["**/wp-content/plugins/**", "**/wp-content/themes/**"]
+match:
+  filename: '(?i)\.(sql|mysql|pgsql)(\.(gz|bz2|xz|zip|7z|zst))?$|\.sqlite3?$'
+impact: A database dump holds user accounts, password hashes, emails and orders. If served, anyone can download all of it.
+fix: Move dumps off the server or above the web root and delete old ones.

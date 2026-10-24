@@ -1,0 +1,15 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+positive:
+  - path: .env
+    content: "APP_KEY=base64:abc\nDB_PASSWORD=hunter2-not-real\n"
+  - path: app/.env.production
+    content: "DEBUG=false\n"
+negative:
+  - path: .env.example
+    content: "DB_PASSWORD=changeme\n"
+  - path: node_modules/pkg/.env
+    content: "TOKEN=abc\n"
+  - path: env.txt
+    content: "DB_PASSWORD=x\n"

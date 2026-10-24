@@ -1,0 +1,20 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+id: local-phpinfo
+name: phpinfo() page in the web root
+severity: medium
+confidence: high
+tags: [php, disclosure]
+scope: web
+# Any PHP file at the top, or one named like a test page anywhere.
+files: ["*.php", "**/phpinfo.php", "**/php_info.php", "**/info.php", "**/pinfo.php", "**/pi.php", "**/i.php",
+  "**/test.php", "**/phptest.php", "**/php.php"]
+# Plugins and themes ship diagnostics pages; Adminer has its own rule.
+exclude: ["**/wp-content/plugins/**", "**/wp-content/themes/**", "**/adminer*.php"]
+# Small files only: real pages are a line or two.
+max_size: 16384
+match:
+  regex: ['(?i)\bphpinfo\s*\(']
+impact: phpinfo() shows the PHP version, modules, paths and environment variables, which may include secrets.
+fix: Delete it.

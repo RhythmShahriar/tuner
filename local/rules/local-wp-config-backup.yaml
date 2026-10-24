@@ -1,0 +1,19 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+id: local-wp-config-backup
+name: Copy of wp-config.php in the web root
+severity: high
+confidence: high
+tags: [leak, secrets, wordpress]
+scope: web
+files: ["**"]
+# wp-config.php.bak, wp-config.old, .wp-config.php.swp, wp-config.php~ and
+# so on: copies a server sends as plain text. Copies ending in .php run.
+exclude: ["**/*.php"]
+match:
+  filename: '(?i)^\.?wp-config(\.php)?[.~_-]'
+extract:
+  secrets: true
+impact: The server sends this copy as plain text rather than running it, exposing the database password and keys.
+fix: Delete it, then change the database password and keys if it was ever reachable.

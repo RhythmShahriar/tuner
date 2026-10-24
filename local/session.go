@@ -8,6 +8,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/RhythmShahriar/tuner/engine"
 )
@@ -24,7 +26,7 @@ import (
 //
 //  1. session.serialize_handler is php_binary or php_serialize,
 //  2. the application switches it to php at runtime with ini_set(),
-//  3. before calling session_start(), and
+//  3. before calling session_start() and
 //  4. session.upload_progress.enabled is on (the default).
 //
 // Conditions 1 and 4 are configuration, read from what PHP reports and
@@ -68,10 +70,10 @@ type handlerSwitch struct {
 	startedBefore bool   // session_start() only appears before it in the file
 }
 
-// sessionUploadProgress checks the CVE-2026-115560 preconditions.
-func (s *scan) sessionUploadProgress(ctx context.Context) []engine.Finding {
-	s.checks++
-	switches, overrides := s.sessionCode(ctx)
+// sessionUploadProgress checks the CVE-2026-115560 preconditions, with
+// the code the walk found.
+func (s *scan) sessionUploadProgress(ctx context.Context, code *sessionVisitor) []engine.Finding {
+	switches, overrides := code.results()
 	var toPHP, toUnsafe []handlerSwitch
 	for _, sw := range switches {
 		switch {
@@ -126,7 +128,7 @@ func (s *scan) sessionUploadProgress(ctx context.Context) []engine.Finding {
 	}
 	ev = append(ev, fmt.Sprintf("✓ switched to %s at runtime with ini_set() (%s:%d)", val, s.rel(sw.file), sw.line))
 	if n := len(toPHP) - 1; n > 0 {
-		ev[len(ev)-1] += fmt.Sprintf(", and %d more", n)
+		ev[len(ev)-1] += fmt.Sprintf(" and %d more", n)
 	}
 	ordered := sw.startLine > 0
 	switch {
@@ -152,7 +154,7 @@ func (s *scan) sessionUploadProgress(ctx context.Context) []engine.Finding {
 		"Better still, remove the runtime ini_set() of session.serialize_handler, or call it with the configured handler."
 	impact := sessionCVE + " is an unpatched flaw in PHP's session upload progress. PHP says it is only reachable when " +
 		"the configured serialize handler is php_binary or php_serialize, the app switches it to php with ini_set() " +
-		"before session_start(), and upload progress is enabled."
+		"before session_start() and upload progress is enabled."
 	f := s.finding(sessionCheckID, engine.High, sw.file, "", ev, impact, fix, "php", "session", "vuln", strings.ToLower(sessionCVE))
 	f.Evidence.Request = "read config and code"
 	f.References = []string{"https://www.cve.org/CVERecord?id=" + sessionCVE}
@@ -165,11 +167,11 @@ func (s *scan) sessionUploadProgress(ctx context.Context) []engine.Finding {
 		f.Title = sessionCVE + " is reachable: all four conditions hold"
 	case cond1:
 		f.Title = sessionCVE + " is likely reachable"
-		f.Confidence = "low"
+		f.Confidence = confidenceLow
 		f.Caveat = "likely: the code's order of calls couldn't be confirmed from one file"
 	case len(ctxs) == 0:
 		f.Severity, f.Title = engine.Medium, sessionCVE+": runtime handler switch found, configuration unknown"
-		f.Confidence = "low"
+		f.Confidence = confidenceLow
 		f.Caveat = "likely: PHP's configuration couldn't be read; check session.serialize_handler"
 	default:
 		f.Severity, f.Title = engine.Low, sessionCVE+": runtime handler switch found, not reachable now"
@@ -340,6 +342,11 @@ func parseKV(path string, line *regexp.Regexp) map[string]string {
 	if err != nil {
 		return nil
 	}
+	return kvFrom(b, line)
+}
+
+// kvFrom parses the settings in b, one per line.
+func kvFrom(b []byte, line *regexp.Regexp) map[string]string {
 	kv := map[string]string{}
 	for _, l := range strings.Split(string(b), "\n") {
 		l = strings.TrimSpace(l)
@@ -375,65 +382,99 @@ func globSorted(pattern string) []string {
 	return m
 }
 
-// sessionCode finds runtime switches of session.serialize_handler in the
-// site's PHP files, and .user.ini/.htaccess overrides of the two settings.
-// Unlike the stray-file walk it includes vendor/: libraries manage
-// sessions too.
-func (s *scan) sessionCode(ctx context.Context) ([]handlerSwitch, []override) {
-	var switches []handlerSwitch
-	var ovs []override
-	entries := 0
-	_ = filepath.WalkDir(s.root, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
+// sessionVisitor finds runtime switches of session.serialize_handler in
+// the site's PHP files and .user.ini/.htaccess overrides of the two
+// settings. Like the stray-file checks it skips vendor/ and
+// node_modules/: they hold most of a project's files. A library that
+// switches the handler is the app's choice to call.
+type sessionVisitor struct {
+	s        *scan
+	mu       sync.Mutex
+	switches []handlerSwitch
+	ovs      []override
+}
+
+func (v *sessionVisitor) root() string { return v.s.root }
+func (v *sessionVisitor) checks() int  { return 1 }
+
+func (v *sessionVisitor) enter(e *entry) bool {
+	parent := filepath.Base(filepath.Dir(e.path))
+	switch name := e.name; {
+	case name == "node_modules" || name == "vendor" || name == ".git" || name == ".svn" || name == ".hg":
+		return false
+	case name == "cache" && parent == "wp-content":
+		return false
+	case yearDir.MatchString(name) && parent == "uploads":
+		return false
+	}
+	return true
+}
+
+func (v *sessionVisitor) need(e *entry) need {
+	if !e.regular() {
+		return 0
+	}
+	if e.name == ".user.ini" || e.name == ".htaccess" || strings.HasSuffix(strings.ToLower(e.name), ".php") {
+		return needHead
+	}
+	return 0
+}
+
+func (v *sessionVisitor) visit(e *entry, f *fileData) {
+	if f.head == nil {
+		return
+	}
+	var ov *override
+	var sws []handlerSwitch
+	switch e.name {
+	case ".user.ini":
+		if kv := kvFrom(f.head, iniLine); hasSessionKey(kv) {
+			ov = &override{path: e.path, rel: v.s.rel(e.path), kind: ".user.ini", kv: kv}
 		}
-		if entries++; entries > s.opts.MaxEntries {
-			return fs.SkipAll
+	case ".htaccess":
+		if kv := kvFrom(f.head, htaccessLine); hasSessionKey(kv) {
+			ov = &override{path: e.path, rel: v.s.rel(e.path), kind: ".htaccess", kv: kv}
 		}
-		if entries%1024 == 0 && ctx.Err() != nil {
-			return ctx.Err()
+	default:
+		// The regexes are case-insensitive and slow on big files, so
+		// only files that mention the setting (ini names are case
+		// sensitive) and the call (function names aren't) get them.
+		if !bytes.Contains(f.head, []byte("serialize_handler")) {
+			return
 		}
-		name := d.Name()
-		if d.IsDir() {
-			switch {
-			case p == s.root:
-			case name == "node_modules" || name == ".git" || name == ".svn" || name == ".hg":
-				return fs.SkipDir
-			case name == "cache" && filepath.Base(filepath.Dir(p)) == "wp-content":
-				return fs.SkipDir
-			case yearDir.MatchString(name) && filepath.Base(filepath.Dir(p)) == "uploads":
-				return fs.SkipDir
-			}
-			return nil
+		lower := f.lower()
+		if !bytes.Contains(lower, []byte("ini_set")) && !bytes.Contains(lower, []byte("ini_alter")) {
+			return
 		}
-		if !d.Type().IsRegular() {
-			return nil
-		}
-		switch {
-		case name == ".user.ini":
-			if kv := parseKV(p, iniLine); hasSessionKey(kv) {
-				ovs = append(ovs, override{path: p, rel: s.rel(p), kind: ".user.ini", kv: kv})
-			}
-		case name == ".htaccess":
-			if kv := parseKV(p, htaccessLine); hasSessionKey(kv) {
-				ovs = append(ovs, override{path: p, rel: s.rel(p), kind: ".htaccess", kv: kv})
-			}
-		case strings.HasSuffix(strings.ToLower(name), ".php"):
-			b, err := readHead(p, maxRead)
-			if err != nil || !bytes.Contains(b, []byte("serialize_handler")) {
-				return nil
-			}
-			switches = append(switches, findSwitches(p, b)...)
-		}
-		return nil
-	})
-	// Literal switches to php first, ones confirmed before session_start()
-	// first among those, so the evidence shows the strongest case.
+		sws = findSwitchesLower(e.path, f.head, lower)
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if ov != nil {
+		v.ovs = append(v.ovs, *ov)
+	}
+	v.switches = append(v.switches, sws...)
+}
+
+// results returns the switches, literal switches to php first and ones
+// confirmed before session_start() first among those, so the evidence
+// shows the strongest case. The walk's workers find things in any
+// order, so overrides are sorted too.
+func (v *sessionVisitor) results() ([]handlerSwitch, []override) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	switches, ovs := slices.Clone(v.switches), slices.Clone(v.ovs)
 	slices.SortStableFunc(switches, func(a, b handlerSwitch) int {
 		return cmp.Or(
 			cmp.Compare(rankSwitch(a), rankSwitch(b)),
 			strings.Compare(a.file, b.file),
 			cmp.Compare(a.line, b.line))
+	})
+	// Shallow folders first, so the web root's override is applied
+	// before the folders below it start from it.
+	slices.SortFunc(ovs, func(a, b override) int {
+		return cmp.Or(cmp.Compare(strings.Count(a.path, string(filepath.Separator)), strings.Count(b.path, string(filepath.Separator))),
+			strings.Compare(a.path, b.path))
 	})
 	return switches, ovs
 }
@@ -456,20 +497,28 @@ func hasSessionKey(kv map[string]string) bool {
 }
 
 // findSwitches finds ini_set('session.serialize_handler', …) calls in PHP
-// source, ignoring comments, and where session_start() sits relative to
-// each.
+// source, ignoring comments, strings and inline HTML. It also notes
+// where session_start() sits relative to each.
 func findSwitches(path string, src []byte) []handlerSwitch {
-	code, inString := scanPHP(src)
+	return findSwitchesLower(path, src, bytes.ToLower(src))
+}
+
+// findSwitchesLower is findSwitches with src already in lower case, to
+// skip the session_start() search in files that never call it.
+func findSwitchesLower(path string, src, lower []byte) []handlerSwitch {
+	code, notCode := scanPHP(src)
 	var starts [][]int
-	for _, st := range sessionStart.FindAllIndex(code, -1) {
-		if !inString[st[0]] {
-			starts = append(starts, st)
+	if bytes.Contains(lower, []byte("session_start")) {
+		for _, st := range sessionStart.FindAllIndex(code, -1) {
+			if !notCode[st[0]] {
+				starts = append(starts, st)
+			}
 		}
 	}
 	var out []handlerSwitch
 	for _, m := range iniSetHandler.FindAllSubmatchIndex(code, -1) {
-		if inString[m[0]] {
-			continue // text that mentions the call, not the call
+		if notCode[m[0]] {
+			continue // HTML or a string that mentions the call, not the call
 		}
 		sw := handlerSwitch{file: path, line: lineAt(code, m[0])}
 		if lit := literalArg.FindSubmatch(code[m[4]:m[5]]); lit != nil {
@@ -490,6 +539,23 @@ func findSwitches(path string, src []byte) []handlerSwitch {
 	return out
 }
 
+// errText renders a walk error without the path the message already names.
+func errText(err error) string {
+	var pe *fs.PathError
+	if errors.As(err, &pe) {
+		return pe.Err.Error()
+	}
+	return err.Error()
+}
+
+// plural2 picks the singular or plural ending for n.
+func plural2(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
 func lineAt(b []byte, off int) int { return bytes.Count(b[:off], []byte("\n")) + 1 }
 
 // stripPHPComments blanks out //, # and /* */ comments while keeping line
@@ -500,47 +566,181 @@ func stripPHPComments(src []byte) []byte {
 }
 
 // scanPHP returns src with comments blanked (see stripPHPComments) and a
-// mask of the bytes inside string literals, quotes included.
+// mask of the bytes that aren't code: inline HTML outside the PHP tags,
+// and string literals (quotes, heredocs and nowdocs included). Templates
+// mix the two, so an apostrophe in "<p>Don't miss it</p>" must not open
+// a string that hides the PHP after it.
 func scanPHP(src []byte) ([]byte, []bool) {
-	out := make([]byte, len(src))
-	copy(out, src)
-	inString := make([]bool, len(src)+1)
-	blank := func(i int) {
-		if out[i] != '\n' {
-			out[i] = ' '
+	t := phpTokenizer{out: bytes.Clone(src), text: make([]bool, len(src)+1)}
+	for i := 0; i < len(src); {
+		start, n := openTag(src, i)
+		if start < 0 {
+			t.mark(i, len(src))
+			break
 		}
+		t.mark(i, start)
+		i = t.code(start + n)
 	}
-	for i := 0; i < len(out); i++ {
-		switch c := out[i]; {
-		case c == '\'' || c == '"':
-			start := i
-			for i++; i < len(out) && out[i] != c; i++ {
-				if out[i] == '\\' {
-					i++
-				}
-			}
-			for j := start; j <= i && j < len(out); j++ {
-				inString[j] = true
-			}
-		case c == '#' || (c == '/' && i+1 < len(out) && out[i+1] == '/'):
-			for ; i < len(out) && out[i] != '\n'; i++ {
-				// A closing ?> ends a line comment too.
-				if out[i] == '?' && i+1 < len(out) && out[i+1] == '>' {
-					break
-				}
-				blank(i)
-			}
-		case c == '/' && i+1 < len(out) && out[i+1] == '*':
-			for ; i < len(out); i++ {
-				if out[i] == '*' && i+1 < len(out) && out[i+1] == '/' {
-					blank(i)
-					blank(i + 1)
-					i++
-					break
-				}
-				blank(i)
-			}
-		}
-	}
-	return out, inString
+	return t.out, t.text
 }
+
+// openTag finds the next <?php or <?= at or after i, returning its offset
+// and length, or -1. Short <? tags are off by default and would match
+// <?xml, so they don't count.
+func openTag(src []byte, i int) (int, int) {
+	for {
+		j := bytes.Index(src[i:], []byte("<?"))
+		if j < 0 {
+			return -1, 0
+		}
+		j += i
+		rest := src[j+2:]
+		switch {
+		case len(rest) > 0 && rest[0] == '=':
+			return j, 3
+		case len(rest) >= 3 && bytes.EqualFold(rest[:3], []byte("php")) && (len(rest) == 3 || isSpace(rest[3])):
+			return j, 5
+		}
+		i = j + 2
+	}
+}
+
+// phpTokenizer holds scanPHP's output while it walks the code.
+type phpTokenizer struct {
+	out  []byte
+	text []bool
+}
+
+func (t *phpTokenizer) mark(from, to int) {
+	for j := from; j < to && j < len(t.out); j++ {
+		t.text[j] = true
+	}
+}
+
+// blank replaces a comment byte with a space, keeping line breaks.
+func (t *phpTokenizer) blank(from, to int) {
+	for j := from; j < to && j < len(t.out); j++ {
+		if t.out[j] != '\n' {
+			t.out[j] = ' '
+		}
+	}
+}
+
+// code tokenizes PHP from i up to the closing ?> (or the end of the
+// file) and returns the offset after it.
+func (t *phpTokenizer) code(i int) int {
+	src := t.out
+	for i < len(src) {
+		c := src[i]
+		next := byte(0)
+		if i+1 < len(src) {
+			next = src[i+1]
+		}
+		switch {
+		case c == '?' && next == '>':
+			return i + 2
+		case c == '\'' || c == '"' || c == '`':
+			end := i + 1
+			for end < len(src) && src[end] != c {
+				if src[end] == '\\' {
+					end++
+				}
+				end++
+			}
+			end = min(end+1, len(src))
+			t.mark(i, end)
+			i = end
+		case c == '<' && bytes.HasPrefix(src[i:], []byte("<<<")):
+			end, ok := heredocEnd(src, i)
+			if !ok {
+				i++
+				continue
+			}
+			t.mark(i, end)
+			i = end
+		case (c == '#' && next != '[') || (c == '/' && next == '/'):
+			// A line comment ends at the line break or at ?>, which
+			// still closes the PHP block. #[ starts an attribute.
+			end := i
+			for end < len(src) && src[end] != '\n' && !bytes.HasPrefix(src[end:], []byte("?>")) {
+				end++
+			}
+			t.blank(i, end)
+			i = end
+		case c == '/' && next == '*':
+			end := bytes.Index(src[i+2:], []byte("*/"))
+			if end < 0 {
+				end = len(src)
+			} else {
+				end += i + 4
+			}
+			t.blank(i, end)
+			i = end
+		default:
+			i++
+		}
+	}
+	return len(src)
+}
+
+// heredocEnd parses a heredoc or nowdoc starting with <<< at i and
+// returns the offset after its closing identifier. Since PHP 7.3 the
+// closing identifier may be indented and followed by anything that
+// can't continue an identifier, such as ")" or ",". ok is false when
+// <<< doesn't start one.
+func heredocEnd(src []byte, i int) (end int, ok bool) {
+	j := i + 3
+	for j < len(src) && (src[j] == ' ' || src[j] == '\t') {
+		j++
+	}
+	quote := byte(0)
+	if j < len(src) && (src[j] == '\'' || src[j] == '"') {
+		quote = src[j]
+		j++
+	}
+	idStart := j
+	for j < len(src) && isIdent(src[j], j == idStart) {
+		j++
+	}
+	id := src[idStart:j]
+	if len(id) == 0 {
+		return 0, false
+	}
+	if quote != 0 {
+		if j >= len(src) || src[j] != quote {
+			return 0, false
+		}
+		j++
+	}
+	if j < len(src) && src[j] == '\r' {
+		j++
+	}
+	if j >= len(src) || src[j] != '\n' {
+		return 0, false
+	}
+	// Each following line: optional indentation, then the identifier not
+	// followed by an identifier character.
+	for line := j + 1; line < len(src); {
+		k := line
+		for k < len(src) && (src[k] == ' ' || src[k] == '\t') {
+			k++
+		}
+		if bytes.HasPrefix(src[k:], id) && (k+len(id) == len(src) || !isIdent(src[k+len(id)], false)) {
+			return k + len(id), true
+		}
+		nl := bytes.IndexByte(src[line:], '\n')
+		if nl < 0 {
+			break
+		}
+		line += nl + 1
+	}
+	return len(src), true // unterminated: the rest of the file is the string
+}
+
+// isIdent reports whether c can appear in a PHP identifier (first: at the
+// start of one, where digits aren't allowed).
+func isIdent(c byte, first bool) bool {
+	return c == '_' || c >= 0x80 || (c|0x20 >= 'a' && c|0x20 <= 'z') || (!first && c >= '0' && c <= '9')
+}
+
+func isSpace(c byte) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r' }

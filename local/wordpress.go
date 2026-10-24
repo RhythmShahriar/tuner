@@ -5,6 +5,7 @@ package local
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,12 +29,13 @@ const maxPluginFiles = 50
 
 var (
 	wpVersionVar = regexp.MustCompile(`\$wp_version\s*=\s*['"]([^'"]+)['"]`)
+	wpLocalVar   = regexp.MustCompile(`\$wp_local_package\s*=\s*['"]([A-Za-z_]+)['"]`)
 	versionToken = regexp.MustCompile(`^[0-9][0-9A-Za-z.+-]*`)
 	tablePrefix  = regexp.MustCompile(`\$table_prefix\s*=\s*['"]([^'"]*)['"]`)
 	defineRe     = regexp.MustCompile(`(?is)\bdefine\s*\(\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]\s*,\s*(.*?)\s*\)\s*;`)
 )
 
-// The keys and salts wp-config.php should set, and the value the sample
+// The keys and salts wp-config.php should set and the value the sample
 // file ships with.
 var (
 	saltNames       = []string{"AUTH_KEY", "SECURE_AUTH_KEY", "LOGGED_IN_KEY", "NONCE_KEY", "AUTH_SALT", "SECURE_AUTH_SALT", "LOGGED_IN_SALT", "NONCE_SALT"}
@@ -55,13 +57,14 @@ var includeRe = regexp.MustCompile(`(?i)\b(?:require|include)(?:_once)?\b[^;]*;`
 type wordpress struct {
 	root       string
 	version    string
+	locale     string // a localized package's locale, e.g. de_DE; "" for en_US
 	content    string // wp-content directory
 	components []fingerprint.Component
 }
 
 // detectWordPress returns nil unless root is a WordPress install.
-func detectWordPress(root string) *wordpress {
-	b, err := readHead(filepath.Join(root, "wp-includes", "version.php"), 64<<10)
+func (s *scan) detectWordPress(ctx context.Context, root string) *wordpress {
+	b, err := s.readHead(filepath.Join(root, "wp-includes", "version.php"), 64<<10)
 	if err != nil {
 		return nil
 	}
@@ -69,7 +72,10 @@ func detectWordPress(root string) *wordpress {
 	if m := wpVersionVar.FindSubmatch(b); m != nil {
 		wp.version = string(m[1])
 	}
-	wp.components = append(plugins(filepath.Join(wp.content, "plugins")), themes(filepath.Join(wp.content, "themes"))...)
+	if m := wpLocalVar.FindSubmatch(b); m != nil {
+		wp.locale = string(m[1])
+	}
+	wp.components = append(s.plugins(ctx, filepath.Join(wp.content, "plugins")), s.themes(ctx, filepath.Join(wp.content, "themes"))...)
 	return wp
 }
 
@@ -93,22 +99,25 @@ func headerVersion(b []byte) string {
 
 // plugins reads each installed plugin's version from its main file's
 // header: the installed version, unlike readme.txt's Stable tag.
-func plugins(dir string) []fingerprint.Component {
+func (s *scan) plugins(ctx context.Context, dir string) []fingerprint.Component {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
 	}
 	var out []fingerprint.Component
 	for _, e := range entries {
+		if ctx.Err() != nil {
+			return out
+		}
 		name := e.Name()
 		switch {
 		case e.IsDir() && !strings.HasPrefix(name, "."):
-			if b := mainPluginFile(filepath.Join(dir, name), name); b != nil {
+			if b := s.mainPluginFile(filepath.Join(dir, name), name); b != nil {
 				out = append(out, fingerprint.Component{Type: "plugin", Slug: name, Version: headerVersion(b), Source: "plugin header"})
 			}
 		case e.Type().IsRegular() && strings.HasSuffix(name, ".php") && name != "index.php":
 			// A single-file plugin, e.g. hello.php.
-			if b, err := readHead(filepath.Join(dir, name), headerBytes); err == nil {
+			if b, err := s.readHead(filepath.Join(dir, name), headerBytes); err == nil {
 				if _, ok := header(b, "Plugin Name"); ok {
 					out = append(out, fingerprint.Component{Type: "plugin", Slug: strings.TrimSuffix(name, ".php"), Version: headerVersion(b), Source: "plugin header"})
 				}
@@ -120,7 +129,7 @@ func plugins(dir string) []fingerprint.Component {
 
 // mainPluginFile returns the head of the PHP file in dir with a "Plugin
 // Name:" header, trying <slug>.php first, or nil if there is none.
-func mainPluginFile(dir, slug string) []byte {
+func (s *scan) mainPluginFile(dir, slug string) []byte {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
@@ -135,7 +144,7 @@ func mainPluginFile(dir, slug string) []byte {
 		return cmp.Compare(boolInt(a != slug+".php"), boolInt(b != slug+".php"))
 	})
 	for _, f := range files[:min(len(files), maxPluginFiles)] {
-		b, err := readHead(filepath.Join(dir, f), headerBytes)
+		b, err := s.readHead(filepath.Join(dir, f), headerBytes)
 		if err != nil {
 			continue
 		}
@@ -161,17 +170,20 @@ func boolInt(b bool) int {
 }
 
 // themes reads each theme's version from its style.css.
-func themes(dir string) []fingerprint.Component {
+func (s *scan) themes(ctx context.Context, dir string) []fingerprint.Component {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
 	}
 	var out []fingerprint.Component
 	for _, e := range entries {
+		if ctx.Err() != nil {
+			return out
+		}
 		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
-		b, err := readHead(filepath.Join(dir, e.Name(), "style.css"), headerBytes)
+		b, err := s.readHead(filepath.Join(dir, e.Name(), "style.css"), headerBytes)
 		if err != nil {
 			continue
 		}
@@ -198,7 +210,7 @@ func (s *scan) muPlugins() []engine.Finding {
 			continue
 		}
 		item := e.Name()
-		if b, err := readHead(filepath.Join(dir, e.Name()), headerBytes); err == nil {
+		if b, err := s.readHead(filepath.Join(dir, e.Name()), headerBytes); err == nil {
 			if name, ok := header(b, "Plugin Name"); ok && name != "" {
 				item += " (" + name
 				if v := headerVersion(b); v != "" {
@@ -231,9 +243,11 @@ func (s *scan) wpConfig() []engine.Finding {
 		}
 		path = up
 	}
-	b, err := readHead(path, maxRead)
+	b, err := s.readHead(path, maxRead)
 	if err != nil {
-		s.warn("couldn't read wp-config.php: %v", err)
+		if !isNotRegular(err) { // already warned
+			s.warn("couldn't read wp-config.php: %v", err)
+		}
 		return nil
 	}
 	cfg := parseConfig(string(b))
@@ -252,9 +266,9 @@ func (s *scan) wpConfig() []engine.Finding {
 		case !isLit:
 			// Computed, e.g. getenv(); can't judge it.
 		case lit == "" || lit == saltPlaceholder:
-			weak = append(weak, name+" is the sample placeholder or empty")
+			weak = append(weak, name+" is the sample placeholder or empty"+cfg.at(name))
 		case seen[lit]:
-			weak = append(weak, name+" repeats another key's value")
+			weak = append(weak, name+" repeats another key's value"+cfg.at(name))
 		}
 		if isLit {
 			seen[lit] = true
@@ -273,7 +287,7 @@ func (s *scan) wpConfig() []engine.Finding {
 	if on, _ := cfg.truthy("WP_DEBUG"); on {
 		display, known := cfg.truthy("WP_DEBUG_DISPLAY")
 		display = display || !known // WordPress shows errors unless told not to
-		ev := []string{"WP_DEBUG is true"}
+		ev := []string{"WP_DEBUG is true" + cfg.at("WP_DEBUG")}
 		sev := engine.Low
 		if display {
 			ev = append(ev, "WP_DEBUG_DISPLAY is not false, so errors are shown on pages")
@@ -281,9 +295,9 @@ func (s *scan) wpConfig() []engine.Finding {
 		}
 		if v, ok := cfg.defines["WP_DEBUG_LOG"]; ok {
 			if p, isStr := phpString(v); isStr && p != "" && p != "0" && p != "1" {
-				ev = append(ev, "WP_DEBUG_LOG writes to "+p)
+				ev = append(ev, "WP_DEBUG_LOG writes to "+p+cfg.at("WP_DEBUG_LOG"))
 			} else if l, _ := cfg.truthy("WP_DEBUG_LOG"); l {
-				ev = append(ev, "WP_DEBUG_LOG writes to wp-content/debug.log, which is public by default")
+				ev = append(ev, "WP_DEBUG_LOG writes to wp-content/debug.log, which is public by default"+cfg.at("WP_DEBUG_LOG"))
 				sev = engine.Medium
 			}
 		}
@@ -298,7 +312,7 @@ func (s *scan) wpConfig() []engine.Finding {
 	mods, _ := cfg.truthy("DISALLOW_FILE_MODS")
 	if !edit && !mods {
 		out = append(out, s.maybe(cfg, true, "local-wp-file-edit", engine.Low, path,
-			"The dashboard file editor is enabled", []string{"DISALLOW_FILE_EDIT is not set to true"},
+			"The dashboard file editor is enabled", []string{"DISALLOW_FILE_EDIT is not set to true" + cfg.at("DISALLOW_FILE_EDIT")},
 			"An attacker who gets into any administrator account can edit plugin and theme PHP and run code on the server.",
 			"Add define( 'DISALLOW_FILE_EDIT', true ); to wp-config.php.",
 			"wordpress", "config", "hardening"))
@@ -307,7 +321,7 @@ func (s *scan) wpConfig() []engine.Finding {
 	// Table prefix.
 	if cfg.prefix == "wp_" {
 		out = append(out, s.finding("local-wp-table-prefix", engine.Info, path,
-			"Database tables use the default wp_ prefix", []string{"$table_prefix = 'wp_'"},
+			"Database tables use the default wp_ prefix", []string{"$table_prefix = 'wp_'" + lineNote(cfg.prefixLine)},
 			"Automated SQL injection attacks assume wp_ table names. A custom prefix is minor defense in depth, not a fix.",
 			"Use a custom prefix on new installs. Changing it on a live site means renaming tables and options, so only do it with a backup.",
 			"wordpress", "config", "hardening"))
@@ -316,7 +330,7 @@ func (s *scan) wpConfig() []engine.Finding {
 	// HTTPS for the dashboard.
 	if ssl, _ := cfg.truthy("FORCE_SSL_ADMIN"); !ssl {
 		out = append(out, s.maybe(cfg, true, "local-wp-force-ssl-admin", engine.Info, path,
-			"FORCE_SSL_ADMIN is not set", []string{"FORCE_SSL_ADMIN is not true"},
+			"FORCE_SSL_ADMIN is not set", []string{"FORCE_SSL_ADMIN is not true" + cfg.at("FORCE_SSL_ADMIN")},
 			"If the site can be reached over plain HTTP, logins and admin cookies could travel unencrypted. Most sites already redirect to HTTPS at the server.",
 			"Add define( 'FORCE_SSL_ADMIN', true ); to wp-config.php once the site has a certificate.",
 			"wordpress", "config", "hardening"))
@@ -340,7 +354,7 @@ func (s *scan) wpConfig() []engine.Finding {
 func (s *scan) maybe(cfg config, absent bool, id string, sev engine.Severity, path, title string, ev []string, impact, fix string, tags ...string) engine.Finding {
 	f := s.finding(id, sev, path, title, ev, impact, fix, tags...)
 	if absent && cfg.includes {
-		f.Confidence = "low"
+		f.Confidence = confidenceLow
 		f.Evidence.Matched = append(f.Evidence.Matched, "wp-config.php includes other files, which may set this")
 	}
 	return f
@@ -349,7 +363,10 @@ func (s *scan) maybe(cfg config, absent bool, id string, sev engine.Severity, pa
 // config is what wp-config.php defines, read as text.
 type config struct {
 	defines map[string]string // name → raw PHP expression; the first definition wins
+	lines   map[string]int    // name → line of that definition
 	prefix  string
+	// prefixLine is the line $table_prefix is set on, 0 if it isn't.
+	prefixLine int
 	// includes is true when the file loads other PHP files (besides
 	// wp-settings.php) that may define what's missing here.
 	includes bool
@@ -357,14 +374,17 @@ type config struct {
 
 func parseConfig(src string) config {
 	code := stripComments(src)
-	c := config{defines: map[string]string{}}
-	for _, m := range defineRe.FindAllStringSubmatch(code, -1) {
-		if _, dup := c.defines[m[1]]; !dup {
-			c.defines[m[1]] = strings.TrimSpace(m[2])
+	c := config{defines: map[string]string{}, lines: map[string]int{}}
+	for _, m := range defineRe.FindAllStringSubmatchIndex(code, -1) {
+		name := code[m[2]:m[3]]
+		if _, dup := c.defines[name]; !dup {
+			c.defines[name] = strings.TrimSpace(code[m[4]:m[5]])
+			c.lines[name] = lineAt([]byte(code), m[0])
 		}
 	}
-	if m := tablePrefix.FindStringSubmatch(code); m != nil {
-		c.prefix = m[1]
+	if m := tablePrefix.FindStringSubmatchIndex(code); m != nil {
+		c.prefix = code[m[2]:m[3]]
+		c.prefixLine = lineAt([]byte(code), m[0])
 	}
 	for _, m := range includeRe.FindAllString(code, -1) {
 		if !strings.Contains(m, "wp-settings.php") {
@@ -372,6 +392,18 @@ func parseConfig(src string) config {
 		}
 	}
 	return c
+}
+
+// at renders where name is defined, e.g. " (line 14)", or "" when it isn't.
+func (c config) at(name string) string { return lineNote(c.lines[name]) }
+
+// lineNote renders a 1-based line number for evidence, or "" for 0.
+// Findings have no line field yet, so it goes in the evidence text.
+func lineNote(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (line %d)", n)
 }
 
 func (c config) defined(name string) bool {
@@ -418,7 +450,8 @@ func phpString(v string) (string, bool) {
 }
 
 // stripComments removes PHP comments, leaving strings intact, so a
-// commented-out define() doesn't count.
+// commented-out define() doesn't count. Line breaks are kept so offsets
+// in the result still give the file's line numbers.
 func stripComments(src string) string {
 	var b strings.Builder
 	b.Grow(len(src))
@@ -449,6 +482,7 @@ func stripComments(src string) string {
 				return b.String()
 			}
 			b.WriteByte(' ')
+			b.WriteString(strings.Repeat("\n", strings.Count(src[i+2:i+2+end], "\n")))
 			i += 2 + end + 1
 		default:
 			b.WriteByte(c)

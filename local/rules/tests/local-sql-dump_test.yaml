@@ -1,0 +1,15 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+positive:
+  - path: backup.sql
+    content: "INSERT INTO wp_users VALUES (1);"
+  - path: db/site.sql.gz
+    content: "gz"
+negative:
+  - path: wp-content/plugins/shop/schema.sql
+    content: "CREATE TABLE x;"
+  - path: vendor/pkg/dump.sql
+    content: "-- vendored"
+  - path: notes.sqlx
+    content: "not a dump"

@@ -7,7 +7,9 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -20,7 +22,7 @@ const phpTimeout = 5 * time.Second
 var phpVersionRe = regexp.MustCompile(`^([0-9]+\.[0-9]+\.[0-9]+)([^\s]*)`)
 
 // phpVersion asks the php binary for its version. It returns the version,
-// the full build string when it carries a distro suffix, and a warning
+// the full build string when it carries a distro suffix and a warning
 // when the version couldn't be read.
 //
 // php runs with -n so no php.ini is loaded: an auto_prepend_file there
@@ -48,6 +50,55 @@ func (s *scan) phpVersion(ctx context.Context) (version, build, warning string) 
 		build = m[1] + m[2]
 	}
 	return m[1], build, ""
+}
+
+// phpSource says where the PHP version came from, for reports:
+// "php on PATH", or "--php /usr/bin/php8.3" when the user chose the binary.
+func (s *scan) phpSource() string {
+	if s.opts.PHP == "" {
+		return "php on PATH"
+	}
+	return "--php " + s.opts.PHP
+}
+
+// Files whose presence at the root marks a PHP project.
+var phpMarkers = []string{"composer.json", "artisan", filepath.Join("wp-includes", "version.php")}
+
+// isPHPProject reports whether root holds PHP code: a marker file, or a
+// .php file at the root or one folder down. Dependency folders don't
+// count: a JavaScript app can carry a stray .php file in node_modules.
+func isPHPProject(root string) bool {
+	for _, m := range phpMarkers {
+		if fi, err := os.Stat(filepath.Join(root, m)); err == nil && fi.Mode().IsRegular() {
+			return true
+		}
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return false
+	}
+	var dirs []string
+	for _, e := range entries {
+		name := e.Name()
+		switch {
+		case e.Type().IsRegular() && strings.HasSuffix(strings.ToLower(name), ".php"):
+			return true
+		case e.IsDir() && !strings.HasPrefix(name, ".") && name != "node_modules" && name != "vendor" && name != "bower_components":
+			dirs = append(dirs, filepath.Join(root, name))
+		}
+	}
+	for _, d := range dirs {
+		sub, err := os.ReadDir(d)
+		if err != nil {
+			continue
+		}
+		for _, e := range sub {
+			if e.Type().IsRegular() && strings.HasSuffix(strings.ToLower(e.Name()), ".php") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func execOutput(ctx context.Context, name string, args ...string) ([]byte, error) {

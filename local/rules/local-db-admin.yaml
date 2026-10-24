@@ -1,0 +1,12 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+id: local-db-admin
+name: Adminer in the web root
+severity: medium
+confidence: high
+tags: [php, database, admin]
+scope: web
+files: ["**/adminer*.php"]
+impact: A database login page on the public site invites password guessing and old Adminer versions have known vulnerabilities.
+fix: Delete it when you're done, or restrict it to your IP address.

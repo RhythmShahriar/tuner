@@ -194,3 +194,52 @@ func TestStripPHPComments(t *testing.T) {
 		t.Error("line count changed")
 	}
 }
+
+// Only the code between PHP tags is tokenized: quotes in HTML don't open
+// strings; heredocs, nowdocs and comments hide what they contain.
+func TestFindSwitchesTemplates(t *testing.T) {
+	call := "ini_set('session.serialize_handler','php'); session_start();"
+	cases := []struct {
+		name, src string
+		want      int // switches found
+	}{
+		{"plain HTML before", "<p>Do not miss it</p>\n<?php " + call, 1},
+		{"apostrophe in HTML", "<p>Don't miss it</p>\n<?php " + call, 1},
+		{"quote in HTML between blocks", "<?php $a = 1; ?><a title=\"x>Don't\n<?php " + call, 1},
+		{"short echo tag", "<p>it's</p><?= ini_set('session.serialize_handler', 'php') ?><?php session_start();", 1},
+		{"uppercase open tag", "it's\n<?PHP\n" + call, 1},
+		{"after a closed block", "<?php echo 'a'; ?>\n<b>'</b>\n<?php\n" + call, 1},
+		{"?> ends a // comment", "<?php // note ?><p>it's</p><?php " + call, 1},
+		{"?> ends a # comment", "<?php # note ?>'<?php " + call, 1},
+		{"attribute isn't a comment", "<?php #[Attr] " + call, 1},
+		{"heredoc then code", "<?php $s = <<<EOT\nit's\nEOT;\n" + call, 1},
+		{"flexible heredoc close", "<?php f(<<<\"EOT\"\n    it's\n    EOT, 1);\n" + call, 1},
+		{"nowdoc then code", "<?php $s = <<<'EOT'\n\"\nEOT;\n" + call, 1},
+
+		{"call text in HTML", "<p>Use " + call + " to switch.</p>", 0},
+		{"call text in a heredoc", "<?php $help = <<<EOT\n" + call + "\nEOT;\n", 0},
+		{"call text in a nowdoc", "<?php $help = <<<'EOT'\n" + call + "\n  EOT;\n", 0},
+		{"heredoc id must end", "<?php $s = <<<EOT\nEOTX " + call + "\nEOT;\n", 0},
+		{"call in a block comment", "<?php /* ?> " + call + " */", 0},
+		{"call in a line comment", "<?php // " + call, 0},
+		{"<?xml isn't PHP", "<?xml version=\"1.0\"?>\n" + call, 0},
+		{"no PHP tags", call, 0},
+	}
+	for _, c := range cases {
+		got := findSwitches("/x.php", []byte(c.src))
+		if len(got) != c.want {
+			t.Errorf("%s: %d switches, want %d", c.name, len(got), c.want)
+		}
+		if c.want > 0 && len(got) > 0 && got[0].startLine == 0 && !strings.Contains(c.name, "short echo") {
+			t.Errorf("%s: session_start() not seen after the switch", c.name)
+		}
+	}
+}
+
+// A theme template with an apostrophe in its HTML, end to end.
+func TestSessionApostropheInTemplate(t *testing.T) {
+	src := "<p>Don't miss it</p>\n<?php ini_set('session.serialize_handler','php'); session_start();"
+	if f := sessionScan(t, map[string]string{"wp-content/themes/t/header.php": src}, unsafeCLI("1"), t.TempDir()); f == nil || f.Severity != engine.High {
+		t.Errorf("got %+v", f)
+	}
+}

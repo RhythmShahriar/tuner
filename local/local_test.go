@@ -362,7 +362,7 @@ func TestStrayFiles(t *testing.T) {
 		}
 	}
 
-	// Secrets are found, and only ever masked.
+	// Secrets are found and only ever masked.
 	if f := find(res, "local-dotenv"); f.Path != "/.env" || len(f.Evidence.Secrets) == 0 || f.Evidence.Secrets[0].Name != "DB_PASSWORD" {
 		t.Errorf(".env secrets: %+v", f)
 	}
@@ -567,7 +567,7 @@ func TestRoot(t *testing.T) {
 func TestMaxEntries(t *testing.T) {
 	root := tree(t, map[string]string{"a/b/c/d.txt": "", "e/f.txt": "", "g.txt": ""})
 	res := scanTree(t, root, Options{MaxEntries: 2})
-	if !slices.ContainsFunc(res.Warnings, func(w string) bool { return strings.Contains(w, "stopped looking") }) {
+	if !slices.ContainsFunc(res.Warnings, func(w string) bool { return strings.Contains(w, "stopped after 2 entries") }) {
 		t.Errorf("warnings %v", res.Warnings)
 	}
 }
@@ -587,4 +587,57 @@ type advisorFunc func()
 func (a advisorFunc) Advise(context.Context, *url.URL, fingerprint.Result) ([]engine.Finding, []string) {
 	a()
 	return nil, nil
+}
+
+func TestExpandHome(t *testing.T) {
+	home := func() (string, error) { return "/home/u", nil }
+	for _, c := range []struct{ in, want string }{
+		{"~", "/home/u"},
+		{"~/site", "/home/u/site"},
+		{`~\site`, "/home/u/site"},
+		{`~\sites\blog`, "/home/u/sites/blog"},
+		{"~user/site", "~user/site"}, // other users' homes aren't expanded
+		{"/var/www", "/var/www"},
+		{"site", "site"},
+	} {
+		got, err := expandHome(c.in, home)
+		if err != nil || filepath.ToSlash(got) != c.want {
+			t.Errorf("expandHome(%q) = %q, %v; want %q", c.in, got, err, c.want)
+		}
+	}
+	if _, err := expandHome("~/x", func() (string, error) { return "", errors.New("no home") }); err == nil {
+		t.Error("a missing home folder should be an error")
+	}
+}
+
+func TestFileURL(t *testing.T) {
+	for _, c := range []struct {
+		in   string
+		sep  byte
+		want string
+	}{
+		{`C:\inetpub\wwwroot\.env`, '\\', "file:///C:/inetpub/wwwroot/.env"},
+		{`d:\sites\my site\wp-config.php`, '\\', "file:///d:/sites/my%20site/wp-config.php"},
+		{`\\fileserver\www\site\.env`, '\\', "file://fileserver/www/site/.env"},
+		{"/var/www/html/.env", '/', "file:///var/www/html/.env"},
+		{"/srv/a b/#x.php", '/', "file:///srv/a%20b/%23x.php"},
+	} {
+		if got := fileURLSep(c.in, c.sep).String(); got != c.want {
+			t.Errorf("fileURLSep(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestFindingURLsAreFileURLs(t *testing.T) {
+	root := tree(t, map[string]string{".env": "DB_PASSWORD=" + rawSecret + "\n"})
+	res := scanTree(t, root, Options{Exec: noPHP})
+	if len(res.Findings) == 0 {
+		t.Fatal("no findings")
+	}
+	for _, f := range res.Findings {
+		u, err := url.Parse(f.URL)
+		if err != nil || u.Scheme != "file" || u.Host != "" || !strings.HasSuffix(u.Path, f.Path) {
+			t.Errorf("%s: URL %q isn't a file URL of %s", f.ID, f.URL, f.Path)
+		}
+	}
 }
