@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -533,7 +534,107 @@ func TestHelperProcess(t *testing.T) {
 	if os.Getenv("TUNER_HELPER_ARGS") == "" {
 		t.Skip("only runs as a child process")
 	}
-	os.Exit(run(strings.Split(os.Getenv("TUNER_HELPER_ARGS"), "\n"), io.Discard, io.Discard))
+	stderr := io.Discard
+	if os.Getenv("TUNER_HELPER_STDERR") != "" {
+		stderr = os.Stderr
+	}
+	if os.Getenv("TUNER_HELPER_HANG") != "" {
+		// A target stuck where cancellation can't reach it, like a read
+		// from a FIFO.
+		scanOne = func(*scanPlan, context.Context, *engine.Scanner, string, engine.Hooks) (*engine.Result, error) {
+			fmt.Fprintln(os.Stderr, "scan blocked")
+			time.Sleep(time.Hour)
+			return nil, nil
+		}
+	}
+	os.Exit(run(strings.Split(os.Getenv("TUNER_HELPER_ARGS"), "\n"), io.Discard, stderr))
+}
+
+func TestSecondInterruptQuits(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("sends SIGINT to a child process")
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestHelperProcess$")
+	cmd.Env = append(os.Environ(),
+		"TUNER_HELPER_ARGS="+strings.Join([]string{"scan", t.TempDir(), "--no-vulns", "--no-check-updates"}, "\n"),
+		"TUNER_HELPER_HANG=1", "TUNER_HELPER_STDERR=1", "RHYTHM_OFFLINE=1",
+		"XDG_CONFIG_HOME="+t.TempDir(), "XDG_CACHE_HOME="+t.TempDir())
+	pipe, err := cmd.StderrPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer cmd.Process.Kill()
+	lines := make(chan string, 16)
+	go func() {
+		sc := bufio.NewScanner(pipe)
+		for sc.Scan() {
+			lines <- sc.Text()
+		}
+		close(lines)
+	}()
+	waitFor := func(want string) {
+		t.Helper()
+		deadline := time.After(20 * time.Second)
+		for {
+			select {
+			case line, ok := <-lines:
+				if !ok {
+					t.Fatalf("the child exited before printing %q", want)
+				}
+				if strings.Contains(line, want) {
+					return
+				}
+			case <-deadline:
+				t.Fatalf("no %q from the child", want)
+			}
+		}
+	}
+
+	waitFor("scan blocked")
+	cmd.Process.Signal(os.Interrupt)
+	waitFor("rhythm tuner: stopping... press Ctrl+C again to quit now")
+	cmd.Process.Signal(os.Interrupt)
+	done := make(chan error, 1)
+	go func() {
+		for range lines { // drain, so the child never blocks on a full pipe
+		}
+		done <- cmd.Wait()
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("the second Ctrl+C did not end the scan within 1s")
+	}
+	if ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); !ok || !ws.Signaled() || ws.Signal() != syscall.SIGINT {
+		t.Errorf("want the child ended by SIGINT, got %v", cmd.ProcessState)
+	}
+}
+
+func TestPanicInOneTarget(t *testing.T) {
+	good, bad := leakySite(t), cleanSite(t)
+	orig := scanOne
+	defer func() { scanOne = orig }()
+	scanOne = func(p *scanPlan, ctx context.Context, s *engine.Scanner, target string, h engine.Hooks) (*engine.Result, error) {
+		if target == bad.URL {
+			panic("boom")
+		}
+		return orig(p, ctx, s, target, h)
+	}
+	code, out, errs := tuner(t, "scan", good.URL, bad.URL, "--json", "--no-vulns")
+	var reps []struct{ Target string }
+	if err := json.Unmarshal([]byte(out), &reps); err != nil || len(reps) != 1 {
+		t.Fatalf("want the good target's report: %v\n%s", err, out)
+	}
+	if code != exitError || !strings.Contains(errs, "rhythm tuner: "+bad.URL+": internal error (please report): boom") ||
+		strings.Contains(errs, "goroutine ") {
+		t.Errorf("exit %d, stderr %q", code, errs)
+	}
+	if _, _, errs := tuner(t, "scan", bad.URL, "--json", "--no-vulns", "-v"); !strings.Contains(errs, "goroutine ") {
+		t.Errorf("-v should print the stack:\n%s", errs)
+	}
 }
 
 func TestReportSurvivesSIGKILL(t *testing.T) {

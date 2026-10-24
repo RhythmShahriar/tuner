@@ -19,6 +19,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"sync"
@@ -415,8 +416,32 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 			"Tuner is non-intrusive and never sends exploit payloads. This notice is shown once.\n\n")
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// The first Ctrl-C asks the scan to stop and write what it has. A second
+	// one must always work, even when a target ignores cancellation, so
+	// the handler goes away after the first: the next signal ends the
+	// process the default way.
+	var outMu sync.Mutex
+	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	finished := make(chan struct{})
+	var watch sync.WaitGroup
+	watch.Go(func() {
+		select {
+		case <-sigCtx.Done():
+		case <-finished:
+			return
+		}
+		stop()
+		select {
+		case <-finished: // the deferred stop at the end, not a signal
+			return
+		default:
+		}
+		outMu.Lock()
+		fmt.Fprintln(stderr, "rhythm tuner: stopping... press Ctrl+C again to quit now")
+		outMu.Unlock()
+	})
+	ctx := sigCtx
 	if o.maxTime > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, o.maxTime)
@@ -430,8 +455,7 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 	results := make([]*engine.Result, len(p.targets))
 	statuses := make([]runStatus, len(p.targets))
 	failed := make([]string, len(p.targets)) // why each target failed, or ""
-	var outMu sync.Mutex
-	var jsonlErr error // the first failed --jsonl write, guarded by outMu
+	var jsonlErr error                       // the first failed --jsonl write, guarded by outMu
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, p.o.parallel)
 
@@ -481,7 +505,7 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 			}
 
 			slot := &vulnSlot{}
-			res, err := p.scanTarget(context.WithValue(ctx, vulnSlotKey{}, slot), scanner, target, h)
+			res, err := p.safeScan(context.WithValue(ctx, vulnSlotKey{}, slot), scanner, target, h)
 			statuses[i] = p.status(ctx, err, slot)
 			if res != nil {
 				stampFindings(res, target)
@@ -499,10 +523,15 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 			if err != nil && !errors.Is(err, context.Canceled) {
 				failed[i] = describe(ctx, err, o)
 				fmt.Fprintf(stderr, "rhythm tuner: %s: %v\n", target, failed[i])
+				if ie := (internalError{}); errors.As(err, &ie) && o.verbose {
+					_, _ = stderr.Write(ie.stack)
+				}
 			}
 		})
 	}
 	wg.Wait()
+	close(finished)
+	watch.Wait()
 
 	var reports []report.Report
 	for i, res := range results {
@@ -566,6 +595,31 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 		exit = max(exit, code)
 	}
 	return exit
+}
+
+// scanOne scans one target. Tests swap it to make a target hang or panic.
+var scanOne = (*scanPlan).scanTarget
+
+// safeScan runs scanOne and turns a panic into an error, so one target
+// that trips a bug still lets every other target report. Panics in
+// goroutines the scan starts itself can't be caught here.
+func (p *scanPlan) safeScan(ctx context.Context, s *engine.Scanner, target string, h engine.Hooks) (res *engine.Result, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			res, err = nil, internalError{r, debug.Stack()}
+		}
+	}()
+	return scanOne(p, ctx, s, target, h)
+}
+
+// internalError is a panic caught while scanning one target.
+type internalError struct {
+	value any
+	stack []byte
+}
+
+func (e internalError) Error() string {
+	return fmt.Sprintf("internal error (please report): %v", e.value)
 }
 
 // scanExit picks the built-in exit code once every target is done.
