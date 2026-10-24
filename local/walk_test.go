@@ -64,6 +64,42 @@ func TestWalkOpensEachFileOnce(t *testing.T) {
 	}
 }
 
+func TestScanOpensFilesOnceExceptDetection(t *testing.T) {
+	// Across the whole scan of a WordPress install, every file is opened
+	// once, except the ones WordPress detection reads before the walk:
+	// those at most twice.
+	root := tree(t, map[string]string{
+		"wp-includes/version.php":            "<?php\n$wp_version = '6.5.2';\n",
+		"wp-includes/load.php":               "<?php function wp_load() {}",
+		"wp-config.php":                      "<?php $table_prefix = 'x_';",
+		"wp-content/plugins/a/a.php":         "<?php\n/*\nPlugin Name: A\nVersion: 1.0\n*/\n",
+		"wp-content/plugins/a/inc/b.php":     "<?php echo 1;",
+		"wp-content/mu-plugins/m.php":        "<?php // must-use",
+		"wp-content/themes/t/style.css":      "/*\nTheme Name: T\nVersion: 2.0\n*/",
+		"wp-content/themes/t/functions.php":  "<?php echo 1;",
+		"wp-content/uploads/2024/05/pic.jpg": "\xff\xd8\xff",
+		".env":                               "DB_PASSWORD=" + rawSecret + "\n",
+	})
+	c := &countingRead{opens: map[string]int{}}
+	scanTree(t, root, Options{Exec: noPHP, read: c.read})
+	detection := map[string]bool{}
+	for _, p := range []string{"wp-includes/version.php", "wp-config.php", "wp-content/plugins/a/a.php",
+		"wp-content/mu-plugins/m.php", "wp-content/themes/t/style.css"} {
+		detection[filepath.Join(root, filepath.FromSlash(p))] = true
+		if c.opens[filepath.Join(root, filepath.FromSlash(p))] == 0 {
+			t.Errorf("%s: detection didn't go through the read hook", p)
+		}
+	}
+	for p, n := range c.opens {
+		if limit := map[bool]int{false: 1, true: 2}[detection[p]]; n > limit {
+			t.Errorf("%s opened %d times", p, n)
+		}
+	}
+	if c.opens[filepath.Join(root, "wp-includes", "load.php")] != 1 {
+		t.Errorf("load.php opened %d times", c.opens[filepath.Join(root, "wp-includes", "load.php")])
+	}
+}
+
 func TestWalkVisitorsKeepTheirOwnScope(t *testing.T) {
 	// Laravel: stray files only under public/, the session check over
 	// the whole project. bower_components is skipped by the stray-file

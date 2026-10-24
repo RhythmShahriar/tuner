@@ -83,7 +83,8 @@ type Options struct {
 	// nil uses the rules built into Tuner.
 	Rules fs.FS
 
-	// read replaces readFile in the walk, so tests can count opens.
+	// read replaces readFile in the walk and in the reads before it, so
+	// tests can count opens.
 	read func(path string, n int64, hs ...hash.Hash) ([]byte, int64, error)
 }
 
@@ -383,9 +384,14 @@ func readFile(path string, n int64, hs ...hash.Hash) ([]byte, int64, error) {
 }
 
 // readHead is readHead that warns when it skips a FIFO, socket or device,
-// so a scan that left a file out says so.
+// so a scan that left a file out says so. It goes through Options.read
+// like the walk, so tests count every open.
 func (s *scan) readHead(path string, n int64) ([]byte, error) {
-	b, err := readHead(path, n)
+	read := s.opts.read
+	if read == nil {
+		read = readFile
+	}
+	b, _, err := read(path, n)
 	if nr := (*notRegularError)(nil); errors.As(err, &nr) {
 		s.skip(path, nr.kind)
 	}

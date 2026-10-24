@@ -25,7 +25,10 @@ import (
 // One walk of the project feeds every check that looks at files. Each
 // check is a visitor with its own root and its own folders to skip; a
 // folder is only skipped when no visitor wants it. Files are read once,
-// by a pool of workers. The bytes are shared by every visitor that
+// by a pool of workers. The one exception is the few files WordPress
+// detection reads before the walk (version.php, wp-config.php, plugin
+// and must-use plugin headers, theme style.css): a rule may read them
+// again. The bytes are shared by every visitor that
 // asked for them.
 
 // need says what a visitor wants from a file.
