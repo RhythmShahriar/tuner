@@ -34,4 +34,31 @@ class ScanArgsTest extends TestCase {
 		$this->assertContains( '--json', $argv );
 		$this->assertSame( '/srv', $argv[1] );
 	}
+
+	public function test_json_report_is_passed_on_unescaped() {
+		$stdout = "{\"target\":\"/srv\",\"findings\":[{\"id\":\"local-dotenv\"}]}\n";
+		$out    = ScanCommand::jsonReport( $stdout );
+		$report = json_decode( $out, true );
+		$this->assertIsArray( $report, 'the output must be the report, not a JSON string' );
+		$this->assertSame( 'local-dotenv', $report['findings'][0]['id'] );
+		$this->assertSame( trim( $stdout ), $out );
+	}
+
+	public function test_json_report_refuses_non_json() {
+		$this->expectException( \RuntimeException::class );
+		ScanCommand::jsonReport( 'flag provided but not defined: -integrity' );
+	}
+
+	public function test_json_report_refuses_a_bare_string() {
+		$this->expectException( \RuntimeException::class );
+		ScanCommand::jsonReport( '"{\\"findings\\":[]}"' );
+	}
+
+	public function test_help_has_flag() {
+		$help = "  -q, --quiet              findings only\n      --integrity          verify checksums\n";
+		$this->assertTrue( ScanCommand::helpHasFlag( $help, 'integrity' ) );
+		$this->assertTrue( ScanCommand::helpHasFlag( $help, 'quiet' ) );
+		$this->assertFalse( ScanCommand::helpHasFlag( "      --integrity-only  x\n", 'integrity' ) );
+		$this->assertFalse( ScanCommand::helpHasFlag( "      --json   JSON report\n", 'integrity' ) );
+	}
 }

@@ -11,6 +11,10 @@ use WP_CLI\Utils;
  * ScanCommand implements `wp tuner scan`: it installs a verified
  * rhythm-tuner release and runs a local scan of this site's files
  * (ABSPATH). It never runs the site's PHP beyond WP-CLI itself.
+ *
+ * WP-CLI's global --path picks the install and sets ABSPATH before
+ * this command runs. The command has no --path of its own because WP-CLI
+ * would consume it as the global flag anyway.
  */
 class ScanCommand {
 
@@ -20,7 +24,7 @@ class ScanCommand {
 	 * ## OPTIONS
 	 *
 	 * [--integrity]
-	 * : Also verify WordPress core and plugin files against the official checksums.
+	 * : Also verify WordPress core and plugin files against the official checksums. Needs a Tuner release with integrity checking; an older one is refused with a message.
 	 *
 	 * [--format=<format>]
 	 * : Render results as a table or raw Tuner JSON.
@@ -47,17 +51,15 @@ class ScanCommand {
 	 * [--version=<version>]
 	 * : Tuner version to install, e.g. 0.4.0. Default the latest release.
 	 *
-	 * [--path=<path>]
-	 * : Scan this folder instead of ABSPATH.
-	 *
-	 * [--no-verify-signature]
-	 * : Skip the cosign signature check of the release (checksums are still verified).
+	 * [--[no-]verify-signature]
+	 * : Check the release's cosign signature when cosign is on PATH. On by default; --no-verify-signature skips it (checksums are still verified).
 	 *
 	 * ## EXAMPLES
 	 *
 	 *     wp tuner scan
 	 *     wp tuner scan --integrity --fail-on=medium
 	 *     wp tuner scan --format=json > tuner.json
+	 *     wp --path=/srv/www/blog tuner scan
 	 *
 	 * @when before_wp_load
 	 *
@@ -65,7 +67,7 @@ class ScanCommand {
 	 * @param array $assoc_args Flags.
 	 */
 	public function __invoke( $args, $assoc_args ) {
-		$target = Utils\get_flag_value( $assoc_args, 'path', ABSPATH );
+		$target = ABSPATH;
 		$format = Utils\get_flag_value( $assoc_args, 'format', 'table' );
 
 		$downloader = new Downloader(
@@ -83,11 +85,23 @@ class ScanCommand {
 			return;
 		}
 
+		if ( ! empty( $assoc_args['integrity'] ) ) {
+			$help = self::runBinary( $binary, array( 'scan', '--help' ) );
+			if ( ! self::helpHasFlag( $help['stdout'] . $help['stderr'], 'integrity' ) ) {
+				WP_CLI::error( 'This Tuner release has no integrity checking yet, so --integrity is not available. Install a release that has it with --version, or leave --integrity off.' );
+				return;
+			}
+		}
+
 		$scanArgs = self::buildScanArgs( $target, $assoc_args );
 		$result   = self::runBinary( $binary, $scanArgs );
 
 		if ( 'json' === $format ) {
-			WP_CLI::print_value( trim( $result['stdout'] ), array( 'format' => 'json' ) );
+			try {
+				WP_CLI::line( self::jsonReport( $result['stdout'] ) );
+			} catch ( \RuntimeException $e ) {
+				WP_CLI::error( $e->getMessage() );
+			}
 		} else {
 			self::renderTable( $result['stdout'] );
 		}
@@ -104,8 +118,8 @@ class ScanCommand {
 
 	/**
 	 * buildScanArgs turns the flags into rhythm-tuner scan arguments. It
-	 * always asks for JSON, so the command can render it, and a local scan
-	 * of the target folder.
+	 * always asks for JSON so the command can render it and for a local
+	 * scan of the target folder.
 	 *
 	 * @return string[] arguments after "scan".
 	 */
@@ -121,6 +135,30 @@ class ScanCommand {
 			$argv[] = '--integrity';
 		}
 		return $argv;
+	}
+
+	/**
+	 * jsonReport returns Tuner's JSON report as it should reach stdout.
+	 * Tuner already wrote JSON, so it is passed on as is: encoding it
+	 * again (as WP_CLI::print_value does) would print one escaped string.
+	 *
+	 * @throws \RuntimeException when stdout holds no JSON object or array.
+	 */
+	public static function jsonReport( $stdout ) {
+		$json = trim( (string) $stdout );
+		if ( ! is_array( json_decode( $json, true ) ) ) {
+			throw new \RuntimeException( 'Tuner produced no readable report.' );
+		}
+		return $json;
+	}
+
+	/**
+	 * helpHasFlag reports whether a `rhythm-tuner scan --help` text lists
+	 * --<name>, so a flag added in a later release is only passed to a
+	 * binary that knows it.
+	 */
+	public static function helpHasFlag( $help, $name ) {
+		return 1 === preg_match( '/(^|[\s,])--' . preg_quote( $name, '/' ) . '\b(?!-)/m', (string) $help );
 	}
 
 	/** runBinary runs rhythm-tuner and captures stdout, stderr and the code. */
