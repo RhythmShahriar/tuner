@@ -52,9 +52,13 @@ type Options struct {
 	FollowHost bool
 	// Plugins picks how hard plugin discovery tries; "" means passive.
 	Plugins PluginMode
-	// RequestBudget caps the requests discovery may spend; 0 means the
-	// mode's default.
+	// RequestBudget caps the requests plugin discovery may spend; 0 means
+	// DefaultRequestBudget. Reaching it ends discovery and marks the scan
+	// partial (StoppedBy "budget").
 	RequestBudget int
+	// PluginData maps REST namespaces to plugins and lists the popular
+	// plugins deep discovery probes; nil means fingerprint.Embedded().
+	PluginData fingerprint.Data
 	// ResponseAdvisors look at the body behind a finding, e.g. an exposed
 	// composer.lock. They may add findings of their own.
 	ResponseAdvisors []ResponseAdvisor
@@ -240,6 +244,13 @@ func (s *Scanner) Scan(ctx context.Context, target string, h Hooks) (*Result, er
 	} else if home.Status < 200 || home.Status > 399 {
 		res.StoppedBy = "home-status"
 		res.Warnings = append(res.Warnings, homeStatusWarning(home.Status))
+	}
+	// Plugin discovery first, so version lookups cover what it finds.
+	if w, budgetHit := ss.discoverPlugins(ctx, &res.Fingerprint); w != "" {
+		res.Warnings = append(res.Warnings, w)
+		if budgetHit && res.StoppedBy == "" {
+			res.StoppedBy = "budget"
+		}
 	}
 	// The PHP probe runs in every profile: it costs at most three requests,
 	// and without it quick scans would report the version as hidden behind

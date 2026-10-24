@@ -218,6 +218,15 @@ type filtered struct {
 	sel Selector
 }
 
+// PluginSlugs passes PluginLister through the filter, so deep discovery
+// still sees the advisor's slugs.
+func (f filtered) PluginSlugs(ctx context.Context) []string {
+	if l, ok := f.Advisor.(PluginLister); ok {
+		return l.PluginSlugs(ctx)
+	}
+	return nil
+}
+
 func (f filtered) Advise(ctx context.Context, base *url.URL, fp fingerprint.Result) ([]Finding, []string) {
 	findings, warnings := f.Advisor.Advise(ctx, base, fp)
 	sel := f.sel.normalize()
