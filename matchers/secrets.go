@@ -117,5 +117,5 @@ func Mask(v string, keep int) string {
 	if keep > len(r)/3 {
 		keep = len(r) / 3
 	}
-	return string(r[:keep]) + "•••••"
+	return CleanText(string(r[:keep])) + "•••••"
 }

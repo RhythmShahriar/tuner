@@ -108,3 +108,12 @@ func TestMethods(t *testing.T) {
 		t.Errorf("empty set not omitted: %s", b)
 	}
 }
+
+func TestPHPBuildCleaned(t *testing.T) {
+	h := http.Header{}
+	h.Set("X-Powered-By", "PHP/8.1.2-1ubuntu\x1b[2J")
+	v, build, _ := PHPVersion(h)
+	if v != "8.1.2" || strings.ContainsRune(build, 0x1b) || build != "8.1.2-1ubuntu�[2J" {
+		t.Errorf("got %q %q", v, build)
+	}
+}

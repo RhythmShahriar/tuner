@@ -166,7 +166,7 @@ func Detect(r *matchers.Response) Result {
 		add("php")
 	}
 	if s := r.Header.Get("Server"); s != "" {
-		res.Server = matchers.Snippet([]byte(s))
+		res.Server = matchers.Snippet([]byte(s)) // cleans control bytes too
 	}
 	return res
 }
@@ -187,7 +187,7 @@ func PHPVersion(h http.Header) (version, build, header string) {
 		for _, v := range h.Values(name) {
 			if m := phpPowered.FindStringSubmatch(v); m != nil {
 				if m[2] != "" {
-					build = m[1] + m[2]
+					build = matchers.CleanText(m[1] + m[2])
 				}
 				return m[1], build, strings.ToLower(name)
 			}

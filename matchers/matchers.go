@@ -182,14 +182,16 @@ func (m *Matcher) Match(r *Response, isBaseline func() bool) (bool, string) {
 		if loc == nil {
 			return false, ""
 		}
-		ev = Snippet(r.Body[loc[0]:loc[1]])
+		// Redact the whole match before Snippet cuts it: a token cut short
+		// no longer looks like a secret and would leak in part.
+		ev = Snippet([]byte(Redact(string(r.Body[loc[0]:loc[1]]))))
 	}
 	for name, re := range m.header {
 		v, ok := headerMatch(r.Header, name, re)
 		if !ok {
 			return false, ""
 		}
-		ev = name + ": " + v
+		ev = name + ": " + Redact(CleanText(v))
 	}
 	for name, re := range m.notHeader {
 		if _, ok := headerMatch(r.Header, name, re); ok {
@@ -318,7 +320,9 @@ func (b *Block) Match(r *Response, isBaseline func() bool) (bool, []string) {
 	var ev []string
 	add := func(e string) {
 		if e != "" {
-			ev = append(ev, e)
+			// Evidence can quote the site (TLS errors name certificate
+			// hosts), so no matcher may pass control bytes through.
+			ev = append(ev, CleanText(e))
 		}
 	}
 	never := func() bool { return false }
@@ -350,11 +354,26 @@ func (b *Block) Match(r *Response, isBaseline func() bool) (bool, []string) {
 	return true, ev
 }
 
-// Snippet turns matched bytes into a short single-line string.
+// Snippet turns matched bytes into a short single-line string, safe to
+// print: runs of whitespace become one space and control bytes become
+// U+FFFD (see CleanText).
 func Snippet(b []byte) string {
-	s := strings.Join(strings.Fields(strings.ToValidUTF8(string(b), "�")), " ")
+	s := CleanText(strings.Join(strings.Fields(strings.ToValidUTF8(string(b), "\uFFFD")), " "))
 	if utf8.RuneCountInString(s) > 120 {
 		s = string([]rune(s)[:119]) + "…"
 	}
 	return s
+}
+
+// CleanText replaces control characters in text copied from a site with
+// U+FFFD, so a page can't move the cursor, rewrite earlier output or set
+// the clipboard (OSC 52) when a finding is printed. It replaces C0
+// controls other than tab, DEL, C1 controls and invalid UTF-8.
+func CleanText(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 && r != '\t' || r >= 0x7f && r <= 0x9f {
+			return utf8.RuneError
+		}
+		return r
+	}, s)
 }

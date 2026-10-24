@@ -56,7 +56,7 @@ type Options struct {
 	// mode's default.
 	RequestBudget int
 	// ResponseAdvisors look at the body behind a finding, e.g. an exposed
-	// composer.lock, and may add findings of their own.
+	// composer.lock. They may add findings of their own.
 	ResponseAdvisors []ResponseAdvisor
 }
 
@@ -355,6 +355,8 @@ func (ss *session) run(ctx context.Context, c *Check, p string) (Finding, bool) 
 	if !ok {
 		return Finding{}, false
 	}
+	// Matchers already redact before cutting evidence; this second pass
+	// covers evidence they build from other sources.
 	for i := range ev {
 		ev[i] = matchers.Redact(ev[i])
 	}

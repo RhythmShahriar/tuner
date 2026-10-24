@@ -7,6 +7,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -220,5 +221,39 @@ func TestIsAdvisorID(t *testing.T) {
 		if got := IsAdvisorID(id); got != want {
 			t.Errorf("IsAdvisorID(%q) = %v, want %v", id, got, want)
 		}
+	}
+}
+
+func TestEvidenceHasNoControlBytes(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Go's client rejects C0 bytes in headers but not C1 controls.
+		w.Header().Set("Server", "nginx\u009b2J")
+		if r.URL.Path == "/.env.local" {
+			w.Write([]byte("APP_NAME=\x1b]52;c;ZWNobyBvd25lZA==\x07\nDB_PASSWORD=supersecret\n"))
+		}
+	}))
+	defer srv.Close()
+	c := mustParse(t, `
+id: t-env-local
+name: env
+severity: critical
+request: {path: ["/.env.local"]}
+match: {all: [{status: 200}, {regex: "(?m)^[A-Z_]+=.+"}]}
+extract: {secrets: true}
+`)
+	res, err := New([]*Check{c}, Options{HTTPClient: srv.Client()}).Scan(context.Background(), srv.URL, Hooks{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 {
+		t.Fatalf("findings %+v", res.Findings)
+	}
+	for _, m := range res.Findings[0].Evidence.Matched {
+		if strings.ContainsAny(m, "\x1b\x07") {
+			t.Errorf("evidence keeps control bytes: %q", m)
+		}
+	}
+	if strings.ContainsRune(res.Fingerprint.Server, 0x9b) {
+		t.Errorf("server keeps control bytes: %q", res.Fingerprint.Server)
 	}
 }
