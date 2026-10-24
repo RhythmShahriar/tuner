@@ -292,7 +292,7 @@ func WriteMarkdown(w io.Writer, res Result, since string) error {
 			if e.Was != "" {
 				sev += " (was " + strings.ToUpper(string(e.Was)) + ")"
 			}
-			fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", report.MDText(sev), report.MDText(e.title()), report.MDCode(f.Path), report.MDText(e.Target))
+			fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", report.MDText(sev), report.MDText(e.title()), report.MDCodeCell(f.Path), report.MDText(e.Target))
 		}
 	}
 	if len(res.NotScanned) > 0 {

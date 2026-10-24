@@ -55,6 +55,7 @@ func TestMDText(t *testing.T) {
 		"two\nlines\r\nhere":           "two lines here",
 		"&lt;img src=x&gt;":            "&amp;lt;img src=x&amp;gt;",
 		"esc\x1b[31mred":               `esc` + "�" + `\[31mred`,
+		"@org/team and @alice":         "@\u2060org/team and @\u2060alice",
 	} {
 		if got := MDText(in); got != want {
 			t.Errorf("MDText(%q) = %q, want %q", in, got, want)
@@ -69,13 +70,16 @@ func TestMDCode(t *testing.T) {
 		"a``b`":           "``` a``b` ```",
 		"`":               "`` ` ``",
 		"":                "` `",
-		"x|y":             "`x\\|y`",
+		"x|y":             "`x|y`",
 		"one\ntwo":        "`one two`",
 		"\x1b]0;t\x07<i>": "`�]0;t�<i>`",
 	} {
 		if got := MDCode(in); got != want {
 			t.Errorf("MDCode(%q) = %q, want %q", in, got, want)
 		}
+	}
+	if got := MDCodeCell("x|y"); got != "`x\\|y`" {
+		t.Errorf("MDCodeCell = %q", got)
 	}
 	if got := mdFence("a\n```\nb"); got != "````\na\n```\nb\n````" {
 		t.Errorf("mdFence = %q", got)

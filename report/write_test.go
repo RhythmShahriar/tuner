@@ -133,6 +133,22 @@ func TestMarkdownListsFailedTargets(t *testing.T) {
 	}
 }
 
+// Pipes are escaped in table cells only: outside a table GitHub would
+// show the backslash inside the code span.
+func TestMarkdownPipes(t *testing.T) {
+	res := &engine.Result{Target: "https://a.test", Findings: []engine.Finding{{
+		ID: "x", Title: "X", Severity: engine.Low, Path: "/a|b",
+		Evidence: engine.Evidence{Request: "GET /a|b", Status: 200, Matched: []string{"a|b"}},
+	}}}
+	var b bytes.Buffer
+	_ = Write("md", &b, []Report{New(res, "0.4.0")}, WriteOptions{})
+	for _, want := range []string{"| `/a\\|b` |", "- **Evidence:** `a|b`", "- **Request:** `GET /a|b` → 200"} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("missing %q:\n%s", want, b.String())
+		}
+	}
+}
+
 func TestWriteUnknownFormat(t *testing.T) {
 	err := Write("pdf", &bytes.Buffer{}, nil, WriteOptions{})
 	if err == nil || !strings.Contains(err.Error(), `unknown report format "pdf"`) || !strings.Contains(err.Error(), "json") {

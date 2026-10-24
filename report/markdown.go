@@ -51,7 +51,7 @@ func writeMarkdown(w io.Writer, reports []Report, o WriteOptions) error {
 		}
 		b.WriteString("| Severity | Finding | Path |\n|---|---|---|\n")
 		for _, f := range r.Findings {
-			fmt.Fprintf(&b, "| %s | %s | %s |\n", MDText(strings.ToUpper(string(f.Severity))), MDText(f.Title), MDCode(f.Path))
+			fmt.Fprintf(&b, "| %s | %s | %s |\n", MDText(strings.ToUpper(string(f.Severity))), MDText(f.Title), MDCodeCell(f.Path))
 		}
 		b.WriteString("\n## Details\n")
 		for _, f := range r.Findings {

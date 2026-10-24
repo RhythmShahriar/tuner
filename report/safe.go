@@ -58,19 +58,31 @@ var mdReplacer = func() *strings.Replacer {
 	}
 	// Entities would let "&lt;img" through as an image once rendered.
 	pairs = append(pairs, "&", "&amp;", "\r\n", " ", "\n", " ", "\r", " ")
+	// A site-derived "@org/team" pasted into an issue would ping real
+	// people. GitHub drops Markdown escapes and decodes entities before it
+	// looks for mentions, so only a character between the @ and the name
+	// stops it: U+2060 WORD JOINER is invisible and doesn't break the line.
+	pairs = append(pairs, "@", "@\u2060")
 	return strings.NewReplacer(pairs...)
 }()
 
 // MDText makes s safe as inline Markdown text: control characters are
-// replaced, Markdown and HTML punctuation is escaped and line breaks
-// become spaces, so s can't open an image, link, heading or table cell.
+// replaced, Markdown and HTML punctuation is escaped, line breaks become
+// spaces and @mentions are broken, so s can't open an image, link,
+// heading or table cell or ping anyone.
 func MDText(s string) string { return mdReplacer.Replace(SafeText(oneLine(s))) }
 
 // MDCode renders s as an inline code span. The fence is one backtick
 // longer than the longest run of backticks in s, so s can't close it.
-// Pipes are escaped so the span also works inside a table cell (GitHub
-// strips the backslash there).
-func MDCode(s string) string {
+// Use MDCodeCell inside a table.
+func MDCode(s string) string { return mdCode(s, false) }
+
+// MDCodeCell is MDCode for a table cell: pipes are escaped so they can't
+// end the cell. GitHub strips the backslash there, but would show it
+// in a code span outside a table.
+func MDCodeCell(s string) string { return mdCode(s, true) }
+
+func mdCode(s string, cell bool) string {
 	s = SafeText(oneLine(s))
 	if s == "" {
 		return "` `"
@@ -79,7 +91,10 @@ func MDCode(s string) string {
 	if strings.HasPrefix(s, "`") || strings.HasSuffix(s, "`") {
 		s = " " + s + " "
 	}
-	return fence + strings.ReplaceAll(s, "|", `\|`) + fence
+	if cell {
+		s = strings.ReplaceAll(s, "|", `\|`)
+	}
+	return fence + s + fence
 }
 
 // mdFence renders multi-line s as a fenced code block that s can't close.
