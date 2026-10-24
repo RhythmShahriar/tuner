@@ -122,6 +122,14 @@ func TestPHPVersionHiddenQuiet(t *testing.T) {
 	if len(findings) != 0 || len(warnings) != 1 || !strings.Contains(warnings[0], "recent PHP advisories") {
 		t.Errorf("php.net down: findings %v, warnings %v", keys(byID(findings)), warnings)
 	}
+
+	// Every branch failing: one error in the note, not several joined by
+	// newlines (which the terminal shows as U+FFFD).
+	f = newFakeAPI(t, map[string]string{"/php/8.2.0/": "!404", "/php/8.3.0/": "!404", "/php/8.4.0/": "!404", "/php/8.5.0/": "!404"})
+	_, warnings = newAdvisor(f, t.TempDir()).Advise(context.Background(), base, fingerprint.Result{Tech: []string{"php"}})
+	if len(warnings) != 1 || strings.ContainsAny(warnings[0], "\n\r\uFFFD") || strings.Count(warnings[0], "unexpected response") != 1 {
+		t.Errorf("branches down: warnings %q", warnings)
+	}
 }
 
 func TestPHPEndOfLife(t *testing.T) {

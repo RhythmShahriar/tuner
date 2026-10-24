@@ -186,8 +186,12 @@ func (a *Advisor) recentPHPFlaws(ctx context.Context, now time.Time) (flaws []*r
 		wg.Go(func() { recs[i], stales[i], errs[i] = a.Client.Advisories(ctx, "php", b.Version+".0") })
 	}
 	wg.Wait()
-	if err := errors.Join(errs...); err != nil {
-		return nil, nil, false, err
+	// The first error is enough for the note: a joined error puts newlines
+	// in it, which the terminal sanitizer shows as U+FFFD.
+	for _, err := range errs {
+		if err != nil {
+			return nil, nil, false, err
+		}
 	}
 
 	byKey := map[string]*recentFlaw{}
