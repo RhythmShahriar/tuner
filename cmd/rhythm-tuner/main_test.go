@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -67,16 +68,22 @@ func cleanSite(t *testing.T) *httptest.Server {
 	return srv
 }
 
+// tuner runs the CLI in process. Scans get --rate 0 and, unless the test
+// sets --retries, --retries 0, so a target that is down fails at once
+// instead of after two backed-off retries.
 func tuner(t *testing.T, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
 	if len(args) > 0 && args[0] == "scan" {
 		args = append(args, "--rate", "0")
+		if !slices.ContainsFunc(args, func(a string) bool { return a == "--retries" || strings.HasPrefix(a, "--retries=") }) {
+			args = append(args, "--retries", "0")
+		}
 	}
 	return tunerExact(t, args...)
 }
 
-// tunerExact is tuner without the added --rate 0, for tests of the
-// command line itself.
+// tunerExact is tuner without the added --rate 0 and --retries 0, for
+// tests of the command line itself.
 func tunerExact(t *testing.T, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // keep the first-run marker out of the real config
@@ -87,6 +94,8 @@ func tunerExact(t *testing.T, args ...string) (code int, stdout, stderr string) 
 		t.Setenv("TUNER_VULN_API", "http://127.0.0.1:1") // never reach the real APIs from tests
 		t.Setenv("TUNER_WPORG_API", "http://127.0.0.1:1")
 		t.Setenv("TUNER_PHPNET_API", "http://127.0.0.1:1")
+		t.Setenv("TUNER_OSV_API", "http://127.0.0.1:1")
+		t.Setenv("TUNER_WPDL_API", "http://127.0.0.1:1") // --integrity checksums, once that lands
 	}
 	if os.Getenv("TUNER_CHECKS_URL") == "" {
 		t.Setenv("TUNER_CHECKS_URL", "http://127.0.0.1:1") // nor the check pack release
@@ -1412,5 +1421,272 @@ func TestDeepProfileHidden(t *testing.T) {
 	}
 	if _, _, errs := tuner(t, "scan", srv.URL, "--json", "--profile", "deep", "-q"); strings.Contains(errs, "deep") {
 		t.Errorf("-q still prints the deep note:\n%s", errs)
+	}
+}
+
+// needCommand skips a test until another lane's command is registered in
+// this binary, so the end-to-end tests below run on the integration
+// branch with no edit here.
+func needCommand(t *testing.T, name string) {
+	t.Helper()
+	if lookupCommand(name) == nil {
+		t.Skipf("rhythm tuner %s is not registered in this build", name)
+	}
+}
+
+// needScanFlags skips a test until a scan extension registers the flags.
+func needScanFlags(t *testing.T, names ...string) {
+	t.Helper()
+	var o scanOptions
+	fs := scanFlagSet(&o, io.Discard)
+	for _, e := range scanExtensions {
+		e.Flags(fs)
+	}
+	for _, n := range names {
+		if fs.Lookup(n) == nil {
+			t.Skipf("scan --%s is not registered in this build", n)
+		}
+	}
+}
+
+// laneReports writes two JSON reports of one site: before.json without
+// the exposed .env and after.json with it. The leak is new in after.
+func laneReports(t *testing.T) (srv *httptest.Server, before, after string) {
+	t.Helper()
+	srv = leakySite(t)
+	dir := t.TempDir()
+	before, after = filepath.Join(dir, "before.json"), filepath.Join(dir, "after.json")
+	if code, _, errs := tuner(t, "scan", srv.URL, "--no-vulns", "--exclude-id", "leak-dotenv", "-o", before, "-q"); code != exitOK {
+		t.Fatalf("before: exit %d: %s", code, errs)
+	}
+	if code, _, errs := tuner(t, "scan", srv.URL, "--no-vulns", "-o", after, "-q"); code != exitOK {
+		t.Fatalf("after: exit %d: %s", code, errs)
+	}
+	return srv, before, after
+}
+
+func TestEndToEndDiff(t *testing.T) {
+	needCommand(t, "diff")
+	_, before, after := laneReports(t)
+	code, out, errs := tuner(t, "diff", before, after, "--fail-on-new", "high")
+	if code != exitFindings || !strings.Contains(out, "leak-dotenv") {
+		t.Errorf("new leak: exit %d, stderr %s\n%s", code, errs, out)
+	}
+	if code, out, errs := tuner(t, "diff", after, before, "--fail-on-new", "high"); code != exitOK {
+		t.Errorf("leak fixed: exit %d, stderr %s\n%s", code, errs, out)
+	}
+	if code, _, _ := tuner(t, "diff", before); code != exitUsage {
+		t.Errorf("one report: exit %d, want %d", code, exitUsage)
+	}
+}
+
+func TestEndToEndReportHTML(t *testing.T) {
+	needCommand(t, "report")
+	_, before, after := laneReports(t)
+	html := filepath.Join(t.TempDir(), "client.html")
+	code, _, errs := tuner(t, "report", after, "--since", before, "--brand-name", "Acme Web", "-o", html)
+	body, _ := os.ReadFile(html)
+	if code != exitOK || !strings.Contains(strings.ToLower(string(body)), "<!doctype html") ||
+		!strings.Contains(string(body), "Acme Web") || strings.Contains(string(body), rawSecret) {
+		t.Errorf("report --html: exit %d, stderr %s, %d bytes", code, errs, len(body))
+	}
+	if code, _, _ := tuner(t, "report", filepath.Join(t.TempDir(), "missing.json"), "--html"); code == exitOK {
+		t.Error("a missing report should fail")
+	}
+
+	// scan --html writes the same kind of file next to the scan.
+	needScanFlags(t, "html")
+	srv := leakySite(t)
+	html = filepath.Join(t.TempDir(), "scan.html")
+	if code, _, errs := tuner(t, "scan", srv.URL, "--no-vulns", "--html", html, "-q"); code != exitOK {
+		t.Errorf("scan --html: exit %d: %s", code, errs)
+	} else if body, _ := os.ReadFile(html); !strings.Contains(string(body), ".env") {
+		t.Errorf("scan --html lacks the finding:\n%.300s", body)
+	}
+}
+
+func TestEndToEndFix(t *testing.T) {
+	needCommand(t, "fix")
+	_, _, after := laneReports(t)
+	for _, server := range []string{"nginx", "apache"} {
+		code, out, errs := tuner(t, "fix", after, "--server", server)
+		if code != exitOK || strings.TrimSpace(out) == "" {
+			t.Errorf("fix --server %s: exit %d, stderr %s\n%s", server, code, errs, out)
+		}
+	}
+	if code, _, _ := tuner(t, "fix", after, "--server", "iis"); code != exitUsage {
+		t.Errorf("fix --server iis: exit %d, want %d", code, exitUsage)
+	}
+}
+
+func TestEndToEndExplain(t *testing.T) {
+	needCommand(t, "explain")
+	code, out, errs := tuner(t, "explain", "leak-dotenv", "--no-check-updates")
+	if code != exitOK || !strings.Contains(out, "leak-dotenv") {
+		t.Errorf("explain leak-dotenv: exit %d, stderr %s\n%s", code, errs, out)
+	}
+	code, out, _ = tuner(t, "explain", "leak-dotenv", "--no-check-updates", "--json")
+	var e struct{ ID, Kind string }
+	if code != exitOK || json.Unmarshal([]byte(out), &e) != nil || e.ID != "leak-dotenv" || e.Kind != "check" {
+		t.Errorf("explain --json: exit %d, %+v\n%s", code, e, out)
+	}
+	if code, _, _ := tuner(t, "explain", "no-such-check", "--no-check-updates"); code == exitOK {
+		t.Error("explain of an unknown ID should fail")
+	}
+}
+
+// wordPressFolder makes a folder that reads as a WordPress install.
+func wordPressFolder(t *testing.T, dir string) {
+	t.Helper()
+	for name, body := range map[string]string{
+		"wp-includes/version.php": "<?php\n$wp_version = '6.4.1';\n",
+		"wp-config.php":           "<?php\ndefine('DB_NAME', 'wp');\n",
+		"wp-login.php":            "<?php\n",
+		"index.php":               "<?php\n",
+	} {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestEndToEndIntegrityAndDiscover(t *testing.T) {
+	needScanFlags(t, "integrity", "discover")
+	root := t.TempDir()
+	wordPressFolder(t, filepath.Join(root, "shop"))
+	wordPressFolder(t, filepath.Join(root, "blog"))
+
+	// The checksum service is down in tests, so --integrity can only say so;
+	// it must not crash or fail the scan.
+	code, out, errs := tuner(t, "scan", filepath.Join(root, "shop"), "--integrity", "--offline", "--plain")
+	if code != exitOK && code != exitFindings {
+		t.Errorf("--integrity: exit %d, stderr %s\n%s", code, errs, out)
+	}
+
+	code, out, errs = tuner(t, "scan", root, "--discover", "--offline", "--json")
+	var reps []struct{ Target string }
+	if (code != exitOK && code != exitFindings) || json.Unmarshal([]byte(out), &reps) != nil || len(reps) != 2 {
+		t.Errorf("--discover: exit %d, %d reports, stderr %s\n%.400s", code, len(reps), errs, out)
+	}
+}
+
+func TestEndToEndPluginsDeep(t *testing.T) {
+	needScanFlags(t, "plugins", "request-budget")
+	srv := leakySite(t)
+	code, out, errs := tuner(t, "scan", srv.URL, "--no-vulns", "--plugins", "deep", "--request-budget", "20", "--json")
+	var rep struct{ Target string }
+	if code != exitOK || json.Unmarshal([]byte(out), &rep) != nil || rep.Target == "" {
+		t.Errorf("--plugins deep: exit %d, stderr %s\n%.300s", code, errs, out)
+	}
+	if code, _, _ := tuner(t, "scan", srv.URL, "--plugins", "turbo"); code != exitUsage {
+		t.Errorf("--plugins turbo: exit %d, want %d", code, exitUsage)
+	}
+}
+
+func TestEndToEndSinceAndNotify(t *testing.T) {
+	needScanFlags(t, "since", "notify", "fail-on-new")
+	srv, before, _ := laneReports(t)
+	var mu sync.Mutex
+	var posts []string
+	hook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		posts = append(posts, string(body))
+		mu.Unlock()
+	}))
+	t.Cleanup(hook.Close)
+
+	code, _, errs := tuner(t, "scan", srv.URL, "--no-vulns", "--since", before, "--fail-on-new", "high",
+		"--notify", "webhook+"+hook.URL, "-q")
+	mu.Lock()
+	defer mu.Unlock()
+	if code != exitFindings || len(posts) != 1 || !strings.Contains(posts[0], "leak-dotenv") || strings.Contains(posts[0], rawSecret) {
+		t.Errorf("--since --notify: exit %d, stderr %s, posts %q", code, errs, posts)
+	}
+	if code, _, _ := tuner(t, "scan", srv.URL, "--notify", "ftp://example.com"); code != exitUsage {
+		t.Errorf("bad --notify: exit %d, want %d", code, exitUsage)
+	}
+}
+
+// watch and serve run scans as child processes of the binary, which a
+// test binary can't be, so only their command lines are tested here.
+func TestEndToEndWatchAndServe(t *testing.T) {
+	for _, c := range []struct{ name, want string }{{"watch", "--every"}, {"serve", "/v0/scans"}} {
+		t.Run(c.name, func(t *testing.T) {
+			needCommand(t, c.name)
+			code, out, errs := tuner(t, c.name, "--help")
+			if code != exitOK || !strings.Contains(out+errs, c.want) {
+				t.Errorf("%s --help: exit %d\n%s%s", c.name, code, out, errs)
+			}
+			if code, _, _ := tuner(t, c.name, "--no-such-flag"); code != exitUsage {
+				t.Errorf("%s --no-such-flag: exit %d, want %d", c.name, code, exitUsage)
+			}
+		})
+	}
+}
+
+func TestEndToEndInitCI(t *testing.T) {
+	needCommand(t, "init")
+	repo := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(repo)
+	code, _, errs := tuner(t, "init", "ci", "--target", "https://staging.example.com", "--sarif")
+	body, err := os.ReadFile(filepath.Join(repo, ".github", "workflows", "tuner.yml"))
+	if code != exitOK || err != nil || !strings.Contains(string(body), "staging.example.com") {
+		t.Fatalf("init ci: exit %d, stderr %s, %v\n%s", code, errs, err, body)
+	}
+	if code, _, _ := tuner(t, "init", "ci", "--target", "https://staging.example.com"); code == exitOK {
+		t.Error("init ci replaced tuner.yml without --force")
+	}
+	if code, _, errs := tuner(t, "init", "ci", "--target", "https://staging.example.com", "--force"); code != exitOK {
+		t.Errorf("init ci --force: exit %d: %s", code, errs)
+	}
+}
+
+// Every command and the headline scan flags other lanes add need a row in
+// the README's "You want to…" table once they are registered, so a merge
+// that adds one without the row fails here.
+func TestReadmeCoversLaneFeatures(t *testing.T) {
+	readme, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	table := string(readme)
+	if i := strings.Index(table, "| You want to… | Run |"); i >= 0 {
+		table = table[i:]
+		if end := strings.Index(table, "\n\n"); end >= 0 {
+			table = table[:end]
+		}
+	}
+	for _, c := range commands {
+		if strings.HasPrefix(c.Name, "test-") {
+			continue // registered by tests only
+		}
+		want := "rhythm tuner " + c.Name
+		if c.Name == "init" {
+			want = "rhythm tuner init ci"
+		}
+		if !strings.Contains(table, want) {
+			t.Errorf("the README task table has no row for %s", want)
+		}
+	}
+	var o scanOptions
+	fs := scanFlagSet(&o, io.Discard)
+	for _, e := range scanExtensions {
+		e.Flags(fs)
+	}
+	for flagName, want := range map[string]string{
+		"html": "--html", "integrity": "--integrity", "discover": "--discover",
+		"plugins": "--plugins deep", "since": "--since", "notify": "--notify",
+	} {
+		if fs.Lookup(flagName) != nil && !strings.Contains(table, want) {
+			t.Errorf("the README task table has no row for scan %s", want)
+		}
 	}
 }
