@@ -3,7 +3,7 @@ module github.com/RhythmShahriar/tuner
 go 1.27.3
 
 require (
-	github.com/RhythmShahriar/rhythm v0.1.0
+	github.com/RhythmShahriar/rhythm v0.5.0
 	github.com/charmbracelet/huh v1.0.0
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/term v0.2.2
@@ -33,6 +33,6 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/sync v0.15.0 // indirect
-	golang.org/x/sys v0.36.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.23.0 // indirect
 )
