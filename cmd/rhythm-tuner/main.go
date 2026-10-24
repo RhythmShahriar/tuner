@@ -92,8 +92,8 @@ Checks:
       --checks <dir>       load checks from a directory
       --no-check-updates   use the built-in checks, not the latest check pack
       --no-vulns           skip known-vulnerability matching
-      --offline            use cached vulnerability data and check pack only,
-                           and skip the update check (RHYTHM_OFFLINE=1 skips it too)
+      --offline            use cached vulnerability data and check pack only;
+                           no update check either (RHYTHM_OFFLINE=1 skips it too)
 
 Requests:
       --rate <n>           max requests per second per site (default 5)
