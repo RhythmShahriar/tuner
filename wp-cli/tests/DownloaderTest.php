@@ -28,6 +28,33 @@ class DownloaderTest extends TestCase {
 		$this->assertNull( Downloader::checksumFor( $sums, 'missing' ) );
 	}
 
+	public function test_rejects_a_version_that_is_not_a_release() {
+		foreach ( array( '../../../escaped', '1.2', '0.4.0/../x', 'latest-ish', '' ) as $bad ) {
+			$fetched = array();
+			$d       = new Downloader(
+				array(
+					'version'   => $bad,
+					'cache_dir' => $this->cache,
+					'platform'  => new Platform( 'Linux', 'x86_64' ),
+					'fetch'     => function ( $url ) use ( &$fetched ) {
+						$fetched[] = $url;
+						return null;
+					},
+				)
+			);
+			try {
+				$d->ensure();
+				$this->fail( "accepted version $bad" );
+			} catch ( \RuntimeException $e ) {
+				$this->assertStringContainsString( '--version must be latest or a release such as 0.4.0', $e->getMessage() );
+			}
+			$this->assertSame( array(), $fetched, "fetched for version $bad" );
+			$this->assertFileDoesNotExist( $this->cache . '/escaped' );
+		}
+		$this->assertTrue( Downloader::validVersion( '0.4.0' ) );
+		$this->assertTrue( Downloader::validVersion( '1.2.3-rc.1' ) );
+	}
+
 	public function test_downloads_and_extracts_verified_binary() {
 		$release = $this->fakeRelease( 'tuner body v1' );
 		$calls   = array();

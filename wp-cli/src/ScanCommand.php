@@ -190,25 +190,39 @@ class ScanCommand {
 
 	/** runBinary runs rhythm-tuner and captures stdout, stderr and the code. */
 	private static function runBinary( $binary, array $scanArgs ) {
-		$descriptors = array(
-			1 => array( 'pipe', 'w' ),
-			2 => array( 'pipe', 'w' ),
-		);
-		$cmd = array_merge( array( $binary ), $scanArgs );
-		$proc = proc_open( self::quote( $cmd ), $descriptors, $pipes );
-		if ( ! is_resource( $proc ) ) {
+		$result = self::run( array_merge( array( $binary ), $scanArgs ) );
+		if ( null === $result ) {
 			WP_CLI::error( "couldn't run $binary" );
 		}
-		$stdout = stream_get_contents( $pipes[1] );
-		$stderr = stream_get_contents( $pipes[2] );
-		fclose( $pipes[1] );
-		fclose( $pipes[2] );
-		$code = proc_close( $proc );
-		return array( 'stdout' => $stdout, 'stderr' => $stderr, 'code' => $code );
+		return $result;
 	}
 
-	private static function quote( array $argv ) {
-		return implode( ' ', array_map( 'escapeshellarg', $argv ) );
+	/**
+	 * run runs argv without a shell and returns its stdout, stderr and
+	 * exit code, or null when it can't start. stderr goes to a temporary
+	 * file: with both on pipes, a child that fills the stderr pipe while
+	 * this side still reads stdout would block both processes.
+	 */
+	public static function run( array $argv ) {
+		$errFile = tempnam( sys_get_temp_dir(), 'tuner-stderr-' );
+		if ( false === $errFile ) {
+			return null;
+		}
+		$descriptors = array(
+			1 => array( 'pipe', 'w' ),
+			2 => array( 'file', $errFile, 'w' ),
+		);
+		$proc = proc_open( $argv, $descriptors, $pipes );
+		if ( ! is_resource( $proc ) ) {
+			unlink( $errFile );
+			return null;
+		}
+		$stdout = stream_get_contents( $pipes[1] );
+		fclose( $pipes[1] );
+		$code   = proc_close( $proc );
+		$stderr = (string) file_get_contents( $errFile );
+		unlink( $errFile );
+		return array( 'stdout' => $stdout, 'stderr' => $stderr, 'code' => $code );
 	}
 
 	/**

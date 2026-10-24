@@ -145,6 +145,11 @@ class Downloader {
 	 */
 	private function resolveVersion() {
 		if ( 'latest' !== $this->version ) {
+			if ( ! self::validVersion( $this->version ) ) {
+				// The version names a folder in the cache and part of the
+				// download URL, so it can't hold a path.
+				throw new \RuntimeException( sprintf( '--version must be latest or a release such as 0.4.0, not %s', json_encode( $this->version ) ) );
+			}
 			return $this->version;
 		}
 		if ( '' !== $this->baseUrl ) {
@@ -155,10 +160,18 @@ class Downloader {
 			throw new \RuntimeException( "couldn't find Tuner's latest release" );
 		}
 		$data = json_decode( $body, true );
-		if ( ! isset( $data['tag_name'] ) || ! preg_match( '/^v?([0-9][0-9A-Za-z.\-]*)$/', $data['tag_name'], $m ) ) {
+		if ( ! isset( $data['tag_name'] ) || ! preg_match( '/^v?(.*)$/', $data['tag_name'], $m ) || ! self::validVersion( $m[1] ) ) {
 			throw new \RuntimeException( "couldn't read Tuner's latest release tag" );
 		}
 		return $m[1];
+	}
+
+	/**
+	 * validVersion reports whether v is a release version such as 0.4.0
+	 * or 1.2.3-rc.1, without a leading v.
+	 */
+	public static function validVersion( $v ) {
+		return 1 === preg_match( '/^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$/', (string) $v );
 	}
 
 	private function must( $url, $name ) {

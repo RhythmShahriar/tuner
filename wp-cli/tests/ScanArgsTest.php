@@ -9,6 +9,16 @@ use RhythmShahriar\Tuner\ScanCommand;
 
 class ScanArgsTest extends TestCase {
 
+	public function test_run_survives_a_full_stderr() {
+		// More than a pipe buffer on stderr while stdout is still open.
+		$code   = 'fwrite(STDERR, str_repeat("e", 300000)); echo "{\"ok\":true}"; exit(3);';
+		$result = ScanCommand::run( array( PHP_BINARY, '-r', $code ) );
+		$this->assertNotNull( $result );
+		$this->assertSame( '{"ok":true}', $result['stdout'] );
+		$this->assertSame( 300000, strlen( $result['stderr'] ) );
+		$this->assertSame( 3, $result['code'] );
+	}
+
 	public function test_defaults() {
 		$argv = ScanCommand::buildScanArgs( '/var/www/html', array() );
 		$this->assertSame(
