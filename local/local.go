@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package local scans a site's files in place (white-box mode). Run on the
 // server against the document root, it reads exact versions instead of
 // guessing them from the outside: PHP from the php binary, WordPress core,

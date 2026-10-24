@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
 # Publishes checks/ as a check pack on the rolling checks-latest release,
 # so new checks reach users without a new binary. rhythm-tuner downloads
 # the pack (see checkpack/ and https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Check-Packs), verifies its checksums and

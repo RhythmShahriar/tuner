@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package matchers evaluates check conditions against an HTTP response.
 package matchers
 

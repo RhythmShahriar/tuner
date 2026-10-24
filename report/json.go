@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package report renders scan results for people and machines.
 package report
 

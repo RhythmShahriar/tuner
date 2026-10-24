@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package checkpack lets checks update like data. CI publishes the checks/
 // tree as a "check pack" (a tar.gz, a manifest and a checksum file) on the
 // rolling checks-latest release, and Tuner fetches it, verifies it, and uses

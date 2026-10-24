@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
 positive:
   - name: phpinfo with php_serialize and upload progress on
     routes:

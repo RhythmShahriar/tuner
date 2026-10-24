@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
 id: tls-legacy-protocol
 name: Obsolete TLS 1.0/1.1 accepted
 severity: medium

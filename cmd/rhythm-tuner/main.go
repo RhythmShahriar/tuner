@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // rhythm-tuner is the Tuner binary, normally run as `rhythm tuner`.
 package main
 

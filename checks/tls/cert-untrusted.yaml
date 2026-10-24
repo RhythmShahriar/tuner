@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
 id: tls-cert-untrusted
 name: TLS certificate not trusted
 severity: high

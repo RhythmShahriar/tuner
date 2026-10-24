@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // packbuild builds the check pack release assets from checks/. CI and
 // `make pack` both run it, so a local build matches the published one byte
 // for byte given the same commit:

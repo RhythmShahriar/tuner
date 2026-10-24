@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
 id: php-session-upload-progress
 name: phpinfo() shows settings exposed to CVE-2026-115560
 severity: medium
