@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"net/http"
@@ -40,12 +41,20 @@ func source(minTuner string, files map[string]string) fstest.MapFS {
 	return fsys
 }
 
+// testKey signs the packs the fake releases serve; otherKey is a key the
+// clients don't trust.
+var (
+	testKey  = ed25519.NewKeyFromSeed(bytes.Repeat([]byte{1}, ed25519.SeedSize))
+	otherKey = ed25519.NewKeyFromSeed(bytes.Repeat([]byte{2}, ed25519.SeedSize))
+)
+
 func build(t *testing.T, src fstest.MapFS, created time.Time) map[string][]byte {
 	t.Helper()
 	b, err := Build(src, "abc1234def", created)
 	if err != nil {
 		t.Fatal(err)
 	}
+	b.Sign(testKey)
 	return b.Files
 }
 
@@ -99,14 +108,19 @@ func (r *release) total() int {
 }
 
 func (r *release) client(dir string) *Client {
-	return &Client{BaseURL: r.URL + "/checks-latest", CacheDir: dir, Tuner: "0.3.0", UserAgent: "test"}
+	return &Client{
+		BaseURL: r.URL + "/checks-latest", CacheDir: dir, Tuner: "0.3.0", UserAgent: "test",
+		Keys: []ed25519.PublicKey{testKey.Public().(ed25519.PublicKey)},
+	}
 }
 
-// withSums recomputes the checksum file, as a careless or malicious
-// publisher who controls every asset would.
+// withSums recomputes and re-signs the checksum file, as a broken CI run
+// or someone holding the signing key would. The checks after the
+// signature must hold even then.
 func withSums(files map[string][]byte) map[string][]byte {
 	files[SumsName] = fmt.Appendf(nil, "%s  %s\n%s  %s\n",
 		sum(files[ArchiveName]), ArchiveName, sum(files[ManifestName]), ManifestName)
+	files[SigName] = Sign(files[SumsName], testKey)
 	return files
 }
 

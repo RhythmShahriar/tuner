@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"net/http"
@@ -64,10 +65,16 @@ func loadCheckSet(dir string, updates, offline bool, ua string, proxy *url.URL) 
 	// Short: an unreachable release must not hold up every scan.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	p, err := packClient(ua, proxy, offline, false).Get(ctx)
+	pc := packClient(ua, proxy, offline, false)
+	if pc.Insecure {
+		set.warnings = append(set.warnings, insecureWarning)
+	}
+	p, err := pc.Get(ctx)
 	switch {
-	case errors.Is(err, checkpack.ErrNotCached):
-		return set, nil // offline and nothing cached: expected, not worth a warning
+	case errors.Is(err, checkpack.ErrNotCached), errors.Is(err, checkpack.ErrNoTrustedKeys):
+		// Offline and nothing cached, or a build without a signing key
+		// (a fork or a dev build): expected, not worth a warning.
+		return set, nil
 	case err != nil:
 		set.warnings = append(set.warnings, fmt.Sprintf("check pack: %v; using built-in checks", err))
 		return set, nil
@@ -81,8 +88,18 @@ func loadCheckSet(dir string, updates, offline bool, ua string, proxy *url.URL) 
 	return set, nil
 }
 
+// insecureWarning is shown on every run with TUNER_CHECKS_INSECURE=1, so
+// the bypass can't be left on and forgotten.
+const insecureWarning = "TUNER_CHECKS_INSECURE=1: check pack signatures are not verified; use it only for a pack you build yourself"
+
+// packKeys overrides the pack signing keys compiled into checkpack, for
+// tests; nil means the embedded keys.
+var packKeys []ed25519.PublicKey
+
 // packClient builds the check pack client. Like vulnClient, it goes
-// through the scan's proxy.
+// through the scan's proxy. A mirror set with TUNER_CHECKS_URL still has
+// to serve packs signed by a trusted key; TUNER_CHECKS_INSECURE=1 is the
+// only way around that.
 func packClient(ua string, proxy *url.URL, offline, force bool) *checkpack.Client {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	if proxy != nil {
@@ -96,5 +113,26 @@ func packClient(ua string, proxy *url.URL, offline, force bool) *checkpack.Clien
 		Offline:   offline,
 		Force:     force,
 		Tuner:     version,
+		Keys:      packKeys,
+		Insecure:  os.Getenv("TUNER_CHECKS_INSECURE") == "1",
+		BuiltIn:   builtInIDs(),
 	}
+}
+
+// builtInIDs lists the checks compiled into this binary, which a pack must
+// keep or retire. A build with uncommitted changes never uses a pack, so
+// a check author's new check doesn't make every pack look short of one.
+func builtInIDs() []string {
+	if checkpack.CurrentBuild().Modified {
+		return nil
+	}
+	all, err := engine.LoadChecks(checks.FS)
+	if err != nil {
+		return nil
+	}
+	ids := make([]string, len(all))
+	for i, c := range all {
+		ids[i] = c.ID
+	}
+	return ids
 }

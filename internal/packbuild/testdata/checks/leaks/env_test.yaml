@@ -1,0 +1,8 @@
+positive:
+  - name: readable
+    routes:
+      /.env: {body: "A=1\n"}
+negative:
+  - name: blocked
+    routes:
+      /.env: {status: 403}

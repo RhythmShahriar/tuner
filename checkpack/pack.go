@@ -2,15 +2,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package checkpack lets checks update like data. CI publishes the checks/
-// tree as a "check pack" (a tar.gz, a manifest and a checksum file) on the
-// rolling checks-latest release, and Tuner fetches it, verifies it, and uses
-// it in place of the checks compiled into the binary when it is newer.
+// tree as a "check pack" (a tar.gz, a manifest, a checksum file and its
+// signature) on the rolling checks-latest release, and Tuner fetches it,
+// verifies it, and uses it in place of the checks compiled into the binary
+// when it is newer.
 //
 // A pack is only ever data: declarative YAML checks that make GET requests
-// to the scanned site and match the replies. It is checked against its
-// sha256 sums, unpacked in memory with strict limits, and loaded with
+// to the scanned site and match the replies. Its sha256 sums file is
+// signed with an Ed25519 key whose public half is compiled into Tuner (see
+// keys.go), so a pack can only come from CI, not from whoever can upload
+// release assets or run a mirror. The archive is checked against the
+// signed sums, unpacked in memory with strict limits, and loaded with
 // engine.LoadChecks, which rejects unknown fields; that is how an older
-// binary refuses a pack that relies on matchers it doesn't have.
+// binary refuses a pack that relies on matchers it doesn't have. A pack
+// must also carry every built-in check unless its manifest retires it, so
+// a smaller pack cannot quietly drop coverage.
 package checkpack
 
 import (
@@ -18,6 +24,7 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -71,9 +78,11 @@ type Manifest struct {
 	Created  time.Time `json:"created"`   // that commit's time; orders packs and builds
 	MinTuner string    `json:"min_tuner"` // oldest rhythm-tuner that can run these checks
 	Checks   int       `json:"checks"`
+	Retired  []string  `json:"retired,omitempty"` // check IDs removed on purpose; older binaries still have them built in
 }
 
-// Built is a pack ready to publish: the three release assets.
+// Built is a pack ready to publish: the release assets, and the
+// signature once Sign has run.
 type Built struct {
 	Manifest Manifest
 	Files    map[string][]byte // asset name → contents
@@ -98,6 +107,12 @@ func Build(src fs.FS, commit string, created time.Time) (*Built, error) {
 		Created:  created,
 		MinTuner: cfg.MinTuner,
 		Checks:   len(loaded),
+		Retired:  cfg.Retired,
+	}
+	for _, c := range loaded {
+		if slices.Contains(cfg.Retired, c.ID) {
+			return nil, fmt.Errorf("%s: %s is retired but %s still defines it", ConfigName, c.ID, c.File)
+		}
 	}
 
 	// The checks themselves and the LICENSE that covers them; fixtures
@@ -152,8 +167,14 @@ func Build(src fs.FS, commit string, created time.Time) (*Built, error) {
 	}}, nil
 }
 
+// Sign adds the signature of the checksum file, made with key.
+func (b *Built) Sign(key ed25519.PrivateKey) {
+	b.Files[SigName] = Sign(b.Files[SumsName], key)
+}
+
 type config struct {
-	MinTuner string `json:"min_tuner"`
+	MinTuner string   `json:"min_tuner"`
+	Retired  []string `json:"retired"` // IDs deleted from checks/; see Manifest.Retired
 }
 
 func readConfig(src fs.FS) (config, error) {
@@ -170,6 +191,8 @@ func readConfig(src fs.FS) (config, error) {
 	if !semver.MatchString(cfg.MinTuner) {
 		return cfg, fmt.Errorf("%s: min_tuner %q: want a version like 0.3.0", ConfigName, cfg.MinTuner)
 	}
+	slices.Sort(cfg.Retired)
+	cfg.Retired = slices.Compact(cfg.Retired)
 	return cfg, nil
 }
 
@@ -215,6 +238,27 @@ func Open(m Manifest, archive []byte, tuner string) (fs.FS, []*engine.Check, err
 		return nil, nil, fmt.Errorf("%w: manifest lists %d checks, archive has %d", ErrRejected, m.Checks, len(loaded))
 	}
 	return fsys, loaded, nil
+}
+
+// Covers rejects a pack that lacks a check this binary has built in,
+// unless the manifest retires it. Without this a pack with fewer checks,
+// by mistake or by tampering, would silently scan less than the binary.
+func (m Manifest) Covers(loaded []*engine.Check, builtIn []string) error {
+	have := map[string]bool{}
+	for _, c := range loaded {
+		have[c.ID] = true
+	}
+	var missing []string
+	for _, id := range builtIn {
+		if !have[id] && !slices.Contains(m.Retired, id) {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("%w: pack %s lacks built-in checks %s and does not retire them",
+			ErrRejected, m.Version, strings.Join(missing, ", "))
+	}
+	return nil
 }
 
 // extract unpacks a tar.gz into memory. Only regular files with clean,

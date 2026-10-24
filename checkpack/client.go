@@ -5,6 +5,7 @@ package checkpack
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -41,6 +42,16 @@ type Client struct {
 	Offline   bool          // never fetch; use the cached pack however old
 	Force     bool          // always consult the release (rhythm tuner update)
 	Tuner     string        // the running version, checked against min_tuner
+
+	// Keys verify the signature on the checksum file; nil means the keys
+	// compiled into this build.
+	Keys []ed25519.PublicKey
+	// Insecure skips the signature check, for private forks that publish
+	// their own packs (TUNER_CHECKS_INSECURE=1). Checksums still apply.
+	Insecure bool
+	// BuiltIn lists the IDs of the binary's own checks. A pack must carry
+	// each one or retire it in its manifest.
+	BuiltIn []string
 }
 
 // Pack is a verified pack, ready to scan with.
@@ -64,12 +75,26 @@ func DefaultCacheDir() string {
 
 // state is the cache file. The archive lives inside it so the pack and its
 // manifest are replaced in one atomic write.
+//
+// The signed sums travel with the archive, so the signature is checked
+// again on every use: a key removed from a later build stops trusting a
+// pack cached under it.
 type state struct {
 	Checked  time.Time `json:"checked"`
 	Rejected string    `json:"rejected,omitempty"` // the newest pack, when this binary can't use it
 	Manifest *Manifest `json:"manifest,omitempty"`
 	SHA256   string    `json:"sha256,omitempty"`
+	Sums     []byte    `json:"sums,omitempty"` // checks-sha256.txt as signed
+	Sig      []byte    `json:"sig,omitempty"`  // its signature
 	Archive  []byte    `json:"archive,omitempty"`
+}
+
+// keep copies the pack part of st, if any, into a new state.
+func (st *state) keep(next *state) *state {
+	if st != nil {
+		next.Manifest, next.SHA256, next.Sums, next.Sig, next.Archive = st.Manifest, st.SHA256, st.Sums, st.Sig, st.Archive
+	}
+	return next
 }
 
 // Get returns the pack to use. It errors only when there is no usable pack
@@ -79,9 +104,24 @@ func (c *Client) Get(ctx context.Context) (*Pack, error) {
 	if c.TTL <= 0 {
 		c.TTL = DefaultTTL
 	}
+	if c.Keys == nil {
+		keys, err := TrustedKeys()
+		if err != nil {
+			return nil, err
+		}
+		c.Keys = keys
+	}
+	if len(c.Keys) == 0 && !c.Insecure {
+		return nil, ErrNoTrustedKeys
+	}
 	st := c.load()
 	if st != nil && (c.Offline || (!c.Force && time.Since(st.Checked) < c.TTL)) {
-		return c.open(st)
+		p, err := c.open(st)
+		// A pack cached before packs were signed, or under a key this
+		// build no longer trusts, is replaced rather than kept for a day.
+		if c.Offline || !errors.Is(err, errSignature) {
+			return p, err
+		}
 	}
 	if c.Offline {
 		return nil, ErrNotCached
@@ -95,18 +135,15 @@ func (c *Client) Get(ctx context.Context) (*Pack, error) {
 	case errors.Is(err, ErrRejected):
 		// Remember the verdict so every scan doesn't download the same
 		// pack again; keep the last good one.
-		keep := &state{Checked: time.Now().UTC(), Rejected: err.Error()}
-		if st != nil {
-			keep.Manifest, keep.SHA256, keep.Archive = st.Manifest, st.SHA256, st.Archive
-		}
+		keep := st.keep(&state{Checked: time.Now().UTC(), Rejected: err.Error()})
 		_ = c.save(keep)
 		if p, perr := c.open(keep); perr == nil {
 			return p, nil
 		}
 		return nil, err
 	}
-	// Network or checksum trouble: maybe the release is mid-upload, so
-	// fall back to the cache without recording a check, and retry next run.
+	// Network, checksum or signature trouble: maybe the release is
+	// mid-upload, so fall back to the cache without recording a check, and retry next run.
 	if st != nil {
 		if p, perr := c.open(st); perr == nil {
 			p.Stale, p.Warning = true, fmt.Errorf("couldn't refresh the check pack: %w", err)
@@ -116,13 +153,23 @@ func (c *Client) Get(ctx context.Context) (*Pack, error) {
 	return nil, err
 }
 
-// fetch consults the release and returns the state to cache. The small
-// manifest is checked first, so an incompatible or unchanged pack costs
-// two tiny downloads rather than the archive.
+// fetch consults the release and returns the state to cache. The
+// signature is checked before anything in the sums is believed, and the
+// small manifest before the archive, so an incompatible or unchanged pack
+// costs three tiny downloads rather than the archive.
 func (c *Client) fetch(ctx context.Context, st *state) (*state, error) {
 	rawSums, err := c.get(ctx, SumsName, maxSmall)
 	if err != nil {
 		return nil, err
+	}
+	var sig []byte
+	if !c.Insecure {
+		if sig, err = c.get(ctx, SigName, maxSmall); err != nil {
+			return nil, fmt.Errorf("%w: %w", errSignature, err)
+		}
+		if err := verifySig(rawSums, sig, c.Keys); err != nil {
+			return nil, err
+		}
 	}
 	sums := parseSums(rawSums)
 	rawManifest, err := c.get(ctx, ManifestName, maxSmall)
@@ -140,8 +187,13 @@ func (c *Client) fetch(ctx context.Context, st *state) (*state, error) {
 		return nil, err
 	}
 	now := time.Now().UTC()
+	next := &state{Checked: now, Manifest: &m, Sums: rawSums, Sig: sig}
 	if st != nil && len(st.Archive) > 0 && st.SHA256 == sums[ArchiveName] {
-		return &state{Checked: now, Manifest: &m, SHA256: st.SHA256, Archive: st.Archive}, nil
+		next.SHA256, next.Archive = st.SHA256, st.Archive
+		if _, err := c.verified(next); err != nil {
+			return nil, err
+		}
+		return next, nil
 	}
 
 	archive, err := c.get(ctx, ArchiveName, maxArchive)
@@ -151,14 +203,45 @@ func (c *Client) fetch(ctx context.Context, st *state) (*state, error) {
 	if err := verify(sums, ArchiveName, archive); err != nil {
 		return nil, err
 	}
-	if _, _, err := Open(m, archive, c.Tuner); err != nil {
+	next.SHA256, next.Archive = sum(archive), archive
+	if _, err := c.verified(next); err != nil {
 		return nil, err
 	}
-	return &state{Checked: now, Manifest: &m, SHA256: sum(archive), Archive: archive}, nil
+	return next, nil
 }
 
-// open verifies and loads a cached pack. It runs on every use, not just
-// after download: the binary may have changed since the pack was cached.
+// verified checks a pack's signature and contents and loads its checks.
+// It runs on every use, not just after download: the binary, and with it
+// the trusted keys and built-in checks, may have changed since the pack
+// was cached.
+func (c *Client) verified(st *state) (*opened, error) {
+	if sum(st.Archive) != st.SHA256 {
+		return nil, errors.New("cached check pack is corrupt")
+	}
+	if !c.Insecure {
+		if err := verifySig(st.Sums, st.Sig, c.Keys); err != nil {
+			return nil, err
+		}
+		if parseSums(st.Sums)[ArchiveName] != st.SHA256 {
+			return nil, fmt.Errorf("%w: %s does not list this archive", errSignature, SumsName)
+		}
+	}
+	fsys, loaded, err := Open(*st.Manifest, st.Archive, c.Tuner)
+	if err != nil {
+		return nil, err
+	}
+	if err := st.Manifest.Covers(loaded, c.BuiltIn); err != nil {
+		return nil, err
+	}
+	return &opened{fsys, loaded}, nil
+}
+
+type opened struct {
+	fsys   fs.FS
+	loaded []*engine.Check
+}
+
+// open verifies and loads a cached pack.
 func (c *Client) open(st *state) (*Pack, error) {
 	if st.Manifest == nil || len(st.Archive) == 0 {
 		if st.Rejected != "" {
@@ -166,15 +249,12 @@ func (c *Client) open(st *state) (*Pack, error) {
 		}
 		return nil, ErrNotCached
 	}
-	if sum(st.Archive) != st.SHA256 {
-		return nil, errors.New("cached check pack is corrupt")
-	}
-	fsys, loaded, err := Open(*st.Manifest, st.Archive, c.Tuner)
+	o, err := c.verified(st)
 	if err != nil {
 		return nil, err
 	}
 	p := &Pack{
-		Manifest: *st.Manifest, FS: fsys, Loaded: loaded, Checked: st.Checked,
+		Manifest: *st.Manifest, FS: o.fsys, Loaded: o.loaded, Checked: st.Checked,
 		Stale: time.Since(st.Checked) > c.TTL,
 	}
 	if st.Rejected != "" {
