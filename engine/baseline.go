@@ -41,8 +41,11 @@ func probePath(p, token string) string {
 // proved what r holds, so its hit only counts as noise when the probe
 // passes the same tests: a catch-all that serves env-like lines for every
 // path. Comparing sizes instead would drop a real 78-byte .env next to an
-// 80-byte "Not found" page. Status- and header-only checks have no such
-// proof and fall back to comparing the two pages.
+// 80-byte "Not found" page. It is noise too when the two pages are the
+// same apart from the path they echo, such as "Index of /backup/" from a
+// server that answers "Index of <path>" for every path: a pattern that
+// names the path can't tell those apart. Status- and header-only checks
+// have no such proof and fall back to comparing the two pages.
 func (ss *session) isBaseline(ctx context.Context, c *Check, p string, r *matchers.Response) bool {
 	probe := probePath(p, ss.token)
 	b, err := ss.get(ctx, "GET", probe)
@@ -51,9 +54,15 @@ func (ss *session) isBaseline(ctx context.Context, c *Check, p string, r *matche
 	}
 	if c.Match.Content() {
 		ok, _ := c.Match.Match(b, func() bool { return false })
-		return ok
+		return ok || echoesPath(r, p, b, probe)
 	}
 	return similar(r, p, b, probe)
+}
+
+// echoesPath reports whether two responses are byte for byte the same once
+// each one's requested path is taken out of its body.
+func echoesPath(a *matchers.Response, ap string, b *matchers.Response, bp string) bool {
+	return a.Status == b.Status && bytes.Equal(bytes.ReplaceAll(a.Body, []byte(ap), nil), bytes.ReplaceAll(b.Body, []byte(bp), nil))
 }
 
 // soft404 reports whether the server answers 200 for a missing page.
@@ -80,11 +89,11 @@ func similar(a *matchers.Response, ap string, b *matchers.Response, bp string) b
 	if a.Status != b.Status {
 		return false
 	}
-	x := bytes.ReplaceAll(a.Body, []byte(ap), nil)
-	y := bytes.ReplaceAll(b.Body, []byte(bp), nil)
-	if bytes.Equal(x, y) {
+	if echoesPath(a, ap, b, bp) {
 		return true
 	}
+	x := bytes.ReplaceAll(a.Body, []byte(ap), nil)
+	y := bytes.ReplaceAll(b.Body, []byte(bp), nil)
 	if len(a.Body) >= maxBody || len(b.Body) >= maxBody {
 		return sha256.Sum256(x[:min(len(x), headSize)]) == sha256.Sum256(y[:min(len(y), headSize)])
 	}

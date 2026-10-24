@@ -91,6 +91,27 @@ func TestSoftFourOhFourFiltersEnvLikeCatchAll(t *testing.T) {
 	}
 }
 
+// A pattern that names the path ("Index of /backup/") can't prove a page
+// that echoes every path it is asked for; the page minus the path is the
+// same as the probe's, so it is filtered. A real listing next to that
+// catch-all is still reported.
+func TestSoftFourOhFourFiltersPathEchoCatchAll(t *testing.T) {
+	echo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("<html><head><title>Index of " + r.URL.Path + "</title></head></html>"))
+	}))
+	defer echo.Close()
+	if got := scanFindings(t, echo, shippedCheck(t, "leak-staging-listing")); len(got) != 0 {
+		t.Errorf("path-echo catch-all: findings %+v", got)
+	}
+
+	listing := "<html><head><title>Index of /old/</title></head><body><pre><a href=\"../\">../</a>\n<a href=\"wp-config.php\">wp-config.php</a></pre></body></html>"
+	srv := catchAll(map[string]string{"/old/": listing}, "<html><head><title>Index of /</title></head></html>")
+	defer srv.Close()
+	if got := scanFindings(t, srv, shippedCheck(t, "leak-staging-listing")); len(got) != 1 || got[0].Path != "/old/" {
+		t.Errorf("real listing: findings %+v", got)
+	}
+}
+
 func TestSoftFourOhFourHugeCatchAll(t *testing.T) {
 	statusOnly := mustParse(t, `
 id: t-status
