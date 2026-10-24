@@ -19,18 +19,27 @@ const (
 // merge combines WPVulnerability's record with Wordfence's advisories for
 // the same component. An advisory both list is kept once: they are the
 // same when they share a CVE or, without one, have the same title and
-// affected range. The merged advisory keeps WPVulnerability's range,
-// gains the other's CVEs and references, takes the higher CVSS score and
-// credits both sources. rec is not changed: it may be a cached copy.
+// affected range, and their ranges overlap. The merged advisory keeps
+// WPVulnerability's ID, widens its range to cover both, gains the other's
+// CVEs and references, takes the higher CVSS score and credits both
+// sources. rec is not changed: it may be a cached copy.
+//
+// The feed lists one advisory per affected range, all with the same ID
+// and CVE. Each is matched against WPVulnerability's advisories only, never
+// against another range of the same record, and a range that doesn't
+// overlap stays its own advisory: folding it in would hide the versions
+// only the feed lists.
 func merge(rec *Record, wf []Vuln) *Record {
 	out := *rec
-	out.Vulns = make([]Vuln, len(rec.Vulns), len(rec.Vulns)+len(wf))
+	n := len(rec.Vulns)
+	out.Vulns = make([]Vuln, n, n+len(wf))
 	for i, v := range rec.Vulns {
 		v.Sources = []string{SourceWPVulnerability}
 		out.Vulns[i] = v
 	}
 	for _, w := range wf {
-		if i := slices.IndexFunc(out.Vulns, func(v Vuln) bool { return sameAdvisory(v, w) }); i >= 0 {
+		match := func(v Vuln) bool { return sameAdvisory(v, w) && overlaps(v, w) }
+		if i := slices.IndexFunc(out.Vulns[:n], match); i >= 0 {
 			out.Vulns[i] = combine(out.Vulns[i], w)
 		} else {
 			out.Vulns = append(out.Vulns, w)
@@ -58,8 +67,74 @@ func normTitle(s string) string {
 	return strings.Join(strings.FieldsFunc(strings.ToLower(s), func(r rune) bool { return !keep(r) }), " ")
 }
 
-// combine folds b into a, which keeps its ID, title and range.
+// bounds returns v's affected range as a lower and an upper bound, each
+// "" when open. An "eq" bound pins both ends to one version.
+func bounds(v Vuln) (lo, loOp, hi, hiOp string) {
+	lo, loOp, hi, hiOp = v.Min, v.MinOp, v.Max, v.MaxOp
+	if loOp == "eq" {
+		hi, hiOp = lo, "le"
+	}
+	if hiOp == "eq" {
+		if lo == "" {
+			lo, loOp = hi, "ge"
+		}
+		hiOp = "le"
+	}
+	if loOp == "eq" {
+		loOp = "ge"
+	}
+	return lo, loOp, hi, hiOp
+}
+
+// below reports whether some version is at or above lo and at or below hi.
+func below(lo, loOp, hi, hiOp string) bool {
+	if lo == "" || hi == "" {
+		return true
+	}
+	c := Compare(lo, hi)
+	return c < 0 || c == 0 && loOp != "gt" && hiOp != "lt"
+}
+
+// overlaps reports whether a and b share an affected version.
+func overlaps(a, b Vuln) bool {
+	alo, aloOp, ahi, ahiOp := bounds(a)
+	blo, bloOp, bhi, bhiOp := bounds(b)
+	return below(alo, aloOp, bhi, bhiOp) && below(blo, bloOp, ahi, ahiOp)
+}
+
+// widen sets a's range to the smallest one that holds both a and b, so a
+// version either source calls affected stays affected.
+func widen(a, b Vuln) Vuln {
+	alo, aloOp, ahi, ahiOp := bounds(a)
+	blo, bloOp, bhi, bhiOp := bounds(b)
+	switch c := Compare(blo, alo); {
+	case alo == "" || blo == "":
+		alo, aloOp = "", ""
+	case c < 0 || c == 0 && bloOp == "ge":
+		alo, aloOp = blo, bloOp
+	}
+	switch c := Compare(bhi, ahi); {
+	case ahi == "":
+	case bhi == "":
+		ahi, ahiOp, a.Unfixed = "", "", b.Unfixed
+	case c > 0 || c == 0 && bhiOp == "le":
+		ahi, ahiOp, a.Unfixed = bhi, bhiOp, b.Unfixed
+	}
+	a.Min, a.MinOp, a.Max, a.MaxOp = alo, aloOp, ahi, ahiOp
+	return a
+}
+
+// bounded reports whether v lists an affected range at all. Core records
+// and some feed entries don't: their range is unknown, not every version.
+func bounded(v Vuln) bool { return v.Min != "" || v.Max != "" }
+
+// combine folds b into a, which keeps its ID and title. When both list a
+// range, a's widens to cover b's; an unknown range never replaces a known
+// one.
 func combine(a, b Vuln) Vuln {
+	if bounded(a) && bounded(b) {
+		a = widen(a, b)
+	}
 	a.CVEs = union(a.CVEs, b.CVEs)
 	a.References = union(a.References, b.References)
 	if len(a.References) > 6 {

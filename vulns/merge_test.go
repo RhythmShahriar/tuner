@@ -49,3 +49,59 @@ func TestMerge(t *testing.T) {
 		t.Errorf("lower score won: %+v", v)
 	}
 }
+
+// TestMergeKeepsEveryRange covers a feed record with two affected ranges
+// for one CVE: no range may be folded away.
+func TestMergeKeepsEveryRange(t *testing.T) {
+	wf := []Vuln{
+		{ID: "f1", CVEs: []string{"CVE-2024-1"}, Min: "1.0", MinOp: "ge", Max: "1.5", MaxOp: "lt", Sources: []string{SourceWordfence}},
+		{ID: "f1", CVEs: []string{"CVE-2024-1"}, Min: "2.0", MinOp: "ge", Max: "2.3", MaxOp: "lt", Sources: []string{SourceWordfence}},
+	}
+	affected := func(r *Record, v string) bool {
+		return slices.ContainsFunc(r.Vulns, func(x Vuln) bool { return x.Affects(v) })
+	}
+	for name, rec := range map[string]*Record{
+		"feed only": {Vulns: []Vuln{}},
+		"one range listed": {Vulns: []Vuln{
+			{ID: "w1", CVEs: []string{"CVE-2024-1"}, Min: "1.0", MinOp: "ge", Max: "1.5", MaxOp: "lt"},
+		}},
+		"wider range listed": {Vulns: []Vuln{
+			{ID: "w1", CVEs: []string{"CVE-2024-1"}, Max: "1.4", MaxOp: "le"},
+		}},
+	} {
+		got := merge(rec, wf)
+		for _, v := range []string{"1.0", "1.4.5", "2.0", "2.1", "2.2.9"} {
+			if !affected(got, v) {
+				t.Errorf("%s: %s not affected: %+v", name, v, got.Vulns)
+			}
+		}
+		for _, v := range []string{"1.5", "1.9", "2.3"} {
+			if affected(got, v) {
+				t.Errorf("%s: %s affected: %+v", name, v, got.Vulns)
+			}
+		}
+		if len(got.Vulns) != 2 {
+			t.Errorf("%s: want 2 advisories, got %+v", name, got.Vulns)
+		}
+	}
+}
+
+// TestMergeNegative checks that a matching advisory is still kept once
+// and that ranges which don't touch stay apart.
+func TestMergeNegative(t *testing.T) {
+	rec := &Record{Vulns: []Vuln{{ID: "w1", CVEs: []string{"CVE-1"}, Max: "2.0", MaxOp: "lt"}}}
+	same := merge(rec, []Vuln{{ID: "f1", CVEs: []string{"CVE-1"}, Max: "1.9", MaxOp: "le", Sources: []string{SourceWordfence}}})
+	if len(same.Vulns) != 1 || same.Vulns[0].Max != "2.0" || same.Vulns[0].FixedIn() != "2.0" {
+		t.Errorf("same flaw: %+v", same.Vulns)
+	}
+	apart := merge(rec, []Vuln{{ID: "f1", CVEs: []string{"CVE-1"}, Min: "2.0", MinOp: "ge", Max: "3.0", MaxOp: "lt", Sources: []string{SourceWordfence}}})
+	if len(apart.Vulns) != 2 || apart.Vulns[1].ID != "f1" {
+		t.Errorf("separate range: %+v", apart.Vulns)
+	}
+	if overlaps(Vuln{Max: "2.0", MaxOp: "lt"}, Vuln{Min: "2.0", MinOp: "ge"}) || !overlaps(Vuln{Max: "2.0", MaxOp: "le"}, Vuln{Min: "2.0", MinOp: "ge"}) {
+		t.Error("touching bounds")
+	}
+	if !overlaps(Vuln{Max: "1.2", MaxOp: "eq"}, Vuln{Min: "1.0", MinOp: "ge", Max: "1.5", MaxOp: "lt"}) || overlaps(Vuln{Max: "1.2", MaxOp: "eq"}, Vuln{Min: "1.3", MinOp: "ge"}) {
+		t.Error("eq bound")
+	}
+}
