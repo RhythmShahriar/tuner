@@ -26,12 +26,18 @@ import (
 	"github.com/RhythmShahriar/tuner/vulns/osv"
 )
 
-const updateUsage = `Usage:
-  rhythm tuner update                  refresh everything cached
-  rhythm tuner update --prefetch <target>...
-                                       cache what scans of these sites need
-  rhythm tuner update --clear          delete the cached check pack and data
+// updateUsage is update --help, laid out for the name Tuner was started
+// as like checksUsage.
+func updateUsage() string {
+	name := cmdName()
+	return "Usage:\n" + formatUsage([]usageLine{
+		{cmd: name + " update", summary: "refresh everything cached"},
+		{cmd: name + " update --prefetch <target>...", summary: "cache what scans of these sites need"},
+		{cmd: name + " update --clear", summary: "delete the cached check pack and data"},
+	}) + named(updateHelp)
+}
 
+const updateHelp = `
 Refreshes the check pack and the cached vulnerability data now. Scans also
 refresh both on their own once they are a day old.
 
@@ -61,7 +67,7 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 	pos, err := cli.ParseInterspersed(flags, args)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			fmt.Fprint(stdout, named(updateUsage))
+			fmt.Fprint(stdout, updateUsage())
 			return exitOK
 		}
 		fmt.Fprintf(stderr, "rhythm tuner: %s\nrun 'rhythm tuner update --help' for its flags\n", updateFlagError(err, flags))

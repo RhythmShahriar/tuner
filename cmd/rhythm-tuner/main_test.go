@@ -1292,6 +1292,28 @@ func TestCommandName(t *testing.T) {
 	}
 }
 
+// checks and update help line their summaries up in one column under any
+// name, including a summary wrapped below a long command.
+func TestSubcommandUsageColumns(t *testing.T) {
+	old := argv0
+	defer func() { argv0 = old }()
+	argv0 = "/usr/local/bin/rhythm-tuner"
+	for _, name := range []string{"rt", "rhythm tuner", ""} {
+		t.Setenv(invokedAsEnv, name)
+		for _, page := range [][]string{{"checks", "--help"}, {"update", "--help"}} {
+			_, out, _ := tuner(t, page...)
+			block, _, _ := strings.Cut(strings.TrimPrefix(out, "Usage:\n"), "\n\n")
+			for _, summary := range []string{"write a new check", "write checks as Nuclei", "refresh everything", "cache what scans", "delete the cached"} {
+				for line := range strings.Lines(block) {
+					if i := strings.Index(line, summary); i >= 0 && i != usageCmdWidth+3 {
+						t.Errorf("%q %v: %q starts at column %d, want %d:\n%s", name, page, summary, i, usageCmdWidth+3, block)
+					}
+				}
+			}
+		}
+	}
+}
+
 // The users' N7 table: each mistake gets one line that says what to type,
 // not the whole help. Each exits 2.
 func TestFriendlyUsageErrors(t *testing.T) {

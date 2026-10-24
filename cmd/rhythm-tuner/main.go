@@ -141,6 +141,10 @@ func formatUsage(lines []usageLine) string {
 	indent := strings.Repeat(" ", usageCmdWidth+3)
 	var b strings.Builder
 	for _, l := range lines {
+		if l.summary == "" {
+			fmt.Fprintf(&b, "  %s\n", l.cmd)
+			continue
+		}
 		summary := wrapWords(l.summary, usageWidth-len(indent))
 		if len(l.cmd) > usageCmdWidth {
 			fmt.Fprintf(&b, "  %s\n", l.cmd)

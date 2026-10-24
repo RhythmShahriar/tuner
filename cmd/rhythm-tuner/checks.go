@@ -56,10 +56,10 @@ func listChecks(args []string, stdout, stderr io.Writer) int {
 	flags.BoolVar(&noUpdates, "no-check-updates", false, "")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			fmt.Fprint(stdout, named(checksUsage))
+			fmt.Fprint(stdout, checksUsage())
 			return exitOK
 		}
-		fmt.Fprintf(stderr, "rhythm tuner: %v\n\n%s", err, checksUsage)
+		fmt.Fprintf(stderr, "rhythm tuner: %v\n\n%s", err, checksUsage())
 		return exitUsage
 	}
 
@@ -121,14 +121,20 @@ func listChecks(args []string, stdout, stderr io.Writer) int {
 	return exitOK
 }
 
-const checksUsage = `Usage:
-  rhythm tuner checks [flags]
-  rhythm tuner checks new <id> [dir]   write a new check and its fixtures
-  rhythm tuner checks test [dir]       run checks against their fixtures
-  rhythm tuner checks lint [dir]       check checks against the house rules
-  rhythm tuner checks export --nuclei <dir>
-                                       write checks as Nuclei templates
+// checksUsage is checks --help. The Usage list is laid out for the name
+// Tuner was started as, so its summaries line up under any name.
+func checksUsage() string {
+	name := cmdName()
+	return "Usage:\n" + formatUsage([]usageLine{
+		{cmd: name + " checks [flags]"},
+		{cmd: name + " checks new <id> [dir]", summary: "write a new check and its fixtures"},
+		{cmd: name + " checks test [dir]", summary: "run checks against their fixtures"},
+		{cmd: name + " checks lint [dir]", summary: "check checks against the house rules"},
+		{cmd: name + " checks export --nuclei <dir>", summary: "write checks as Nuclei templates"},
+	}) + named(checksHelp)
+}
 
+const checksHelp = `
 Lists the checks a scan with the same flags would run. Unlike scan, it
 lists every check unless --profile picks one. test and lint read the
 built-in checks when no directory is given; neither needs Go.
