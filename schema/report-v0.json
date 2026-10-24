@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/RhythmShahriar/tuner/master/schema/report-v0.json",
+  "title": "rhythm-tuner JSON report",
+  "description": "What rhythm-tuner scan --json writes. One target gives a Report object; several targets (or --json-array) give an array of Report and TargetError entries. Schema rhythm-tuner/v0 may still change before v1.0; new optional fields can appear in any release, so validators should allow unknown properties.",
+  "anyOf": [
+    { "$ref": "#/$defs/Report" },
+    {
+      "type": "array",
+      "items": { "anyOf": [{ "$ref": "#/$defs/Report" }, { "$ref": "#/$defs/TargetError" }] }
+    }
+  ],
+  "$defs": {
+    "Severity": {
+      "type": "string",
+      "enum": ["critical", "high", "medium", "low", "info"]
+    },
+    "Report": {
+      "description": "One target's results.",
+      "type": "object",
+      "required": ["schema", "tool", "version", "duration_ms", "summary", "baselined", "complete",
+        "target", "fingerprint", "soft_404", "score", "checks", "requests", "errors", "throttled", "findings"],
+      "properties": {
+        "schema": { "type": "string", "enum": ["rhythm-tuner/v0"] },
+        "tool": { "type": "string", "enum": ["rhythm-tuner"] },
+        "version": { "type": "string", "description": "The rhythm-tuner version that wrote the report." },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "summary": {
+          "description": "Findings per severity. Every severity is present, 0 when there are none.",
+          "type": "object",
+          "required": ["critical", "high", "medium", "low", "info"],
+          "properties": {
+            "critical": { "type": "integer", "minimum": 0 },
+            "high": { "type": "integer", "minimum": 0 },
+            "medium": { "type": "integer", "minimum": 0 },
+            "low": { "type": "integer", "minimum": 0 },
+            "info": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "check_set": { "type": "string", "enum": ["built-in", "pack", "directory"] },
+        "check_pack": { "type": "string", "description": "The check pack's version, when check_set is pack." },
+        "baselined": { "type": "integer", "minimum": 0, "description": "Findings a --baseline file hid." },
+        "complete": { "type": "boolean", "description": "False when the scan stopped early or was blocked, so findings may be missing." },
+        "stopped_by": {
+          "type": "string",
+          "description": "Why the scan stopped early: interrupted, max-time, waf, home-status or budget. Other values may be added."
+        },
+        "blocked_by": { "type": "string", "description": "The firewall that challenged the scan, e.g. cloudflare or sucuri." },
+        "vuln_data": { "type": "string", "enum": ["ok", "partial", "missing", "off"] },
+        "target": { "type": "string" },
+        "fingerprint": { "$ref": "#/$defs/Fingerprint" },
+        "soft_404": { "type": "boolean" },
+        "tls": { "$ref": "#/$defs/TLS" },
+        "score": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "checks": { "type": "integer", "minimum": 0 },
+        "requests": { "type": "integer", "minimum": 0 },
+        "errors": { "type": "integer", "minimum": 0 },
+        "throttled": { "type": "integer", "minimum": 0 },
+        "findings": { "type": "array", "items": { "$ref": "#/$defs/Finding" } },
+        "warnings": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "TargetError": {
+      "description": "A target that could not be scanned. Array output lists these after the reports.",
+      "type": "object",
+      "required": ["target", "error"],
+      "properties": {
+        "target": { "type": "string" },
+        "error": { "type": "string" }
+      }
+    },
+    "Finding": {
+      "type": "object",
+      "required": ["id", "title", "severity", "confidence", "target", "url", "path", "evidence", "fingerprint"],
+      "properties": {
+        "id": { "type": "string", "description": "The check or advisor ID, e.g. leak-dotenv or vuln-plugin-contact-form-7." },
+        "title": { "type": "string" },
+        "severity": { "$ref": "#/$defs/Severity" },
+        "confidence": { "type": "string", "enum": ["high", "low"], "description": "high is confirmed, low is likely." },
+        "caveat": { "type": "string", "description": "Why confidence is low." },
+        "target": { "type": "string" },
+        "url": { "type": "string", "description": "Where the finding is: an http(s) URL, or a file:// URL for local scans." },
+        "path": { "type": "string", "description": "The URL path, or for local scans the path inside the scanned folder." },
+        "line": { "type": "integer", "minimum": 1, "description": "1-based line in a local file, when known." },
+        "evidence": { "$ref": "#/$defs/Evidence" },
+        "impact": { "type": "string" },
+        "fix": { "type": "string" },
+        "fixes": {
+          "type": "object",
+          "description": "Server-specific fix snippets keyed by server, e.g. nginx or apache.",
+          "additionalProperties": { "type": "string" }
+        },
+        "references": { "type": "array", "items": { "type": "string" } },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "advisories": { "type": "array", "items": { "$ref": "#/$defs/Advisory" } },
+        "source": { "type": "string", "description": "The vulnerability data provider, for attribution." },
+        "fingerprint": {
+          "type": "string",
+          "description": "Stable key for the finding: the same check at the same place has the same fingerprint on every run, on any host and in any folder.",
+          "pattern": "^v1:[0-9a-f]{32}$"
+        }
+      }
+    },
+    "Evidence": {
+      "description": "Why a finding fired. Secrets are always masked.",
+      "type": "object",
+      "required": ["request", "status"],
+      "properties": {
+        "request": { "type": "string" },
+        "status": { "type": "integer" },
+        "matched": { "type": "array", "items": { "type": "string" } },
+        "secrets": { "type": "array", "items": { "$ref": "#/$defs/Secret" } }
+      }
+    },
+    "Secret": {
+      "type": "object",
+      "required": ["kind", "masked"],
+      "properties": {
+        "kind": { "type": "string" },
+        "name": { "type": "string" },
+        "masked": { "type": "string" }
+      }
+    },
+    "Advisory": {
+      "description": "One known vulnerability behind a vuln-* finding.",
+      "type": "object",
+      "required": ["id", "title"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "cves": { "type": "array", "items": { "type": "string" } },
+        "severity": { "$ref": "#/$defs/Severity" },
+        "cvss": { "type": "number", "minimum": 0, "maximum": 10 },
+        "kev": { "type": "boolean", "description": "Known to be exploited (CISA KEV)." },
+        "fixed_in": { "type": "string" },
+        "references": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "Fingerprint": {
+      "description": "What the scan learned about the target.",
+      "type": "object",
+      "required": ["tech"],
+      "properties": {
+        "tech": { "type": ["array", "null"], "items": { "type": "string" } },
+        "wordpress_version": { "type": "string" },
+        "php_version": { "type": "string" },
+        "php_build": { "type": "string" },
+        "php_source": { "type": "string" },
+        "server": { "type": "string" },
+        "components": { "type": "array", "items": { "$ref": "#/$defs/Component" } }
+      }
+    },
+    "Component": {
+      "type": "object",
+      "required": ["type", "slug"],
+      "properties": {
+        "type": { "type": "string", "enum": ["plugin", "theme"] },
+        "slug": { "type": "string" },
+        "version": { "type": "string" },
+        "version_source": { "type": "string" },
+        "found_by": { "type": "array", "items": { "type": "string" } },
+        "confidence": { "type": "string" }
+      }
+    },
+    "TLS": {
+      "type": "object",
+      "required": ["version", "not_after"],
+      "properties": {
+        "version": { "type": "string" },
+        "not_after": { "type": "string", "format": "date-time" },
+        "verify_error": { "type": "string" },
+        "legacy": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

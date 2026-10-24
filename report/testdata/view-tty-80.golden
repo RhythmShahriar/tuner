@@ -1,0 +1,46 @@
+
+  CRITICAL  1 ────────────────────────────────────────────────────────────
+
+ ▌  CRITICAL   .env file exposed                                    /.env
+ ▌             DB_PASSWORD=...
+ ▌             → Move it above the web root, or block dotfiles in the
+ ▌               server config, then rotate every secret in it.
+
+  HIGH  2 ────────────────────────────────────────────────────────────────
+
+ ▌  HIGH       Keys and salts are the sample placeholders  /wp-config.php
+ ▌             → Generate fresh keys at
+ ▌               https://api.wordpress.org/secret-key/1.1/salt/?a-very-long-query-that-keeps-going-past-the-edge
+ ▌               and paste them into wp-config.php.
+
+ ▌  HIGH       PHP 8.1.2: 3 known vulnerabilities
+ ▌             ~ likely: a distro build may already include the fix
+ ▌             HIGH CVE-2024-1 one
+ ▌             HIGH CVE-2024-2 two
+ ▌             MEDIUM CVE-2024-3 three
+ ▌             …and 1 more
+ ▌             → Upgrade PHP to a supported release.
+
+  MEDIUM  1 ──────────────────────────────────────────────────────────────
+
+ ▌  MEDIUM     WordPress debug mode is on                  /wp-config.php
+ ▌             → Turn off WP_DEBUG_LOG on production or point it outside
+ ▌               the web root (see report)
+
+  LOW  1 ─────────────────────────────────────────────────────────────────
+
+    ●  XML-RPC enabled                                        /xmlrpc.php
+
+  INFO  1 ────────────────────────────────────────────────────────────────
+
+    ·  No Referrer-Policy header
+
+ ╭────────────────────────────────────────────────────────────────────╮
+ │  TUNE SCORE                                              12 / 100  │
+ │  ███████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  │
+ │  ✖ 1 critical   ▲ 2 high   ■ 1 medium   ● 1 low   · 1 info         │
+ ╰────────────────────────────────────────────────────────────────────╯
+  40 checks · 61 requests · 0s
+
+  → full report: rhythm tuner scan https://a.test -o report.md
+

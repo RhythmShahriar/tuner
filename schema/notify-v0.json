@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/RhythmShahriar/tuner/master/schema/notify-v0.json",
+  "title": "rhythm-tuner notification",
+  "description": "What rhythm-tuner scan --notify webhook+https://... posts: the findings that are new since the --since report, at or above --notify-min. No evidence or response bodies are included and anything that looks like a secret is masked. Schema rhythm-tuner-notify/v0 may still change before v1.0; new optional fields can appear in any release, so validators should allow unknown properties.",
+  "type": "object",
+  "required": ["schema", "tool", "version", "min_severity", "summary", "counts", "targets", "findings"],
+  "properties": {
+    "schema": { "type": "string", "enum": ["rhythm-tuner-notify/v0"] },
+    "tool": { "type": "string", "enum": ["rhythm-tuner"] },
+    "version": { "type": "string", "description": "The rhythm-tuner version that sent it." },
+    "since": { "type": "string", "description": "File name of the earlier report the scan was compared with. Absent on a first run (--notify-all-first), when every finding counts as new." },
+    "min_severity": { "$ref": "#/$defs/Severity" },
+    "summary": { "type": "string", "description": "One line, e.g. \"Tuner: 3 new findings (2 critical, 1 high) on a.test\"." },
+    "counts": {
+      "description": "New findings per severity. Every severity is present, 0 when there are none.",
+      "type": "object",
+      "required": ["critical", "high", "medium", "low", "info"],
+      "properties": {
+        "critical": { "type": "integer", "minimum": 0 },
+        "high": { "type": "integer", "minimum": 0 },
+        "medium": { "type": "integer", "minimum": 0 },
+        "low": { "type": "integer", "minimum": 0 },
+        "info": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "targets": { "type": "array", "items": { "type": "string" }, "description": "Targets with new findings, in scan order." },
+    "findings": { "type": "array", "items": { "$ref": "#/$defs/Item" } },
+    "incomplete": { "type": "array", "items": { "type": "string" }, "description": "Present when the scan did not finish or lacked vulnerability data: its notes, e.g. \"Incomplete: stopped by --max-time\", with the target in front for a batch. Findings it did not reach are not listed." }
+  },
+  "$defs": {
+    "Severity": { "type": "string", "enum": ["critical", "high", "medium", "low", "info"] },
+    "Item": {
+      "type": "object",
+      "required": ["target", "fingerprint", "id", "title", "severity", "confidence", "location"],
+      "properties": {
+        "target": { "type": "string" },
+        "fingerprint": { "type": "string", "pattern": "^v1:[0-9a-f]{32}$", "description": "The finding's fingerprint, the same as in the JSON report." },
+        "id": { "type": "string", "description": "Check ID." },
+        "title": { "type": "string" },
+        "severity": { "$ref": "#/$defs/Severity" },
+        "was": { "$ref": "#/$defs/Severity", "description": "The severity in the earlier report, when the change of severity is what made it new." },
+        "confidence": { "type": "string" },
+        "location": { "type": "string", "description": "The finding's URL, or its path inside the scanned folder for a local scan." },
+        "new_advisories": { "type": "array", "items": { "type": "string" }, "description": "CVE or advisory IDs the earlier report did not have." },
+        "fix": { "type": "string" }
+      }
+    }
+  }
+}

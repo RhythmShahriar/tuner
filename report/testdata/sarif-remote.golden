@@ -1,0 +1,249 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "rhythm-tuner",
+          "version": "0.4.0",
+          "informationUri": "https://rythm.sh/tuner",
+          "rules": [
+            {
+              "id": "local-wp-debug",
+              "name": "local-wp-debug",
+              "shortDescription": {
+                "text": "WordPress debug mode is on"
+              },
+              "help": {
+                "text": "Turn off WP_DEBUG_LOG on production or point it outside the web root:\n\n    define( 'WP_DEBUG_LOG', false );"
+              },
+              "helpUri": "https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Finding-Reference#local-findings",
+              "properties": {
+                "security-severity": "5.5",
+                "tags": [
+                  "security"
+                ]
+              }
+            },
+            {
+              "id": "xmlrpc",
+              "name": "xmlrpc",
+              "shortDescription": {
+                "text": "XML-RPC enabled"
+              },
+              "help": {
+                "text": "Block xmlrpc.php in the server config."
+              },
+              "helpUri": "https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Finding-Reference#xmlrpc",
+              "properties": {
+                "security-severity": "3.0",
+                "tags": [
+                  "security"
+                ]
+              }
+            },
+            {
+              "id": "leak-dotenv",
+              "name": "leak-dotenv",
+              "shortDescription": {
+                "text": ".env file exposed"
+              },
+              "help": {
+                "text": "Move it above the web root, or block dotfiles in the server config, then rotate every secret in it."
+              },
+              "helpUri": "https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Finding-Reference#leak-dotenv",
+              "properties": {
+                "security-severity": "9.5",
+                "tags": [
+                  "security"
+                ]
+              }
+            },
+            {
+              "id": "local-wp-salts",
+              "name": "local-wp-salts",
+              "shortDescription": {
+                "text": "Keys and salts are the sample placeholders"
+              },
+              "help": {
+                "text": "Generate fresh keys at https://api.wordpress.org/secret-key/1.1/salt/?a-very-long-query-that-keeps-going-past-the-edge and paste them into wp-config.php."
+              },
+              "helpUri": "https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Finding-Reference#local-findings",
+              "properties": {
+                "security-severity": "8.0",
+                "tags": [
+                  "security"
+                ]
+              }
+            },
+            {
+              "id": "vuln-php",
+              "name": "vuln-php",
+              "shortDescription": {
+                "text": "PHP 8.1.2: 3 known vulnerabilities"
+              },
+              "help": {
+                "text": "Upgrade PHP to a supported release."
+              },
+              "helpUri": "https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Finding-Reference#vulnerability-and-version-findings",
+              "properties": {
+                "security-severity": "8.0",
+                "tags": [
+                  "security"
+                ]
+              }
+            },
+            {
+              "id": "hdr-referrer-policy-missing",
+              "name": "hdr-referrer-policy-missing",
+              "shortDescription": {
+                "text": "No Referrer-Policy header"
+              },
+              "helpUri": "https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Finding-Reference#hdr-referrer-policy-missing",
+              "properties": {
+                "security-severity": "0.0",
+                "tags": [
+                  "security"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "invocations": [
+        {
+          "executionSuccessful": true
+        }
+      ],
+      "originalUriBaseIds": {
+        "SRCROOT": {
+          "uri": "file:///tmp/ci/wp/"
+        }
+      },
+      "results": [
+        {
+          "ruleId": "local-wp-debug",
+          "level": "warning",
+          "message": {
+            "text": "WordPress debug mode is on at /wp-config.php"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "wp-config.php",
+                  "uriBaseId": "SRCROOT"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "tunerFinding/v1": "v1:0bba99c8653cf5c349906355fbee02d8"
+          }
+        },
+        {
+          "ruleId": "xmlrpc",
+          "level": "note",
+          "message": {
+            "text": "XML-RPC enabled at https://a.test/xmlrpc.php"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "https://a.test/xmlrpc.php"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "tunerFinding/v1": "v1:ac92cd7550d4cb26325f2699b4f17847"
+          }
+        },
+        {
+          "ruleId": "leak-dotenv",
+          "level": "error",
+          "message": {
+            "text": ".env file exposed at https://a.test/.env (DB_PASSWORD=...)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "https://a.test/.env"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "tunerFinding/v1": "v1:efd3d5b510718fdc28d6b705068c79c4"
+          }
+        },
+        {
+          "ruleId": "local-wp-salts",
+          "level": "error",
+          "message": {
+            "text": "Keys and salts are the sample placeholders at /wp-config.php"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "wp-config.php",
+                  "uriBaseId": "SRCROOT"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "tunerFinding/v1": "v1:c6790ec32eafbeba9dc5b782cf9fa02d"
+          }
+        },
+        {
+          "ruleId": "vuln-php",
+          "level": "error",
+          "message": {
+            "text": "PHP 8.1.2: 3 known vulnerabilities at https://a.test/ (HIGH CVE-2024-1 one; HIGH CVE-2024-2 two; MEDIUM CVE-2024-3 three)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "https://a.test/"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "tunerFinding/v1": "v1:adb0f78cff109033ad3c2a08e0c77b0f"
+          },
+          "properties": {
+            "advisories": 4,
+            "cves": null,
+            "source": ""
+          }
+        },
+        {
+          "ruleId": "hdr-referrer-policy-missing",
+          "level": "note",
+          "message": {
+            "text": "No Referrer-Policy header at https://a.test/"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "https://a.test/"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "tunerFinding/v1": "v1:b783112c2cbf5e4488fef3f2c21fa2c7"
+          }
+        }
+      ]
+    }
+  ]
+}

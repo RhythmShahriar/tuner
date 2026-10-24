@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:">
+<meta name="referrer" content="no-referrer">
+<meta name="generator" content="rhythm-tuner {{.Version}}">
+<title>{{.Title}}</title>
+<style>
+:root {
+  --bg: #f6f6f4; --card: #ffffff; --text: #1b1b1f; --muted: #5f5f6b; --line: #e2e2dd;
+  --critical: #b3261e; --high: #c2570c; --medium: #9a6b00; --low: #2f5f9e; --info: #5f5f6b;
+  --good: #1e7a46; --fair: #9a6b00; --poor: #b3261e; --new: #6b3fa0;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #131316; --card: #1c1c21; --text: #ececf1; --muted: #a2a2ad; --line: #2e2e36;
+    --critical: #ff6b61; --high: #ff9a4d; --medium: #e6b84a; --low: #7aa7e6; --info: #a2a2ad;
+    --good: #5ccf8b; --fair: #e6b84a; --poor: #ff6b61; --new: #b48cf0;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
+header.page { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+header.page img { max-height: 56px; max-width: 200px; }
+h1 { font-size: 26px; margin: 0; }
+h2 { font-size: 21px; margin: 0 0 4px; overflow-wrap: anywhere; }
+h3 { font-size: 16px; margin: 24px 0 8px; text-transform: uppercase; letter-spacing: .04em; }
+h4 { font-size: 16px; margin: 0 0 6px; overflow-wrap: anywhere; }
+.muted { color: var(--muted); }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 20px; margin: 16px 0; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
+th { color: var(--muted); font-weight: 600; }
+.score { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 12px 0; }
+.score b { font-size: 40px; line-height: 1; }
+.good { color: var(--good); } .fair { color: var(--fair); } .poor { color: var(--poor); }
+.up { color: var(--good); } .down { color: var(--poor); } .same { color: var(--muted); }
+.counts { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 0; padding: 0; list-style: none; }
+.counts li { border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; font-size: 13px; }
+.notes { border-left: 4px solid var(--high); padding: 8px 12px; margin: 12px 0; background: var(--bg); }
+.notes p { margin: 2px 0; }
+.sev { display: inline-block; min-width: 76px; text-align: center; border-radius: 4px; padding: 1px 6px; font-size: 12px; font-weight: 700; color: #fff; }
+.sev.likely { background: transparent !important; border: 1px solid currentColor; }
+.sev-critical { background: var(--critical); color: #fff; } .sev.likely.sev-critical { color: var(--critical); }
+.sev-high { background: var(--high); } .sev.likely.sev-high { color: var(--high); }
+.sev-medium { background: var(--medium); } .sev.likely.sev-medium { color: var(--medium); }
+.sev-low { background: var(--low); } .sev.likely.sev-low { color: var(--low); }
+.sev-info { background: var(--info); } .sev.likely.sev-info { color: var(--info); }
+.new { display: inline-block; border-radius: 4px; padding: 0 6px; font-size: 12px; font-weight: 700; color: #fff; background: var(--new); }
+article.finding { border-top: 1px solid var(--line); padding: 14px 0; }
+article.finding:first-of-type { border-top: 0; }
+.where { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; overflow-wrap: anywhere; }
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+code { overflow-wrap: anywhere; }
+pre { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 0; }
+ul.evidence { margin: 6px 0; padding-left: 18px; }
+.fix { margin-top: 10px; }
+.fix strong { display: block; }
+a { color: inherit; }
+footer { margin-top: 32px; font-size: 13px; color: var(--muted); }
+@media print {
+  body { background: #fff; }
+  .card { border: 0; padding: 0; break-inside: auto; }
+  article.finding { break-inside: avoid; }
+  a { text-decoration: none; }
+}
+</style>
+</head>
+<body>
+<main>
+<header class="page">
+{{- if .Logo}}
+<img src="{{.Logo}}" alt="{{.Brand}}">
+{{- end}}
+<div>
+<h1>{{.Title}}</h1>
+<p class="muted">{{if .Brand}}Prepared by {{.Brand}} with {{else}}Made with {{end}}rhythm-tuner {{.Version}}{{if .SinceName}} · compared with {{.SinceName}}{{end}}</p>
+</div>
+</header>
+{{- if .Overview}}
+<section class="card">
+<h2>Overview</h2>
+<table>
+<thead><tr><th>Site</th><th>Score</th><th>Critical</th><th>High</th><th>Medium</th><th>Low</th><th>Info</th>{{if .SinceName}}<th>New</th>{{end}}</tr></thead>
+<tbody>
+{{- range .Sites}}
+<tr><td><a href="#{{.Anchor}}">{{.Target}}</a></td><td class="{{.ScoreClass}}">{{.Score}}{{if .Trend}} <span class="{{.TrendClass}}">{{.TrendShort}}</span>{{end}}</td>{{range .Counts}}<td>{{.N}}</td>{{end}}{{if $.SinceName}}<td>{{.New}}</td>{{end}}</tr>
+{{- end}}
+{{- range .Failed}}
+<tr><td>{{.Target}}</td><td colspan="{{if $.SinceName}}7{{else}}6{{end}}" class="muted">not scanned: {{.Error}}</td></tr>
+{{- end}}
+</tbody>
+</table>
+</section>
+{{- end}}
+{{- range .Sites}}
+<section class="card" id="{{.Anchor}}">
+<h2>{{.Target}}</h2>
+<p class="muted">{{.Fingerprint}} · {{.Checks}} checks · {{.Requests}} requests</p>
+{{- if .Notes}}
+<div class="notes">
+{{- range .Notes}}
+<p>{{.}}</p>
+{{- end}}
+</div>
+{{- end}}
+<div class="score"><b class="{{.ScoreClass}}">{{.Score}}</b><span class="muted">/ 100 tune score</span>{{if .Trend}}<span class="{{.TrendClass}}">{{.Trend}}</span>{{end}}{{if .Baselined}}<span class="muted">after baseline ({{.Baselined}} hidden)</span>{{end}}</div>
+<ul class="counts">
+{{- range .Counts}}
+<li><span class="sev sev-{{.Severity}}">{{upper .Severity}}</span> {{.N}}</li>
+{{- end}}
+{{- if .Compared}}
+<li><span class="new">NEW</span> {{.New}}</li>
+{{- end}}
+</ul>
+{{- if .Components}}
+<details>
+<summary>Plugins and themes ({{len .Components}})</summary>
+<table>
+<thead><tr><th>Type</th><th>Slug</th><th>Version</th><th>Source</th></tr></thead>
+<tbody>
+{{- range .Components}}
+<tr><td>{{.Type}}</td><td>{{.Slug}}</td><td>{{.Version}}</td><td>{{.Source}}</td></tr>
+{{- end}}
+</tbody>
+</table>
+</details>
+{{- end}}
+{{- if not .Groups}}
+<p>Nothing out of tune.</p>
+{{- end}}
+{{- range .Groups}}
+<h3>{{upper .Severity}} ({{len .Findings}})</h3>
+{{- range .Findings}}
+<article class="finding">
+<h4><span class="sev sev-{{.Severity}}{{if eq .Confidence "low"}} likely{{end}}">{{upper .Severity}}{{if eq .Confidence "low"}}, LIKELY{{end}}</span> {{if .New}}<span class="new">NEW</span> {{end}}{{.Title}}{{if .Was}} <span class="muted">(was {{.Was}})</span>{{end}}</h4>
+<div class="where">{{.Place}}</div>
+<p class="muted">Check <code>{{.ID}}</code> · confidence {{.Confidence}}</p>
+{{- if .Caveat}}
+<p><strong>Why only likely:</strong> {{.Caveat}}</p>
+{{- end}}
+{{- if or .Status .Matched .Secrets}}
+<ul class="evidence">
+{{- if .Status}}
+<li>Request: <code>{{.Request}}</code> → {{.Status}}</li>
+{{- end}}
+{{- range .Matched}}
+<li>Evidence: <code>{{.}}</code></li>
+{{- end}}
+{{- range .Secrets}}
+<li>Secret (masked): <code>{{.}}</code></li>
+{{- end}}
+</ul>
+{{- end}}
+{{- if .Impact}}
+<p>{{.Impact}}</p>
+{{- end}}
+{{- if .Advisories}}
+<table>
+<thead><tr><th>Severity</th><th>CVE</th><th>Advisory</th><th>Fixed in</th></tr></thead>
+<tbody>
+{{- range .Advisories}}
+<tr><td>{{.Severity}}</td><td>{{.CVEs}}</td><td>{{if .New}}<span class="new">NEW</span> {{end}}{{if .Title.Href}}<a href="{{.Title.Href}}" rel="noopener noreferrer">{{.Title.Text}}</a>{{else}}{{.Title.Text}}{{end}}{{if .KEV}} <strong>actively exploited</strong>{{end}}</td><td>{{.FixedIn}}</td></tr>
+{{- end}}
+</tbody>
+</table>
+{{- end}}
+{{- if .Source}}
+<p class="muted">Data: {{.Source}}</p>
+{{- end}}
+{{- if .Fix}}
+<div class="fix"><strong>Fix</strong><pre>{{.Fix}}</pre></div>
+{{- end}}
+{{- if .References}}
+<ul class="evidence">
+{{- range .References}}
+<li>{{if .Href}}<a href="{{.Href}}" rel="noopener noreferrer">{{.Text}}</a>{{else}}{{.Text}}{{end}}</li>
+{{- end}}
+</ul>
+{{- end}}
+</article>
+{{- end}}
+{{- end}}
+{{- if .Fixed}}
+<h3>Fixed since {{$.SinceName}} ({{len .Fixed}})</h3>
+<ul class="evidence">
+{{- range .Fixed}}
+<li><span class="sev sev-{{.Severity}}">{{upper .Severity}}</span> {{.Title}} <span class="where">{{.Place}}</span></li>
+{{- end}}
+</ul>
+{{- end}}
+</section>
+{{- end}}
+{{- if and .Failed (not .Overview)}}
+<section class="card">
+<h2>Not scanned</h2>
+<table>
+<thead><tr><th>Target</th><th>Error</th></tr></thead>
+<tbody>
+{{- range .Failed}}
+<tr><td>{{.Target}}</td><td>{{.Error}}</td></tr>
+{{- end}}
+</tbody>
+</table>
+</section>
+{{- end}}
+<footer>A clean report means none of Tuner's checks found a problem. It is not proof that a site is secure.</footer>
+</main>
+</body>
+</html>

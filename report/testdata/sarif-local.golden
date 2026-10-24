@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "rhythm-tuner",
+          "version": "0.4.0",
+          "informationUri": "https://rythm.sh/tuner",
+          "rules": [
+            {
+              "id": "local-wp-debug",
+              "name": "local-wp-debug",
+              "shortDescription": {
+                "text": "WordPress debug mode is on"
+              },
+              "help": {
+                "text": "Turn it off."
+              },
+              "helpUri": "https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Finding-Reference#local-findings",
+              "properties": {
+                "security-severity": "5.5",
+                "tags": [
+                  "security"
+                ]
+              }
+            },
+            {
+              "id": "local-env-file",
+              "name": "local-env-file",
+              "shortDescription": {
+                "text": ".env file in the web root"
+              },
+              "helpUri": "https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Finding-Reference#local-findings",
+              "properties": {
+                "security-severity": "8.0",
+                "tags": [
+                  "security"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "invocations": [
+        {
+          "executionSuccessful": true
+        }
+      ],
+      "originalUriBaseIds": {
+        "SRCROOT": {
+          "uri": "file:///tmp/ci/wp/"
+        }
+      },
+      "results": [
+        {
+          "ruleId": "local-wp-debug",
+          "level": "warning",
+          "message": {
+            "text": "WordPress debug mode is on at /wp-config.php"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "wp-config.php",
+                  "uriBaseId": "SRCROOT"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "tunerFinding/v1": "v1:0bba99c8653cf5c349906355fbee02d8"
+          }
+        },
+        {
+          "ruleId": "local-env-file",
+          "level": "error",
+          "message": {
+            "text": ".env file in the web root at /app one/.env (2 secrets)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "app%20one/.env",
+                  "uriBaseId": "SRCROOT"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "tunerFinding/v1": "v1:b7cf939867c212084ec4554f388ef684"
+          },
+          "properties": {
+            "secrets": [
+              "DB_PASSWORD=hu****42"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
