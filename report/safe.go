@@ -98,9 +98,9 @@ func SafeLink(text, target string) string {
 		return label
 	}
 	u.User = nil
-	// url.String leaves these as they are; each would end the link early
-	// or start markup inside it.
-	href := strings.NewReplacer("(", "%28", ")", "%29", "<", "%3C", ">", "%3E", " ", "%20", "`", "%60", "\\", "%5C", "[", "%5B", "]", "%5D").
+	// url.String leaves these as they are; each would end the link early,
+	// start markup inside it or split a table cell.
+	href := strings.NewReplacer("(", "%28", ")", "%29", "<", "%3C", ">", "%3E", " ", "%20", "`", "%60", "\\", "%5C", "[", "%5B", "]", "%5D", "|", "%7C").
 		Replace(SafeText(u.String()))
 	return "[" + label + "](" + href + ")"
 }

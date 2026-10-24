@@ -93,6 +93,7 @@ func TestSafeLink(t *testing.T) {
 		{"ftp", "ftp://a.test/f", "ftp"},
 		{"paren", "https://a.test/a)(b", "[paren](https://a.test/a%29%28b)"},
 		{"user", "https://admin:pw@a.test/", "[user](https://a.test/)"},
+		{"t", "https://ref.test/?q=|evil|cell|", "[t](https://ref.test/?q=%7Cevil%7Ccell%7C)"}, // a table cell stays one cell
 		{"[evil](javascript:x)", "https://a.test/", `[\[evil\]\(javascript:x\)](https://a.test/)`},
 	} {
 		if got := SafeLink(tc.text, tc.href); got != tc.want {
