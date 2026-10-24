@@ -112,6 +112,9 @@ func TestRunBaselineAndIgnores(t *testing.T) {
 		if shown != 0 || tg.Suppressed != 1 || len(out.Reports[0].Findings) != 0 || out.Reports[0].Score != 100 {
 			t.Errorf("%s: shown %d, suppressed %d, report %+v", name, shown, tg.Suppressed, out.Reports[0])
 		}
+		if want := len(p.Ignores); tg.Ignored != want {
+			t.Errorf("%s: ignored %d, want %d", name, tg.Ignored, want)
+		}
 		if code, _ := out.Exit(p); code != ExitOK {
 			t.Errorf("%s: exit %d", name, code)
 		}

@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -1490,6 +1491,34 @@ func TestConfigTargetsGetNoCommandLineCredentials(t *testing.T) {
 	}
 	if v, _ := leaked.Load().(string); v != "from-config" {
 		t.Errorf("config header sent as %q", v)
+	}
+}
+
+// The ignore entries and baseline a .tuner.yml brings are counted on
+// stderr even under -q and machine output: an untrusted file could hide
+// every finding from --fail-on.
+func TestConfigHiddenFindingsNote(t *testing.T) {
+	srv := leakySite(t)
+	writeConfig(t, "ignore:\n  - id: \"*\"\n    reason: x\n  - id: nothing-matches\n    reason: y\n")
+	code, _, errs := tuner(t, "scan", srv.URL, "-q", "--json", "--no-vulns", "--fail-on", "low")
+	if want := "rhythm tuner scan: .tuner.yml: 2 ignore entries hid "; code != exitOK || !strings.Contains(errs, want) || strings.Contains(errs, "hid 0 findings") {
+		t.Errorf("ignore note: exit %d, stderr %q", code, errs)
+	}
+
+	// A baseline named in the file is counted too; one from --baseline is
+	// the caller's own choice and needs no note.
+	_, out, _ := tuner(t, "scan", srv.URL, "-q", "--json", "--no-vulns", "--no-config")
+	if err := os.WriteFile("base.json", []byte(out), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(".tuner.yml", []byte("baseline: base.json\n"), 0o600)
+	code, _, errs = tuner(t, "scan", srv.URL, "-q", "--json", "--no-vulns", "--fail-on", "low")
+	if code != exitOK || !regexp.MustCompile(`rhythm tuner scan: \.tuner\.yml: the baseline \S*base\.json hid [1-9]\d* findings?\n`).MatchString(errs) {
+		t.Errorf("baseline note: exit %d, stderr %q", code, errs)
+	}
+	os.WriteFile(".tuner.yml", []byte("fail_on: low\n"), 0o600)
+	if _, _, errs := tuner(t, "scan", srv.URL, "-q", "--json", "--no-vulns", "--baseline", "base.json"); strings.Contains(errs, " hid ") {
+		t.Errorf("note without config ignores: %q", errs)
 	}
 }
 

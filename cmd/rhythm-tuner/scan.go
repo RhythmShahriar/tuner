@@ -163,6 +163,7 @@ type scanPlan struct {
 	// expired, which hide nothing and get a note on stderr.
 	config           *tunerconfig.Config
 	configTargets    []string
+	configBaseline   bool // the baseline was named in the config, not by --baseline
 	ignores, expired []tunerconfig.Ignore
 
 	// fast holds the targets on the user's own machine or network. Without
@@ -533,6 +534,7 @@ func (p *scanPlan) applyConfig(set map[string]bool, haveTargets bool) error {
 	str("fail-on", &o.failOn, c.FailOn)
 	str("min-confidence", &o.minConfidence, c.MinConfidence)
 	str("baseline", &o.baseline, c.Baseline)
+	p.configBaseline = !set["baseline"] && c.Baseline != ""
 	list("tags", &o.tags, c.Tags)
 	list("exclude-tags", &o.excludeTags, c.ExcludeTags)
 	list("id", &o.ids, c.IDs)
@@ -865,6 +867,12 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 		printUpdateNotice(notice, stderr)
 	}
 
+	// Shown even with -q and machine output, like the config note: an
+	// untrusted .tuner.yml could hide every finding from --fail-on.
+	if n := p.hiddenNote(outcome); n != "" {
+		printErr(stderr, "scan", n)
+	}
+
 	exit, why := outcome.Exit(rp)
 	for _, w := range why {
 		printErr(stderr, "scan", w)
@@ -900,6 +908,36 @@ func (p *scanPlan) configNote() string {
 		what = "targets"
 	}
 	return fmt.Sprintf("using %s, which chose the %s: %s", p.config.Path, what, list)
+}
+
+// hiddenNote says how many findings the config's ignore entries and the
+// baseline it named hid in outcome, such as ".tuner.yml: 2 ignore entries
+// hid 5 findings". It is "" when the config holds neither.
+func (p *scanPlan) hiddenNote(outcome *scanrun.Outcome) string {
+	if p.config == nil || (len(p.ignores) == 0 && !p.configBaseline) {
+		return ""
+	}
+	var ignored, baselined int
+	for _, t := range outcome.Targets {
+		ignored += t.Ignored
+		baselined += t.Suppressed - t.Ignored
+	}
+	var parts []string
+	if len(p.ignores) > 0 {
+		parts = append(parts, fmt.Sprintf("%s hid %s", plural(len(p.ignores), "ignore entry", "ignore entries"), plural(ignored, "finding", "findings")))
+	}
+	if p.configBaseline {
+		parts = append(parts, fmt.Sprintf("the baseline %s hid %s", p.o.baseline, plural(baselined, "finding", "findings")))
+	}
+	return p.config.Path + ": " + strings.Join(parts, "; ")
+}
+
+// plural writes n with the singular or plural noun: "1 finding", "5 findings".
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return fmt.Sprintf("%d %s", n, many)
 }
 
 // header is the live view's title for target: the target, then the

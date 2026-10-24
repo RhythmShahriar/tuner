@@ -80,8 +80,9 @@ type Target struct {
 	// Err is why the scan failed or stopped early; context.Canceled when
 	// the run was canceled. A target with a Result may have one too.
 	Err error
-	// Suppressed counts the findings the baseline and ignores hid.
-	Suppressed int
+	// Suppressed counts the findings the baseline and ignores hid;
+	// Ignored counts the ignores' share of them.
+	Suppressed, Ignored int
 }
 
 // Failed reports whether the target ran into an error of its own, rather
@@ -142,7 +143,8 @@ func Run(ctx context.Context, p *Plan, hooks Hooks) *Outcome {
 			if res != nil {
 				stampFindings(res, target)
 				// Ignored findings count with the baselined ones.
-				t.Suppressed = p.Baseline.Filter(res) + p.filterIgnored(res)
+				t.Ignored = p.filterIgnored(res)
+				t.Suppressed = p.Baseline.Filter(res) + t.Ignored
 				t.Result = res
 			}
 			if hooks.Done != nil {
