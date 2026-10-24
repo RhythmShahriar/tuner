@@ -95,18 +95,6 @@ match: {all: [{status: 200}]}
 	}
 }
 
-func TestRetryAfter(t *testing.T) {
-	if d := retryAfter("3", 0); d != 3*time.Second {
-		t.Errorf("seconds: %v", d)
-	}
-	if d := retryAfter("3600", 0); d != maxRetryWait {
-		t.Errorf("cap: %v", d)
-	}
-	if d := retryAfter("", 2); d != 4*time.Second {
-		t.Errorf("backoff: %v", d)
-	}
-}
-
 func TestSelect(t *testing.T) {
 	all := []*Check{
 		mustParse(t, "id: leak-a\nname: a\nseverity: critical\nprofile: quick\ntags: [leak]\nrequest: {path: [/a]}\nmatch: {all: [{status: 200}]}"),

@@ -34,9 +34,6 @@ import (
 // Bodies beyond this size are truncated; matchers only see the first part.
 const maxBody = 1 << 20
 
-// Longest we'll honor a Retry-After header for.
-const maxRetryWait = 30 * time.Second
-
 type Options struct {
 	UserAgent   string
 	Headers     http.Header // sent with every request, e.g. Cookie or Authorization; overrides UserAgent
@@ -757,7 +754,7 @@ func (ss *session) retry(ctx context.Context, c *http.Client, method, u string, 
 			}
 			return r, err
 		}
-		if err := sleep(ctx, retryIn); err != nil {
+		if err := ratelimit.Sleep(ctx, retryIn); err != nil {
 			return nil, err
 		}
 	}
@@ -803,7 +800,7 @@ func (ss *session) attempt(ctx context.Context, c *http.Client, method, u string
 		if ctx.Err() != nil {
 			return nil, 0, err
 		}
-		return nil, backoff(n), err
+		return nil, ratelimit.Backoff(n), err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	log.Status = resp.StatusCode
@@ -812,11 +809,11 @@ func (ss *session) attempt(ctx context.Context, c *http.Client, method, u string
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable {
 		ss.throttled.Add(1)
 		ss.lim.slow()
-		retryIn = retryAfter(resp.Header.Get("Retry-After"), n)
+		retryIn = ratelimit.RetryAfter(resp.Header.Get("Retry-After"), n)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
 	if err != nil {
-		return nil, backoff(n), err
+		return nil, ratelimit.Backoff(n), err
 	}
 	return &matchers.Response{
 		URL: resp.Request.URL, Status: resp.StatusCode, Header: resp.Header, Body: body, TLSState: resp.TLS,
@@ -839,32 +836,6 @@ func (ss *session) release() { <-ss.inflight }
 func (ss *session) logRequest(l RequestLog) {
 	if ss.hooks.Request != nil {
 		ss.emit(func() { ss.hooks.Request(l) })
-	}
-}
-
-// backoff is the wait before retry n+1 after a network error.
-func backoff(n int) time.Duration { return time.Duration(n+1) * 500 * time.Millisecond }
-
-// retryAfter parses a Retry-After header (seconds or HTTP date), falling
-// back to exponential backoff, capped at maxRetryWait.
-func retryAfter(h string, n int) time.Duration {
-	d := time.Second << n
-	if secs, err := strconv.Atoi(strings.TrimSpace(h)); err == nil && secs >= 0 {
-		d = time.Duration(secs) * time.Second
-	} else if t, err := http.ParseTime(h); err == nil {
-		d = time.Until(t)
-	}
-	return min(max(d, 100*time.Millisecond), maxRetryWait)
-}
-
-func sleep(ctx context.Context, d time.Duration) error {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-t.C:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
 	}
 }
 
@@ -910,7 +881,7 @@ func (l *limiter) wait(ctx context.Context) error {
 	}
 	l.next = at.Add(l.every)
 	l.mu.Unlock()
-	return sleep(ctx, time.Until(at))
+	return ratelimit.Sleep(ctx, time.Until(at))
 }
 
 // slow halves the request rate, down to one request every two seconds.
