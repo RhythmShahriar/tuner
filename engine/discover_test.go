@@ -254,3 +254,61 @@ func TestParsePluginMode(t *testing.T) {
 		t.Errorf("loud: %v", err)
 	}
 }
+
+// A blocked or failing home page skips the readme probes: they would
+// only measure the block page.
+func TestDiscoverDeepSkippedWhenHomeFails(t *testing.T) {
+	mux := http.NewServeMux()
+	var readmes atomic.Int64
+	mux.HandleFunc("/{$}", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(wpHome))
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// contact-form-7 is on the home page, so its version lookup still runs.
+		if strings.HasSuffix(r.URL.Path, "/readme.txt") && !strings.Contains(r.URL.Path, "/contact-form-7/") {
+			readmes.Add(1)
+		}
+		http.NotFound(w, r)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	res, err := New([]*Check{mustParse(t, envCheck)}, Options{HTTPClient: srv.Client(), Plugins: PluginsDeep, PluginData: testPluginData()}).
+		Scan(context.Background(), srv.URL, Hooks{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := readmes.Load(); n != 0 {
+		t.Errorf("%d readme probes behind a failing home page", n)
+	}
+	if !slices.Contains(res.Warnings, "plugin discovery skipped readme probes because the home page was blocked or failed") {
+		t.Errorf("warnings %q", res.Warnings)
+	}
+	if res.StoppedBy != "home-status" {
+		t.Errorf("stopped by %q", res.StoppedBy)
+	}
+}
+
+// With the default budget an advisor that knows more plugins than fit is
+// cut to the budget, and the scan stays complete.
+func TestDiscoverDefaultBudgetFitsAdvisorSlugs(t *testing.T) {
+	site := newWPSite(t, "")
+	var many []string
+	for i := range DefaultRequestBudget {
+		many = append(many, fmt.Sprintf("advised-%04d", i))
+	}
+	res := scanWP(t, site, Options{Plugins: PluginsDeep, Advisor: slugAdvisor{many}})
+	if !res.Complete || res.StoppedBy != "" {
+		t.Errorf("complete %v, stopped by %q, warnings %q", res.Complete, res.StoppedBy, res.Warnings)
+	}
+	// 20 popular slugs; 2000 - 2 - 20 advisory slugs fit.
+	want := fmt.Sprintf("plugin discovery probed %d of %d plugins with known advisories; raise --request-budget to probe the rest",
+		DefaultRequestBudget-22, DefaultRequestBudget)
+	if !slices.Contains(res.Warnings, want) {
+		t.Errorf("warnings %q, want %q", res.Warnings, want)
+	}
+	// The probes plus version lookups for the three REST plugins.
+	if n := site.readmeRequests(); n != DefaultRequestBudget-1+3 {
+		t.Errorf("%d readme requests, want %d", n, DefaultRequestBudget-1+3)
+	}
+}

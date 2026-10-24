@@ -108,7 +108,8 @@ func (ss *session) resolveVersions(ctx context.Context, fp *fingerprint.Result) 
 
 // DefaultRequestBudget is how many requests plugin discovery may spend when
 // Options.RequestBudget is 0. --plugins deep needs about 1,500; the rest
-// leaves room for slugs with known advisories.
+// leaves room for slugs with known advisories. With the default budget
+// the advisory slugs are cut to fit, so a normal deep scan never runs out.
 const DefaultRequestBudget = 2000
 
 // ParsePluginMode reads a --plugins value in any case; "" is passive.
@@ -137,8 +138,10 @@ type PluginLister interface {
 // A readme only counts when it reads like one and differs from what the
 // server sends for a plugin that cannot exist, so a site that answers 200
 // to everything gains no plugins. Requests share the scan's pace and -c
-// limit and stop at the request budget; budgetHit then reports it.
-func (ss *session) discoverPlugins(ctx context.Context, fp *fingerprint.Result) (warning string, budgetHit bool) {
+// limit and stop at the request budget; budgetHit then reports it. When
+// the home page was blocked or failed (homeFailed) the readme probes are
+// skipped: they would only measure the block page.
+func (ss *session) discoverPlugins(ctx context.Context, fp *fingerprint.Result, homeFailed bool) (warning string, budgetHit bool) {
 	if !fp.Has("wordpress") {
 		return "", false
 	}
@@ -167,6 +170,9 @@ func (ss *session) discoverPlugins(ctx context.Context, fp *fingerprint.Result) 
 	if ss.opts.Plugins != PluginsDeep || ctx.Err() != nil {
 		return "", false
 	}
+	if homeFailed {
+		return "plugin discovery skipped readme probes because the home page was blocked or failed", false
+	}
 
 	known := map[string]bool{}
 	for _, c := range fp.Components {
@@ -184,10 +190,21 @@ func (ss *session) discoverPlugins(ctx context.Context, fp *fingerprint.Result) 
 	for _, s := range data.TopPlugins() {
 		add(s)
 	}
+	top := len(slugs)
 	if l, ok := ss.opts.Advisor.(PluginLister); ok {
 		for _, s := range l.PluginSlugs(ctx) {
 			add(s)
 		}
+	}
+	// An advisor can know thousands of plugins. With the default budget
+	// probe as many as fit after the popular ones (two requests go to the
+	// REST index and the baseline) instead of ending every deep scan
+	// partial; an explicit --request-budget is honoured as given.
+	var trimmed string
+	if room := max(top, budget-2); ss.opts.RequestBudget <= 0 && len(slugs) > room {
+		trimmed = fmt.Sprintf("plugin discovery probed %d of %d plugins with known advisories; raise --request-budget to probe the rest",
+			room-top, len(slugs)-top)
+		slugs = slugs[:room]
 	}
 
 	// The baseline: a readme for a plugin that cannot exist.
@@ -198,6 +215,9 @@ func (ss *session) discoverPlugins(ctx context.Context, fp *fingerprint.Result) 
 	base, err := ss.get(ctx, "GET", missing)
 	if err != nil {
 		return "", false
+	}
+	if detectBlockPage(base) != nil {
+		return "plugin discovery skipped readme probes because the site answered them with a block page", false
 	}
 	if base.Status == 200 && fingerprint.IsReadme(base.Body) {
 		return "plugin discovery skipped readme probes: the site answers every readme.txt path with a readme", false
@@ -250,7 +270,7 @@ feed:
 	if budgetHit {
 		return stopped(), true
 	}
-	return "", false
+	return trimmed, false
 }
 
 func readmePath(slug string) string { return "/wp-content/plugins/" + slug + "/readme.txt" }

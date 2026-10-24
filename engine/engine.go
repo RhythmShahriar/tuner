@@ -272,7 +272,7 @@ func (s *Scanner) Scan(ctx context.Context, target string, h Hooks) (*Result, er
 		res.Warnings = append(res.Warnings, homeStatusWarning(home.Status))
 	}
 	// Plugin discovery first, so version lookups cover what it finds.
-	if w, budgetHit := ss.discoverPlugins(ctx, &res.Fingerprint); w != "" {
+	if w, budgetHit := ss.discoverPlugins(ctx, &res.Fingerprint, res.StoppedBy != ""); w != "" {
 		res.Warnings = append(res.Warnings, w)
 		if budgetHit && res.StoppedBy == "" {
 			res.StoppedBy = "budget"
