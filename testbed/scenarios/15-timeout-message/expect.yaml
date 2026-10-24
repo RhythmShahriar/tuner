@@ -5,7 +5,6 @@
 # error must blame the per-request --timeout, not --max-time.
 title: request timeouts and --max-time get their own messages
 qa: [15]
-xfail: U3 E11
 servers:
   - name: site
     routes:

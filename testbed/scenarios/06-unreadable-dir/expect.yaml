@@ -5,7 +5,6 @@
 # with the rest of the tree and says what it skipped.
 title: an unreadable folder is skipped with a warning
 qa: [6]
-xfail: L4
 skip_on: [windows]
 tree:
   - copy: ../_fixtures/wordpress

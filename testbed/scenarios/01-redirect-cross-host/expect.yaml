@@ -6,7 +6,6 @@
 # user's -H and --cookie must never reach it.
 title: a cross-host redirect does not move the scan
 qa: [1]
-xfail: E1
 servers:
   - name: site
     routes:

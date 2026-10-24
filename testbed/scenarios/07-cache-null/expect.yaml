@@ -6,7 +6,6 @@
 # scan.
 title: a cache file holding null does not crash the scan
 qa: [7]
-xfail: V1
 tree:
   - copy: ../_fixtures/wordpress
     to: site

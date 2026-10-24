@@ -5,7 +5,6 @@
 # blocks forever; the scan must skip them and finish.
 title: FIFOs in the site tree never hang a local scan
 qa: [6]
-xfail: L2
 skip_on: [windows]
 tree:
   - copy: ../_fixtures/wordpress

@@ -5,7 +5,6 @@
 # masking list. No value may be printed in any output.
 title: .env values are masked whatever the key is called
 qa: [4]
-xfail: C2
 servers:
   - name: site
     routes:

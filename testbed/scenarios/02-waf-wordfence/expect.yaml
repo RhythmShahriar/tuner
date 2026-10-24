@@ -5,7 +5,6 @@
 # saw the site, so the report must say it was blocked and is partial.
 title: a Wordfence block page on every path marks the scan blocked
 qa: [2]
-xfail: E7
 servers:
   - name: site
     routes:

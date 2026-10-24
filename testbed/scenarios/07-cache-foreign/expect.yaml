@@ -8,7 +8,6 @@
 # fetched again.
 title: foreign and corrupt cache files are refetched, not trusted
 qa: [7]
-xfail: V1
 tree:
   - copy: ../_fixtures/wordpress
     to: site

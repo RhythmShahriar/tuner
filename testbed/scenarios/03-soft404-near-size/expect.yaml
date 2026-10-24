@@ -6,7 +6,6 @@
 # the soft-404 filter must not drop it.
 title: a real .env the size of the catch-all page is still found
 qa: [3]
-xfail: E8
 servers:
   - name: site
     routes:

@@ -6,7 +6,6 @@
 # same plugin. The baseline must not hide it.
 title: a baseline never hides a new advisory on a baselined component
 qa: [8]
-xfail: R2
 tree:
   - copy: ../_fixtures/wordpress
     to: site

@@ -6,7 +6,6 @@
 # local scan; ./name and http://name stay unambiguous.
 title: a bare target that is also a folder is a usage error
 qa: [13]
-xfail: U1
 servers:
   - name: site
     routes:

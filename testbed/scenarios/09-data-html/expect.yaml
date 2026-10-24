@@ -6,8 +6,6 @@
 # a --fail-on gate as if they had been.
 title: a vulnerability data service answering HTML instead of JSON fails the gate quickly
 qa: [9]
-xfail: U4
-xfail_covers: ['exit 0, want 3', 'report.json: no vuln_data']
 data:
   state: html
 tree:

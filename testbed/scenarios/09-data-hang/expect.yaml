@@ -6,7 +6,6 @@
 # a --fail-on gate as if they had been.
 title: a vulnerability data service that never answers fails the gate quickly
 qa: [9]
-xfail: V4 U4
 data:
   state: hang
 tree:

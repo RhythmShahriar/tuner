@@ -6,7 +6,6 @@
 # trusted for a day online and forever offline; it must be refetched.
 title: an older release's cache entry is refetched after an upgrade
 qa: [7]
-xfail: V1
 tree:
   - copy: ../_fixtures/wordpress
     to: site

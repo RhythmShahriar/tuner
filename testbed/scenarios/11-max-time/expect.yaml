@@ -5,8 +5,6 @@
 # why and marks the report.
 title: --max-time stops on time and marks the report
 qa: [11, 15]
-xfail: U4 R3
-xfail_covers: ['report.json: no (complete|stopped_by)$']
 servers:
   - name: site
     routes:
