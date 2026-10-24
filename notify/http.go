@@ -89,13 +89,20 @@ var discordEscaper = func() *strings.Replacer {
 	return strings.NewReplacer(pairs...)
 }()
 
-// discordEscape escapes Markdown in a line but leaves URLs as they are,
-// since Discord would keep the backslashes inside a link. A URL here was
-// parsed and printed by Go, so it holds no spaces or angle brackets.
+// urlMarkup percent-encodes what would start Markdown inside a URL. A
+// word only looks like a URL, since titles come from the scanned site:
+// "https://x[click](https://evil.test)" must not become a masked link.
+var urlMarkup = strings.NewReplacer("[", "%5B", "]", "%5D", "(", "%28", ")", "%29", "<", "%3C", ">", "%3E", "`", "%60", "|", "%7C", "*", "%2A", "~", "%7E", "\\", "%5C")
+
+// discordEscape escapes Markdown in a line. URLs get percent-encoding
+// instead of backslashes, since Discord would keep the backslashes inside
+// a link; the link still opens the same page.
 func discordEscape(line string) string {
 	words := strings.Split(line, " ")
 	for i, w := range words {
-		if !strings.HasPrefix(w, "https://") && !strings.HasPrefix(w, "http://") {
+		if strings.HasPrefix(w, "https://") || strings.HasPrefix(w, "http://") {
+			words[i] = urlMarkup.Replace(w)
+		} else {
 			words[i] = discordEscaper.Replace(w)
 		}
 	}
