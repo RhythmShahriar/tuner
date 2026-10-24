@@ -25,10 +25,11 @@ Runs Tuner as an HTTP API for agencies and hosts. A site is scanned only
 after it proves its owner asked for it: a DNS TXT record at
 _tuner-verify.<host> or the file /.well-known/tuner-verify.txt holding
 the token Tuner hands out. The file is fetched from the target's own
-scheme, host and port (https://example.com:8443 looks there, http://
-targets over http); redirects must stay on that host and an https check
-never drops to http. Proof lasts 30 days. Each scan runs as its own
-rhythm tuner scan process, one at a time per site.
+scheme, host and port: a target of http://example.com:8080 serves it at
+http://example.com:8080/.well-known/tuner-verify.txt. Redirects must
+stay on that host and an https check never drops to http. Proof lasts
+30 days. Each scan runs as its own rhythm tuner scan process, one at a
+time per site.
 
   GET    /v0/health
   POST   /v0/targets               {"url": "https://example.com"} -> token
