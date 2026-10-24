@@ -139,6 +139,11 @@ func TestSelect(t *testing.T) {
 		{"exclude ids", Selector{ExcludeIDs: []string{"leak-a"}}, []string{"leak-b"}},
 		{"min severity", Selector{MinSeverity: Medium, Profile: ProfileDeep}, []string{"leak-a", "hdr-c"}},
 		{"unknown id", Selector{IDs: []string{"nope"}}, []string{"error: no check matches \"nope\"; list them with: rhythm tuner checks"}},
+		{"typo gets a suggestion", Selector{IDs: []string{"leak-c"}}, []string{"error: no check matches \"leak-c\"; did you mean \"leak-a\"? list them with: rhythm tuner checks"}},
+		{"swapped letters", Selector{IDs: []string{"hdr-c-"}}, []string{"error: no check matches \"hdr-c-\"; did you mean \"hdr-c\"? list them with: rhythm tuner checks"}},
+		{"globs get no suggestion", Selector{IDs: []string{"lea-*"}}, []string{"error: no check matches \"lea-*\"; list them with: rhythm tuner checks"}},
+		{"severity in any case", Selector{MinSeverity: "MEDIUM", Profile: "Deep"}, []string{"leak-a", "hdr-c"}},
+		{"profile in any case", Selector{Profile: "QUICK"}, []string{"leak-a"}},
 	}
 	for _, tc := range cases {
 		got := ids(tc.sel)
@@ -255,5 +260,42 @@ extract: {secrets: true}
 	}
 	if strings.ContainsRune(res.Fingerprint.Server, 0x9b) {
 		t.Errorf("server keeps control bytes: %q", res.Fingerprint.Server)
+	}
+}
+
+func TestSuggestLeakDotenv(t *testing.T) {
+	all := []*Check{
+		mustParse(t, "id: leak-dotenv\nname: a\nseverity: critical\nrequest: {path: [/.env]}\nmatch: {all: [{status: 200}]}"),
+		mustParse(t, "id: leak-git\nname: b\nseverity: high\nrequest: {path: [/.git/HEAD]}\nmatch: {all: [{status: 200}]}"),
+	}
+	_, err := Select(all, Selector{IDs: []string{"leak-dotnev"}})
+	if err == nil || !strings.Contains(err.Error(), `did you mean "leak-dotenv"?`) {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestParseSeverityAndProfile(t *testing.T) {
+	if s, err := ParseSeverity("HIGH"); err != nil || s != High {
+		t.Errorf("ParseSeverity(HIGH) = %q, %v", s, err)
+	}
+	if _, err := ParseSeverity("urgent"); err == nil || !strings.Contains(err.Error(), "want one of") {
+		t.Errorf("ParseSeverity(urgent) err = %v", err)
+	}
+	if p, err := ParseProfile(" Quick "); err != nil || p != ProfileQuick {
+		t.Errorf("ParseProfile(Quick) = %q, %v", p, err)
+	}
+	if _, err := ParseProfile("fast"); err == nil {
+		t.Error("ParseProfile(fast) accepted")
+	}
+}
+
+func TestEditDistance(t *testing.T) {
+	for _, tc := range []struct {
+		a, b string
+		want int
+	}{{"", "", 0}, {"abc", "", 3}, {"leak-dotnev", "leak-dotenv", 2}, {"kitten", "sitting", 3}, {"same", "same", 0}} {
+		if got := editDistance(tc.a, tc.b); got != tc.want {
+			t.Errorf("editDistance(%q, %q) = %d, want %d", tc.a, tc.b, got, tc.want)
+		}
 	}
 }
