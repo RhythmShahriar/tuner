@@ -350,8 +350,8 @@ func checksNew(args []string, stdout, stderr io.Writer) int {
 const checksNewUsage = `Usage:
   rhythm tuner checks new <id> [dir]
 
-Writes <dir>/<id>.yaml, a check to fill in, and <dir>/<id>_test.yaml, its
-fixtures (default dir: the current folder). Both pass checks test and
+Writes <dir>/<id>.yaml (a check to fill in) and <dir>/<id>_test.yaml (its
+fixtures). dir defaults to the current folder. Both pass checks test and
 checks lint as written. It never replaces a file. The ID is lower-case
 words joined by hyphens and starts with leak-, wp-, php-, laravel-, hdr-,
 tls- or srv-, e.g. leak-old-backup.

@@ -309,7 +309,7 @@ func TestUnreachablePackHostWithoutCache(t *testing.T) {
 }
 
 // A pack's fingerprint data and local rules replace the built-in copies
-// when the pack is in use, and only then.
+// when the pack is in use and only then.
 func TestPackDataAndLocalRules(t *testing.T) {
 	retired, _ := json.Marshal(builtInIDs())
 	servePackWith(t, `{"min_tuner": "0.2.0", "retired": `+string(retired)+`}`, packCheck, checkpack.Extras{

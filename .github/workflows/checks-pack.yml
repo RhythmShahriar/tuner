@@ -50,8 +50,8 @@ jobs:
         with:
           go-version-file: go.mod
 
-      # Every check must pass its positive and negative fixtures, and the
-      # fingerprint data and local rules their own tests.
+      # Every check must pass its positive and negative fixtures. The
+      # fingerprint data and local rules must pass their own tests.
       - name: Test checks
         run: go test ./engine/... ./checkpack ./internal/packbuild ./fingerprint/... ./local/...
 

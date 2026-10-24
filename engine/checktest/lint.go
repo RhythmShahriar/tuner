@@ -81,7 +81,7 @@ func Lint(fsys fs.FS) []Issue {
 	return out
 }
 
-// LintCheck checks one check, loaded from fsys, and its fixture file.
+// LintCheck checks one check from fsys together with its fixture file.
 func LintCheck(fsys fs.FS, c *engine.Check) []Issue {
 	var out []Issue
 	add := func(rule, format string, a ...any) {

@@ -133,7 +133,7 @@ func TestExtractRejectsBadExtras(t *testing.T) {
 	}
 }
 
-// Local rules are YAML too, but never loaded as checks.
+// Local rules are YAML too yet are never loaded as checks.
 func TestLocalRulesAreNotChecks(t *testing.T) {
 	b, err := BuildWith(source("0.2.0", map[string]string{"a/x.yaml": goodCheck}),
 		extras(nil, map[string]string{"r.yaml": "id: local-r\nfiles: ['*.php']\n"}), "abc", t0)

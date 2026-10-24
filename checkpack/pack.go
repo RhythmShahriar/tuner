@@ -74,9 +74,9 @@ const (
 	maxSmall   = 64 << 10 // manifest and sums
 )
 
-// Folders in a pack that hold data rather than checks, and their limits.
+// Folders in a pack that hold data rather than checks with their limits.
 // Fingerprint data is a handful of lookup tables of tens of KB; local
-// rules are small YAML files, but there may be hundreds of them.
+// rules are small YAML files and there may be hundreds of them.
 const (
 	DataDir  = "data"  // fingerprint data, <name>.json
 	LocalDir = "local" // local scan rules, <name>.yaml
@@ -251,7 +251,7 @@ func addExtras(files map[string][]byte, src fs.FS, dir, pattern string) ([]strin
 
 // checkExtras applies the data/ and local/ rules to a pack's files, at
 // build time and again when a pack is unpacked: flat folders, plain file
-// names, valid JSON, and the size and count limits.
+// names, valid JSON and the size and count limits.
 func checkExtras(files map[string][]byte) error {
 	var dataFiles, localFiles, dataTotal int
 	for name, data := range files {
