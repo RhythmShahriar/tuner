@@ -29,10 +29,9 @@ import (
 )
 
 // StrictOutput makes output leaks fail Test rather than only being
-// logged. It stays off until the engine redacts before truncating and
-// strips control bytes and the reports share one sanitizer; until then
-// Test logs what it finds so the remaining gaps stay visible.
-const StrictOutput = false
+// logged. It is on: the engine redacts before truncating and strips
+// control bytes, and every report goes through one sanitizer.
+const StrictOutput = true
 
 // Result is the outcome of one fixture case, or of a check whose fixture
 // file could not be used (Case is then empty).

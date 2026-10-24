@@ -52,25 +52,38 @@ func fakeFS(check, fixture string) fstest.MapFS {
 	}
 }
 
-func TestLeakyCheckFails(t *testing.T) {
+// The engine and the reports now hide what the leaky check matches, so
+// the whole pipeline is clean in every format.
+func TestLeakyCheckIsCleanInEveryFormat(t *testing.T) {
 	// The whole first line is evidence and DB_PWD is no name the masking
-	// rules know.
+	// rules knew before the shared secret rules.
 	res := Run(fakeFS(envCheck(`(?m)^[A-Z_]+=.+`), envFixture))
 	if len(res) != 2 {
 		t.Fatalf("results = %+v", res)
 	}
-	pos := res[0]
-	if !pos.Positive || len(pos.Problems) != 0 {
-		t.Fatalf("positive case = %+v", pos)
-	}
-	for _, format := range []string{"json", "sarif", "md"} {
-		want := format + ` output shows raw value "Hunter2-RealProdPassword"`
-		if !slices.Contains(pos.Leaks, want) {
-			t.Errorf("missing %q in %q", want, pos.Leaks)
+	for _, r := range res {
+		if r.Failed(true) {
+			t.Errorf("%s: problems %q, leaks %q", r, r.Problems, r.Leaks)
 		}
 	}
-	if !pos.Failed(true) || pos.Failed(false) {
-		t.Errorf("Failed(strict) = %v, Failed(lenient) = %v", pos.Failed(true), pos.Failed(false))
+}
+
+// The leak detector still finds a raw value in a report, so strict mode
+// fails a check whose output shows one.
+func TestLeakDetector(t *testing.T) {
+	raw := rawValues([]byte("DB_PWD=Hunter2-RealProdPassword\n"), true)
+	out := []byte(`{"matched": ["DB_PWD=Hunter2-RealProdPassword"]}`)
+	got := leaks("json", out, raw, nil)
+	want := `json output shows raw value "Hunter2-RealProdPassword"`
+	if !slices.Contains(got, want) {
+		t.Errorf("missing %q in %q", want, got)
+	}
+	r := Result{Leaks: got}
+	if !r.Failed(true) || r.Failed(false) {
+		t.Errorf("Failed(strict) = %v, Failed(lenient) = %v", r.Failed(true), r.Failed(false))
+	}
+	if got := leaks("json", out, raw, []byte("Hunter2-RealProdPassword")); len(got) != 0 {
+		t.Errorf("a value in the check's own source counted: %q", got)
 	}
 }
 
@@ -83,8 +96,9 @@ func TestCleanCheckPasses(t *testing.T) {
 	}
 }
 
-func TestControlBytesFail(t *testing.T) {
-	// A first line that clears the screen and retitles the window.
+// A first line that clears the screen and retitles the window reaches no
+// report, and the detector names each control byte a report would hold.
+func TestControlBytes(t *testing.T) {
 	fixture := `positive:
   - name: escapes
     routes:
@@ -94,14 +108,15 @@ negative:
     routes:
       /.env: {status: 403}
 `
-	res := Run(fakeFS(envCheck(`(?m)^[A-Z_]+=.+`), fixture))
-	var leaks string
-	for _, r := range res {
-		leaks += strings.Join(r.Leaks, "\n")
+	for _, r := range Run(fakeFS(envCheck(`(?m)^[A-Z_]+=.+`), fixture)) {
+		if r.Failed(true) {
+			t.Errorf("%s: problems %q, leaks %q", r, r.Problems, r.Leaks)
+		}
 	}
+	found := strings.Join(leaks("plain", []byte("X=\x1b]0;owned\x07\x1b[2J\x9bclean"), nil, nil), "\n")
 	for _, want := range []string{"ESC (0x1b)", "BEL (0x07)", "CSI (0x9b)"} {
-		if !strings.Contains(leaks, want) {
-			t.Errorf("missing %s in:\n%s", want, leaks)
+		if !strings.Contains(found, want) {
+			t.Errorf("missing %s in:\n%s", want, found)
 		}
 	}
 }
@@ -243,8 +258,11 @@ negative:
 	if len(res) != 2 {
 		t.Fatalf("results = %+v", res)
 	}
+	// The engine stops at the cross-host redirect before the fixture's
+	// dialer has to refuse it; either way the case fails.
 	for _, r := range res {
-		if !r.Failed(false) || !strings.Contains(strings.Join(r.Problems, "\n"), "only the fixture server") {
+		problems := strings.Join(r.Problems, "\n")
+		if !r.Failed(false) || !strings.Contains(problems, "only the fixture server") && !strings.Contains(problems, "redirects to") {
 			t.Errorf("%s: problems %q", r, r.Problems)
 		}
 	}

@@ -10,6 +10,7 @@ import (
 	"testing/fstest"
 
 	"github.com/RhythmShahriar/tuner/checks"
+	"github.com/RhythmShahriar/tuner/engine"
 )
 
 // goodCheck passes every lint rule; each case below breaks one.
@@ -74,11 +75,12 @@ func TestLintRules(t *testing.T) {
 		{"one word id", r("leak-thing", "thing"), goodFixture, "id", "lower-case words joined by hyphens"},
 		{"unknown prefix", r("leak-thing", "acme-thing"), goodFixture, "id", "start it with one of hdr-, laravel-, leak-"},
 		{"advisor prefix", r("leak-thing", "wp-core-thing"), goodFixture, "id", "belongs to vulnerability matching"},
-		{"post", r("request:\n", "request:\n  method: POST\n"), goodFixture, "method", "request.method POST: checks only read"},
+		// The engine refuses these at load time, so lint reports the load error.
+		{"post", r("request:\n", "request:\n  method: POST\n"), goodFixture, "load", "checks may only use GET or HEAD"},
 		{"traversal", r("/thing.txt\", \"/{{host}}", "/../etc/passwd\", \"/{{host}}"), goodFixture, "query", "path traversal"},
 		{"encoded dot", r("/thing.txt\"", "/%2e%2e/thing.txt\""), goodFixture, "query", `"%2e" in the path looks like a payload`},
-		{"sql in query", r("?v=1.2", "?id=1'+OR+'1'='1"), goodFixture, "query", "looks like a payload"},
-		{"script in query", r("?v=1.2", "?q=<script>"), goodFixture, "query", "looks like a payload"},
+		{"sql in query", r("?v=1.2", "?id=1'+OR+'1'='1"), goodFixture, "load", "the query may only hold plain name=value pairs"},
+		{"script in query", r("?v=1.2", "?q=<script>"), goodFixture, "load", "the query may only hold plain name=value pairs"},
 		{"other template", r("{{host}}.thing", "{{path}}.thing"), goodFixture, "query", "only {{host}} may be templated"},
 		{"no guard", r(`    - words: ["THING"]`, "    - header: {Content-Type: text/plain}"), goodFixture, "baseline", "needs not_baseline: true or a regex"},
 		{"any without guard", r("    - words: [\"THING\"]\n", "  any:\n    - words: [\"THING\"]\n    - status: 206\n"), goodFixture, "baseline", "needs not_baseline"},
@@ -106,6 +108,24 @@ func TestLintRules(t *testing.T) {
 				t.Errorf("want a %s issue with %q, got %v", tc.rule, tc.want, issues)
 			}
 		})
+	}
+}
+
+// LintCheck keeps its own method and payload rules for checks built in
+// code, which never pass through the engine's loader.
+func TestLintCheckMethodAndPayload(t *testing.T) {
+	c := &engine.Check{ID: "leak-thing", File: "leaks/thing.yaml", Request: engine.Request{
+		Method: "POST", Path: []string{"/thing.txt?id=1'+OR+'1'='1", "/q?x=<script>"},
+	}, References: []string{"https://example.test/thing"}}
+	var got []string
+	for _, i := range LintCheck(fstest.MapFS{}, c) {
+		got = append(got, i.Rule+": "+i.Message)
+	}
+	all := strings.Join(got, "\n")
+	for _, want := range []string{"method: request.method POST: checks only read", "query: request.path \"/thing.txt?id=1'+OR+'1'='1\"", "looks like a payload"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("missing %q in:\n%s", want, all)
+		}
 	}
 }
 
