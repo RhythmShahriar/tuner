@@ -65,7 +65,7 @@ func (ss *session) soft404(ctx context.Context) bool {
 // baselineBlocked reports whether the soft-404 probe got a block page.
 func (ss *session) baselineBlocked(ctx context.Context) bool {
 	b, err := ss.get(ctx, "GET", probePath("/x", ss.token))
-	return err == nil && detectWAF(b) != nil
+	return err == nil && detectBlockPage(b) != nil
 }
 
 // Bodies cut at maxBody all have the same length, so similar compares this

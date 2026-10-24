@@ -126,6 +126,38 @@ func TestNormalRefusalsStayComplete(t *testing.T) {
 	}
 }
 
+// Behind Incapsula or Wordfence the origin's own 403s carry the weak
+// markers too. A hardened site that refuses every check path stays
+// complete when its home page loads.
+func TestWeakMarkersOnCheckRefusalsStayComplete(t *testing.T) {
+	weak := func(w http.ResponseWriter) {
+		w.Header().Set("X-Iinfo", "10-123-0 NNNN CT(0 0 0) RT(1 2) q(0 0 0 -1) r(1 1) U5")
+		w.Header().Add("Set-Cookie", "wfvt_123=abc; path=/")
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/{$}", func(w http.ResponseWriter, _ *http.Request) { weak(w); w.Write([]byte("<html>home</html>")) })
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) { weak(w); http.Error(w, "Forbidden", http.StatusForbidden) })
+	c := mustParse(t, `
+id: t-many
+name: many
+severity: low
+request: {path: ["/a", "/b", "/c"]}
+match: {all: [{status: 200}]}
+`)
+	res, baseline := scanWith(t, mux, c)
+	if !res.Complete || res.BlockedBy != "" || res.StoppedBy != "" || len(res.Warnings) != 0 || !baseline {
+		t.Errorf("complete %v blocked_by %q stopped_by %q warnings %q baseline %v", res.Complete, res.BlockedBy, res.StoppedBy, res.Warnings, baseline)
+	}
+	// The same markers on a refused home page still mark it blocked.
+	res, _ = scanWith(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		weak(w)
+		http.Error(w, "Forbidden", http.StatusForbidden)
+	}), c)
+	if res.Complete || res.BlockedBy != "imperva" {
+		t.Errorf("refused home: complete %v blocked_by %q", res.Complete, res.BlockedBy)
+	}
+}
+
 func TestHomeStatusMarksScanPartial(t *testing.T) {
 	res, baseline := scanWith(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "boom", http.StatusInternalServerError)
@@ -171,6 +203,9 @@ func TestDetectWAFWeakMarkersNeedARefusal(t *testing.T) {
 	}
 	if detectWAF(responseFrom(wf, 200, "home")) != nil {
 		t.Error("wfvt_ cookie on a normal page counted as a block")
+	}
+	if detectBlockPage(responseFrom(wf, 403, "Forbidden")) != nil || detectBlockPage(responseFrom(http.Header{"X-Iinfo": {"1"}}, 403, "no")) != nil {
+		t.Error("weak markers counted on a check response")
 	}
 	if detectWAF(responseFrom(http.Header{"Server": {"AkamaiGHost"}}, 404, "not found")) != nil {
 		t.Error("AkamaiGHost without a reference number counted as a block")

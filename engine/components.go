@@ -159,7 +159,7 @@ func (ss *session) discoverPlugins(ctx context.Context, fp *fingerprint.Result) 
 	if !spend() {
 		return stopped(), true
 	}
-	if r, err := ss.get(ctx, "GET", "/wp-json/"); err == nil && r.Status == 200 && detectWAF(r) == nil {
+	if r, err := ss.get(ctx, "GET", "/wp-json/"); err == nil && r.Status == 200 && detectBlockPage(r) == nil {
 		for _, c := range fingerprint.PluginsFromREST(data, fingerprint.RESTNamespaces(r.Body)) {
 			fp.AddComponent(c)
 		}
@@ -211,7 +211,7 @@ func (ss *session) discoverPlugins(ctx context.Context, fp *fingerprint.Result) 
 			for i := range next {
 				p := readmePath(slugs[i])
 				r, err := ss.get(ctx, "GET", p)
-				if err == nil && r.Status == 200 && detectWAF(r) == nil && fingerprint.IsReadme(r.Body) &&
+				if err == nil && r.Status == 200 && detectBlockPage(r) == nil && fingerprint.IsReadme(r.Body) &&
 					(base.Status != 200 || !similar(r, p, base, missing)) {
 					c := fingerprint.Component{Type: "plugin", Slug: slugs[i], Source: "readme",
 						FoundBy: fingerprint.FoundByReadme, Confidence: fingerprint.ConfidenceHigh}

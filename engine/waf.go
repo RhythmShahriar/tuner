@@ -25,7 +25,9 @@ type wafVendor struct {
 	// strong markers only ever appear on a block or challenge page.
 	strong func(r *matchers.Response) bool
 	// weak markers also appear on normal pages behind the firewall, so
-	// they only count on a refusal (403, 429 or 503).
+	// they only count on a refused home page (403, 429 or 503). A site
+	// behind the firewall refuses /.env or /.git with its own 403, which
+	// still carries them.
 	weak func(r *matchers.Response) bool
 }
 
@@ -69,15 +71,24 @@ var wafVendors = []wafVendor{
 
 func bodyHas(r *matchers.Response, s string) bool { return bytes.Contains(r.Body, []byte(s)) }
 
-// detectWAF returns the vendor whose block page r is, or nil.
-func detectWAF(r *matchers.Response) *wafVendor {
+// detectWAF returns the vendor whose block page the home page r is, or
+// nil. Weak markers count here: a home page refused behind a firewall is
+// the firewall's doing.
+func detectWAF(r *matchers.Response) *wafVendor { return findWAF(r, true) }
+
+// detectBlockPage returns the vendor whose block page r is, or nil, for
+// any page but the home page. Only strong markers count, so a hardened
+// origin's own 403s do not read as a firewall.
+func detectBlockPage(r *matchers.Response) *wafVendor { return findWAF(r, false) }
+
+func findWAF(r *matchers.Response, weak bool) *wafVendor {
 	if r == nil {
 		return nil
 	}
 	refused := r.Status == 403 || r.Status == 429 || r.Status == 503
 	for i := range wafVendors {
 		v := &wafVendors[i]
-		if v.strong(r) || refused && v.weak != nil && v.weak(r) {
+		if v.strong(r) || weak && refused && v.weak != nil && v.weak(r) {
 			return v
 		}
 	}

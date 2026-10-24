@@ -479,7 +479,7 @@ func (ss *session) run(ctx context.Context, c *Check, p string) ([]Finding, []st
 		return nil, nil
 	}
 	// A block page says nothing about the site behind it.
-	v := detectWAF(r)
+	v := detectBlockPage(r)
 	ss.waf.add(v)
 	if v != nil {
 		return nil, nil
