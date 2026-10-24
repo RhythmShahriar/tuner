@@ -127,9 +127,79 @@ func TestRuleEvidenceIsMaskedAndShort(t *testing.T) {
 	if strings.Contains(string(b), strings.Repeat("y", 10)) {
 		t.Errorf("secret shown: %s", b)
 	}
-	// Control bytes are replaced.
+	// Control bytes are replaced, and so are bidi overrides and other
+	// format characters that reorder how a line shows.
 	if got := snippet([]byte("a\x1b[31mb\tc"), 0); got != "a.[31mb.c" {
 		t.Errorf("snippet %q", got)
+	}
+	if got := snippet([]byte("eval(\u202e)x(\u2066\u200b\u0085"), 0); got != "eval(.)x(..." {
+		t.Errorf("snippet %q", got)
+	}
+}
+
+func TestRuleExemptionsNeedTheWholeFile(t *testing.T) {
+	// "<?php", then more padding than is read, then a shell: the head
+	// alone looks like a "Silence is golden" index file.
+	shell := "eval(base64_decode($_POST['x']));"
+	root := tree(t, map[string]string{
+		"wp-content/uploads/a.php":     "<?php" + strings.Repeat(" ", maxRead+10) + shell,
+		"wp-content/uploads/b.php":     "<?php " + shell,
+		"wp-content/uploads/index.php": "<?php // Silence is golden.",
+	})
+	res := scanTree(t, root, Options{Exec: noPHP})
+	var paths []string
+	for _, f := range res.Findings {
+		if f.ID == "local-malware-php-in-uploads" {
+			paths = append(paths, f.Path)
+		}
+	}
+	slices.Sort(paths)
+	if strings.Join(paths, ",") != "/wp-content/uploads/a.php,/wp-content/uploads/b.php" {
+		t.Errorf("php-in-uploads about %v", paths)
+	}
+	for _, f := range res.Findings {
+		if f.Path == "/wp-content/uploads/a.php" && !strings.Contains(strings.Join(f.Evidence.Matched, "\n"), "only the first 1 MB was read") {
+			t.Errorf("evidence %q", f.Evidence.Matched)
+		}
+	}
+}
+
+func TestRuleLinksInUploads(t *testing.T) {
+	// A link named x.php in uploads runs its target when the server
+	// follows links. Its content is never read, so the "Silence is
+	// golden" exemption can't clear it. A link named like media is
+	// fine, and content rules don't match links they can't read.
+	root := tree(t, map[string]string{
+		"shell.inc":                    "<?php eval(base64_decode($_POST['x']));",
+		"wp-content/uploads/index.php": "<?php // Silence is golden.",
+	})
+	up := filepath.Join(root, "wp-content", "uploads")
+	for name, target := range map[string]string{"x.php": "../../shell.inc", "photo.jpg": "../../shell.inc", "y.php": "index.php"} {
+		if err := os.Symlink(target, filepath.Join(up, name)); err != nil {
+			t.Skip("no links:", err)
+		}
+	}
+	res := scanTree(t, root, Options{Exec: noPHP})
+	var paths []string
+	for _, f := range res.Findings {
+		switch f.ID {
+		case "local-malware-php-in-uploads":
+			paths = append(paths, f.Path)
+			if f.Path == "/wp-content/uploads/x.php" && f.Evidence.Matched[1] != "a link to ../../shell.inc, not followed" {
+				t.Errorf("evidence %q", f.Evidence.Matched)
+			}
+		case "local-malware-eval-base64":
+			if f.Path != "/shell.inc" {
+				t.Errorf("eval rule read a link: %s", f.Path)
+			}
+		}
+	}
+	slices.Sort(paths)
+	if strings.Join(paths, ",") != "/wp-content/uploads/x.php,/wp-content/uploads/y.php" {
+		t.Errorf("php-in-uploads about %v", paths)
+	}
+	if find(res, "local-malware-eval-base64") == nil {
+		t.Errorf("the link's target wasn't checked: %v", ids(res))
 	}
 }
 

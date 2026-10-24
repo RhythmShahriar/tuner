@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -16,6 +17,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"unicode"
 	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
@@ -62,7 +64,11 @@ import (
 // The web scope skips what the other stray-file checks skip: dependency
 // folders, version control folders, wp-content/cache and the media
 // library's year folders. The project scope skips version control and
-// node_modules folders. Contents are the first 1 MiB of a file.
+// node_modules folders. Contents are the first 1 MiB of a file. Links
+// aren't followed: a rule that reads content doesn't match a link,
+// except one whose only content parts are not exemptions, since nothing
+// shows the target is harmless. For the same reason not exemptions are
+// skipped for files larger than what was read.
 //
 // Every rule has a fixture file rules/tests/<id>_test.yaml with at least
 // one positive and one negative file; see rules_test.go.
@@ -383,16 +389,29 @@ func (r *Rule) prunes(rel []string) bool {
 	return slices.ContainsFunc(r.prune, func(dir glob) bool { return dir.match(rel) })
 }
 
+// exemptOnly reports whether the rule's only content parts are not
+// regexes: it matches by path unless the content proves the file
+// harmless.
+func (r *Rule) exemptOnly() bool {
+	return len(r.not) > 0 && len(r.regex) == 0 && r.words == nil && r.Match.Magic == "" && len(r.Match.Secrets) == 0
+}
+
 // match reports whether the file's content matches and where: the
 // offset of the first regex or word match, or -1.
-func (r *Rule) match(f *fileData, regular bool) (bool, int) {
+func (r *Rule) match(e *entry, f *fileData) (bool, int) {
 	if r.MaxSize > 0 && f.size > r.MaxSize {
 		return false, -1
 	}
 	if !r.readsContent() {
 		return true, -1
 	}
-	if !regular || f.head == nil {
+	// The walk doesn't follow links, so a link's content is unknown and
+	// can't prove it harmless. A server that follows links still runs
+	// the PHP a link named x.php in uploads points to.
+	if e.typ&fs.ModeSymlink != 0 && r.exemptOnly() {
+		return true, -1
+	}
+	if !e.regular() || f.head == nil {
 		return false, -1
 	}
 	b := f.head
@@ -427,9 +446,14 @@ func (r *Rule) match(f *fileData, regular bool) (bool, int) {
 			at = loc[0]
 		}
 	}
-	for _, re := range r.not {
-		if re.Match(b) {
-			return false, -1
+	// An exemption only holds when it saw the whole file. Anchored at
+	// the end with \z, it would pass "<?php" padded past maxRead with
+	// the payload after the padding.
+	if f.size <= int64(len(b)) {
+		for _, re := range r.not {
+			if re.Match(b) {
+				return false, -1
+			}
 		}
 	}
 	if len(r.Match.Secrets) > 0 {
@@ -446,6 +470,16 @@ func (r *Rule) match(f *fileData, regular bool) (bool, int) {
 // finding builds the rule's finding for the file at e.
 func (r *Rule) finding(s *scan, e *entry, f *fileData, at int) engine.Finding {
 	ev := []string{s.rel(e.path) + sizeNote(f.size)}
+	if e.typ&fs.ModeSymlink != 0 {
+		target, err := os.Readlink(e.path)
+		if err != nil {
+			target = "an unreadable target"
+		}
+		ev = append(ev, "a link to "+snippet([]byte(target), 0)+", not followed")
+	}
+	if f.size > int64(len(f.head)) && f.head != nil && len(r.not) > 0 {
+		ev = append(ev, "only the first 1 MB was read, so the file can't be shown to be harmless")
+	}
 	if at >= 0 {
 		ev = append(ev, fmt.Sprintf("%s: %s (line %d)", r.Name, snippet(f.head, at), lineAt(f.head, at)))
 	}
@@ -468,7 +502,9 @@ func (r *Rule) finding(s *scan, e *entry, f *fileData, at int) engine.Finding {
 }
 
 // snippet is the matched text from at to the end of its line, with
-// secrets masked and control bytes replaced, cut to maxSnippet bytes.
+// secrets masked and control and format characters replaced, cut to
+// maxSnippet bytes. Format characters include the bidi overrides that
+// would reorder how a crafted line shows in a terminal.
 // Secrets are masked before cutting, so a cut can't reveal part of one.
 func snippet(b []byte, at int) string {
 	end := at + 4*maxSnippet
@@ -478,7 +514,7 @@ func snippet(b []byte, at int) string {
 	end = min(end, len(b))
 	s := strings.ToValidUTF8(string(b[at:end]), "?")
 	s = strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
 			return '.'
 		}
 		return r
@@ -625,7 +661,7 @@ func runRules(s *scan, rules []*Rule, rel []string, e *entry, f *fileData) []eng
 		if !r.wants(rel, e.name) {
 			continue
 		}
-		if ok, at := r.match(f, e.regular()); ok {
+		if ok, at := r.match(e, f); ok {
 			out = append(out, r.finding(s, e, f, at))
 		}
 	}
