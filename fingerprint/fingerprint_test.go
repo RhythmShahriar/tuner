@@ -4,7 +4,9 @@
 package fingerprint
 
 import (
+	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/RhythmShahriar/tuner/matchers"
@@ -86,5 +88,23 @@ func TestComponents(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("component %d = %+v, want %+v", i, got[i], want[i])
 		}
+	}
+}
+
+func TestMethods(t *testing.T) {
+	m := Methods("").With("asset").With("rest").With("asset").With("")
+	if m != "asset,rest" || !m.Has("rest") || m.Has("readme") {
+		t.Errorf("set %q", m)
+	}
+	b, err := json.Marshal(Component{Type: "plugin", Slug: "x", FoundBy: m})
+	if err != nil || !strings.Contains(string(b), `"found_by":["asset","rest"]`) {
+		t.Fatalf("marshal %s, %v", b, err)
+	}
+	var back Component
+	if err := json.Unmarshal(b, &back); err != nil || back.FoundBy != m {
+		t.Errorf("round trip %q, %v", back.FoundBy, err)
+	}
+	if b, _ := json.Marshal(Component{Slug: "y"}); strings.Contains(string(b), "found_by") {
+		t.Errorf("empty set not omitted: %s", b)
 	}
 }

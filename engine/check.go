@@ -39,7 +39,7 @@ type Check struct {
 	ID         string         `yaml:"id"`
 	Name       string         `yaml:"name"`
 	Severity   Severity       `yaml:"severity"`
-	Confidence string         `yaml:"confidence"`
+	Confidence Confidence     `yaml:"confidence"`
 	Profile    Profile        `yaml:"profile"` // cheapest scan profile that runs this check
 	Tags       []string       `yaml:"tags"`
 	Requires   []string       `yaml:"requires"` // tech the fingerprint must find, e.g. wordpress
@@ -49,9 +49,31 @@ type Check struct {
 	Impact     string         `yaml:"impact"`
 	Fix        string         `yaml:"fix"`
 	References []string       `yaml:"references"`
+	FixServer  FixServer      `yaml:"fix_server"`
 
 	// File is the check's path inside the checks filesystem.
 	File string `yaml:"-"`
+}
+
+// FixServer holds web server config snippets that fix a finding. They
+// reach the finding as Finding.Fixes, keyed nginx and apache.
+type FixServer struct {
+	Nginx  string `yaml:"nginx"`
+	Apache string `yaml:"apache"`
+}
+
+// fixes returns the non-empty snippets by server name, or nil.
+func (f FixServer) fixes() map[string]string {
+	var m map[string]string
+	for name, v := range map[string]string{"nginx": f.Nginx, "apache": f.Apache} {
+		if v = strings.TrimSpace(v); v != "" {
+			if m == nil {
+				m = map[string]string{}
+			}
+			m[name] = v
+		}
+	}
+	return m
 }
 
 type Request struct {
@@ -135,7 +157,7 @@ func ParseCheck(data []byte) (*Check, error) {
 		return nil, fmt.Errorf("profile %q: want one of %v", c.Profile, Profiles)
 	}
 	if c.Confidence == "" {
-		c.Confidence = "high"
+		c.Confidence = ConfidenceHigh
 	}
 	if err := c.Match.Compile(); err != nil {
 		return nil, fmt.Errorf("match: %w", err)

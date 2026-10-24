@@ -6,6 +6,7 @@ package fingerprint
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"regexp"
 	"slices"
@@ -20,7 +21,7 @@ type Result struct {
 	WordPress string   `json:"wordpress_version,omitempty"`
 	PHP       string   `json:"php_version,omitempty"`
 	PHPBuild  string   `json:"php_build,omitempty"`  // full build string when it carries a distro suffix, e.g. 7.4.3-4ubuntu2.19
-	PHPSource string   `json:"php_source,omitempty"` // header and path the PHP version came from, e.g. "x-powered-by /wp-login.php"
+	PHPSource string   `json:"php_source,omitempty"` // where the PHP version came from, e.g. "x-powered-by /wp-login.php", cookie, probe, php on PATH, --php <path>
 	Server    string   `json:"server,omitempty"`
 
 	Components []Component `json:"components,omitempty"`
@@ -32,6 +33,52 @@ type Component struct {
 	Slug    string `json:"slug"`
 	Version string `json:"version,omitempty"`
 	Source  string `json:"version_source,omitempty"` // readme, style.css or asset
+
+	FoundBy    Methods `json:"found_by,omitempty"`   // how it was discovered: asset, rest, readme
+	Confidence string  `json:"confidence,omitempty"` // high, or low when only a weak hint matched
+}
+
+// Methods is a set of discovery methods such as asset, rest and readme. It
+// is a comma-separated string so Component stays comparable with ==; JSON
+// shows it as an array.
+type Methods string
+
+// List returns the methods in the order they were added.
+func (m Methods) List() []string {
+	if m == "" {
+		return nil
+	}
+	return strings.Split(string(m), ",")
+}
+
+// Has reports whether method is in the set.
+func (m Methods) Has(method string) bool { return slices.Contains(m.List(), method) }
+
+// With returns the set plus method.
+func (m Methods) With(method string) Methods {
+	switch {
+	case method == "" || m.Has(method):
+		return m
+	case m == "":
+		return Methods(method)
+	}
+	return m + "," + Methods(method)
+}
+
+// MarshalJSON writes the set as an array of strings.
+func (m Methods) MarshalJSON() ([]byte, error) { return json.Marshal(m.List()) }
+
+// UnmarshalJSON reads an array of strings.
+func (m *Methods) UnmarshalJSON(b []byte) error {
+	var list []string
+	if err := json.Unmarshal(b, &list); err != nil {
+		return err
+	}
+	*m = ""
+	for _, s := range list {
+		*m = m.With(s)
+	}
+	return nil
 }
 
 func (c Component) String() string {
