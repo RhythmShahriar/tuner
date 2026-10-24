@@ -16,10 +16,10 @@ import (
 )
 
 // A scan stays on the host the user named. The home page may redirect to
-// the www or apex twin of that host, or upgrade http to https, and the scan
-// follows. Anything else stops the target unless Options.FollowHost is set,
-// and even then the user's headers and cookies only go to the named host
-// and never over plain http when the target was https. A site also can't
+// the www or apex twin of that host or upgrade http to https; the scan
+// follows those. Anything else stops the target unless Options.FollowHost
+// is set. Even then the user's headers and cookies only go to the named
+// host, never over plain http when the target was https. A site also can't
 // point the scan at loopback, link-local or private addresses unless the
 // target itself is one: every connection is checked at dial time, so a DNS
 // answer that changes mid-scan (rebinding) is caught too.
@@ -49,7 +49,7 @@ type AddressError struct {
 }
 
 func (e *AddressError) Error() string {
-	return fmt.Sprintf("refusing to connect to %s at %s: a local or private address, and the target is not one", e.Host, e.Addr)
+	return fmt.Sprintf("refusing to connect to %s at %s: a local or private address while the target is not one", e.Host, e.Addr)
 }
 
 // resolver looks up the addresses of a host name.
@@ -228,8 +228,8 @@ func (ss *session) checkRedirect(req *http.Request, via []*http.Request) error {
 	if !ss.opts.FollowHost && !sameSite(ss.origin, req.URL) {
 		return &RedirectError{From: ss.origin, To: req.URL}
 	}
-	// The dial guard catches internal addresses too, but not through a
-	// proxy, and this gives a clearer message.
+	// The dial guard catches internal addresses too but not through a
+	// proxy. This check also gives a clearer message.
 	if !ss.internalOK && ss.internalHost(req.Context(), req.URL.Hostname()) {
 		return &RedirectError{From: ss.origin, To: req.URL, Internal: true}
 	}

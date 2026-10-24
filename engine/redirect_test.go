@@ -188,8 +188,7 @@ func TestFollowHostDropsUserHeaders(t *testing.T) {
 
 func TestTwinAndUpgradeRedirectsFollowed(t *testing.T) {
 	// site.test -> www.site.test on the same server.
-	var srv *logServer
-	srv = newLogServer(t, false, func(w http.ResponseWriter, r *http.Request) {
+	srv := newLogServer(t, false, func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.Host, "site.test:") {
 			http.Redirect(w, r, "http://www."+r.Host+r.URL.Path, http.StatusMovedPermanently)
 		}
@@ -229,7 +228,7 @@ func TestHTTPSDowngrade(t *testing.T) {
 		t.Errorf("http host got %d requests", len(got))
 	}
 
-	// Followed on request, but the user's headers never go over http.
+	// Followed on request but the user's headers never go over http.
 	if _, err := redirectScanner(t, &fakeNet{}, nil, true).Scan(context.Background(), secure.URL, Hooks{}); err != nil {
 		t.Fatal(err)
 	}
