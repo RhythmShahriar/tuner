@@ -17,10 +17,15 @@ permissions:
 jobs:
   # The shared workflows have no tags, so Dependabot can't bump these.
   # Move both SHAs by hand after a change in RhythmShahriar/.github.
+  # Build, vet and race tests on every OS a binary ships for. go.mod pins
+  # a released kit, so the job builds against it without a local checkout.
+  # ./... includes the scenario suite (testbed/scenarios).
   go:
-    uses: RhythmShahriar/.github/.github/workflows/ci-go.yml@d296f34c9b6629211c68561504d938c404afaf74 # master 2026-10-24
+    uses: RhythmShahriar/.github/.github/workflows/ci-go.yml@fb09694450362b6d4b68c631182d78a69b653c83 # master 2026-10-24
+    with:
+      os: '["ubuntu-latest", "windows-latest", "macos-latest"]'
   commitlint:
-    uses: RhythmShahriar/.github/.github/workflows/commitlint.yml@d296f34c9b6629211c68561504d938c404afaf74 # master 2026-10-24
+    uses: RhythmShahriar/.github/.github/workflows/commitlint.yml@fb09694450362b6d4b68c631182d78a69b653c83 # master 2026-10-24
 
   workflows:
     name: pins, actionlint and goreleaser check
@@ -46,16 +51,10 @@ jobs:
           version: v2.18.3
           args: check
 
-  # The shared go job tests on Linux only while Windows and macOS binaries
-  # ship too. go.mod pins a released kit, so like the shared job this one
-  # builds against it without linking a local checkout.
-  test:
-    name: test (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+  # The scenario suite again on its own, for its table of passes and
+  # expected failures in the job summary.
+  scenarios:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -63,18 +62,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      # The race detector needs cgo, which Windows runners don't set up.
-      # ./... includes the scenario suite (testbed/scenarios); its table of
-      # passes and expected failures goes to the job summary.
-      - name: go test
-        shell: bash
-        run: |
-          export TUNER_SCENARIO_SUMMARY="$GITHUB_STEP_SUMMARY"
-          if [ "$RUNNER_OS" = Windows ]; then
-            go test ./...
-          else
-            go test -race ./...
-          fi
+      - name: scenario suite
+        run: TUNER_SCENARIO_SUMMARY="$GITHUB_STEP_SUMMARY" make testbed-fast
 
   vuln:
     name: govulncheck
