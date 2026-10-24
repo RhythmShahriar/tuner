@@ -230,6 +230,15 @@ func (s *Scanner) Scan(ctx context.Context, target string, h Hooks) (*Result, er
 
 	home.TLS = ss.tlsInfo(ctx, home)
 	res := &Result{Target: ss.base.Redacted(), Fingerprint: fingerprint.Detect(home), TLS: home.TLS, Warnings: ss.warnings}
+	// A blocked or failing home page still gets scanned, since some checks
+	// may get through. The result is marked partial.
+	if v := detectWAF(home); v != nil {
+		res.BlockedBy, res.StoppedBy = v.id, "waf"
+		res.Warnings = append(res.Warnings, blockedWarning(v, ""))
+	} else if home.Status < 200 || home.Status > 399 {
+		res.StoppedBy = "home-status"
+		res.Warnings = append(res.Warnings, homeStatusWarning(home.Status))
+	}
 	// The PHP probe runs in every profile: it costs at most three requests,
 	// and without it quick scans would report the version as hidden behind
 	// a page cache.
@@ -253,11 +262,16 @@ func (s *Scanner) Scan(ctx context.Context, target string, h Hooks) (*Result, er
 	})
 
 	res.Soft404 = ss.soft404(ctx)
-	ss.emit(func() {
-		if h.Baseline != nil {
-			h.Baseline(res.Soft404)
-		}
-	})
+	// The baseline hook tells the user whether the server sends real 404s.
+	// Behind a block page that answer is the firewall's, not the site's,
+	// so it is left out rather than reported wrong.
+	if res.StoppedBy == "" && !ss.baselineBlocked(ctx) {
+		ss.emit(func() {
+			if h.Baseline != nil {
+				h.Baseline(res.Soft404)
+			}
+		})
+	}
 
 	type job struct {
 		c    *Check
@@ -328,7 +342,13 @@ feed:
 	res.Errors = ss.errors.Load()
 	res.Throttled = ss.throttled.Load()
 	res.Duration = time.Since(start)
-	res.Complete = ctx.Err() == nil
+	if res.BlockedBy == "" {
+		if v, n, seen := ss.waf.mostlyBlocked(); v != nil {
+			res.BlockedBy, res.StoppedBy = v.id, "waf"
+			res.Warnings = append(res.Warnings, blockedWarning(v, fmt.Sprintf(" on %d of %d check requests", n, seen)))
+		}
+	}
+	res.Complete = ctx.Err() == nil && res.StoppedBy == ""
 	return res, ctx.Err()
 }
 
@@ -352,6 +372,12 @@ func SortFindings(fs []Finding) {
 func (ss *session) run(ctx context.Context, c *Check, p string) (Finding, bool) {
 	r, err := ss.get(ctx, c.Request.Method, p)
 	if err != nil {
+		return Finding{}, false
+	}
+	// A block page says nothing about the site behind it.
+	v := detectWAF(r)
+	ss.waf.add(v)
+	if v != nil {
 		return Finding{}, false
 	}
 	ok, ev := c.Match.Match(r, func() bool { return ss.isBaseline(ctx, p, r) })
@@ -405,6 +431,7 @@ type session struct {
 	internalOK bool
 	mu         sync.Mutex
 	cache      map[string]*fetch
+	waf        wafTally // check responses that were block pages
 	requests   atomic.Int64
 	errors     atomic.Int64
 	throttled  atomic.Int64

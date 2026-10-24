@@ -50,6 +50,12 @@ func (ss *session) soft404(ctx context.Context) bool {
 	return err == nil && b.Status == 200
 }
 
+// baselineBlocked reports whether the soft-404 probe got a block page.
+func (ss *session) baselineBlocked(ctx context.Context) bool {
+	b, err := ss.get(ctx, "GET", probePath("/x", ss.token))
+	return err == nil && detectWAF(b) != nil
+}
+
 // similar compares two responses, ignoring the requested path echoed in the
 // body and allowing 5% size drift for pages with nonces or timestamps.
 func similar(a *matchers.Response, ap string, b *matchers.Response, bp string) bool {
