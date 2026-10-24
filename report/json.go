@@ -23,6 +23,7 @@ type Report struct {
 	Summary    map[engine.Severity]int `json:"summary"`
 	CheckSet   string                  `json:"check_set,omitempty"`  // built-in, pack or directory
 	CheckPack  string                  `json:"check_pack,omitempty"` // the pack's version, when check_set is pack
+	Baselined  int                     `json:"baselined"`            // findings a baseline file hid
 	*engine.Result
 }
 
@@ -53,15 +54,25 @@ func encoder(w io.Writer) *json.Encoder {
 // request, not how many scans succeeded, so a script reading a batch
 // always gets an array even when only one site could be reached.
 func JSON(w io.Writer, reports []Report, many bool) error {
+	return Write("json", w, reports, WriteOptions{Many: many})
+}
+
+// writeJSON is the json writer. Failed targets join the array as
+// {"target", "error"} entries after the reports.
+func writeJSON(w io.Writer, reports []Report, o WriteOptions) error {
 	enc := encoder(w)
 	enc.SetIndent("", "  ")
-	if len(reports) == 1 && !many {
+	if len(reports) == 1 && !o.Many && !o.Array && len(o.Failed) == 0 {
 		return enc.Encode(reports[0])
 	}
-	if reports == nil {
-		reports = []Report{}
+	all := make([]any, 0, len(reports)+len(o.Failed))
+	for _, r := range reports {
+		all = append(all, r)
 	}
-	return enc.Encode(reports)
+	for _, f := range o.Failed {
+		all = append(all, f)
+	}
+	return enc.Encode(all)
 }
 
 // JSONLine writes one finding as a single line, for streaming into jq or

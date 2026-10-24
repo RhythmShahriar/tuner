@@ -83,6 +83,11 @@ func sarifLevel(s engine.Severity) string {
 
 // SARIF writes all reports as one SARIF log with a run per target.
 func SARIF(w io.Writer, reports []Report, version string) error {
+	return Write("sarif", w, reports, WriteOptions{Version: version})
+}
+
+func writeSARIF(w io.Writer, reports []Report, o WriteOptions) error {
+	version := o.Version
 	log := sarifLog{
 		Schema:  "https://json.schemastore.org/sarif-2.1.0.json",
 		Version: "2.1.0",

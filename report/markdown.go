@@ -13,6 +13,10 @@ import (
 
 // Markdown writes reports for pasting into issues and pull requests.
 func Markdown(w io.Writer, reports []Report) error {
+	return Write("md", w, reports, WriteOptions{})
+}
+
+func writeMarkdown(w io.Writer, reports []Report, o WriteOptions) error {
 	var b strings.Builder
 	for i, r := range reports {
 		if i > 0 {
@@ -83,6 +87,15 @@ func Markdown(w io.Writer, reports []Report) error {
 			if len(f.References) > 0 {
 				b.WriteString("\n")
 			}
+		}
+	}
+	if len(o.Failed) > 0 {
+		if len(reports) > 0 {
+			b.WriteString("\n---\n\n")
+		}
+		b.WriteString("# Not scanned\n\n| Target | Error |\n|---|---|\n")
+		for _, f := range o.Failed {
+			fmt.Fprintf(&b, "| %s | %s |\n", mdEscape(f.Target), mdEscape(f.Error))
 		}
 	}
 	_, err := io.WriteString(w, b.String())
