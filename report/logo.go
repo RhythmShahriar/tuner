@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 )
 
@@ -126,7 +127,7 @@ func sanitizeSVG(data []byte) ([]byte, error) {
 				if a.Name.Space != "" || !svgAttrs[a.Name.Local] {
 					return nil, fmt.Errorf("attribute %q is not allowed in an SVG logo", SafeText(a.Name.Local))
 				}
-				if v := strings.ToLower(a.Value); strings.Contains(v, "url(") && !localRefs(v) {
+				if !safeValue(a.Value) {
 					return nil, fmt.Errorf("attribute %q points outside the logo", SafeText(a.Name.Local))
 				}
 				out.WriteString(" " + a.Name.Local + `="`)
@@ -156,17 +157,47 @@ func sanitizeSVG(data []byte) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
-// localRefs reports whether every url(...) in v points inside the
-// document, like fill="url(#grad)".
-func localRefs(v string) bool {
+// svgFuncs are the functions an attribute value may call besides
+// url(#id): transforms and colours, with plain numbers for arguments.
+var svgFuncs = map[string]bool{
+	"matrix": true, "translate": true, "scale": true, "rotate": true, "skewx": true, "skewy": true,
+	"rgb": true, "rgba": true, "hsl": true, "hsla": true,
+}
+
+var (
+	// svgLocalURL is url(#id), the only url() a logo may hold.
+	svgLocalURL = regexp.MustCompile(`^url\(\s*(?:#[\w.:-]+|"#[\w.:-]+"|'#[\w.:-]+')\s*\)`)
+	// svgCall is an allowed function with numeric arguments.
+	svgCall = regexp.MustCompile(`^([a-z]+)\(\s*[-+0-9.,e%\s]*\)`)
+)
+
+// safeValue reports whether an attribute value can't reach outside the
+// logo. A backslash is refused outright because CSS escapes like
+// "u\rl(" would read as url( to the browser but not to a substring
+// check. Every "(" must open url(#id) or an allowed function of numbers.
+func safeValue(v string) bool {
+	if strings.Contains(v, "\\") {
+		return false
+	}
+	v = strings.ToLower(v)
 	for {
-		i := strings.Index(v, "url(")
+		i := strings.IndexByte(v, '(')
 		if i < 0 {
 			return true
 		}
-		v = strings.TrimLeft(v[i+4:], ` "'`)
-		if !strings.HasPrefix(v, "#") {
+		start := i
+		for start > 0 && v[start-1] >= 'a' && v[start-1] <= 'z' {
+			start--
+		}
+		rest := v[start:]
+		if m := svgLocalURL.FindString(rest); m != "" {
+			v = rest[len(m):]
+			continue
+		}
+		m := svgCall.FindStringSubmatch(rest)
+		if m == nil || !svgFuncs[m[1]] {
 			return false
 		}
+		v = rest[len(m[0]):]
 	}
 }

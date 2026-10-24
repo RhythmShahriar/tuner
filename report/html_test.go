@@ -217,9 +217,21 @@ func TestLogo(t *testing.T) {
 		"text":       `just text`,
 		"two roots":  `<svg xmlns="http://www.w3.org/2000/svg"></svg><svg xmlns="http://www.w3.org/2000/svg"></svg>`,
 		"pi":         `<svg xmlns="http://www.w3.org/2000/svg"><?php echo 1 ?></svg>`,
+		"css escape": `<svg xmlns="http://www.w3.org/2000/svg"><rect fill="u\rl(http://evil.test/)"/></svg>`,
+		"hex escape": `<svg xmlns="http://www.w3.org/2000/svg"><rect fill="\75rl(http://evil.test/)"/></svg>`,
+		"other func": `<svg xmlns="http://www.w3.org/2000/svg"><rect fill="image(http://evil.test/)"/></svg>`,
+		"bare paren": `<svg xmlns="http://www.w3.org/2000/svg"><rect fill="(http://evil.test/)"/></svg>`,
+		"url chain":  `<svg xmlns="http://www.w3.org/2000/svg"><rect fill="url(#g) url(http://evil.test/)"/></svg>`,
 	} {
 		if _, err := LogoDataURI(writeLogo(t, "bad.svg", []byte(bad))); err == nil {
 			t.Errorf("%s: accepted", name)
+		}
+	}
+
+	// Transforms, colours and local references are plain values.
+	for _, v := range []string{"url(#g)", `url("#g")`, "URL( #g )", "translate(10 20) rotate(-45.5)", "rgb(255, 0, 0)", "matrix(1,0,0,1,0,0)", "#f00", "none"} {
+		if !safeValue(v) {
+			t.Errorf("safeValue(%q) = false", v)
 		}
 	}
 
