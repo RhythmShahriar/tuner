@@ -44,13 +44,59 @@ type Options struct {
 	Profile     Profile      // quick skips plugin and theme version lookups (not the PHP probe)
 	HTTPClient  *http.Client // optional base client, e.g. one that trusts a test server
 	Advisor     Advisor      // optional: known-vulnerability matching
+
+	// FollowHost lets the scan continue on another host when the home page
+	// redirects there. Headers are still only sent to the requested host.
+	FollowHost bool
+	// Plugins picks how hard plugin discovery tries; "" means passive.
+	Plugins PluginMode
+	// RequestBudget caps the requests discovery may spend; 0 means the
+	// mode's default.
+	RequestBudget int
+	// ResponseAdvisors look at the body behind a finding, e.g. an exposed
+	// composer.lock, and may add findings of their own.
+	ResponseAdvisors []ResponseAdvisor
 }
+
+// PluginMode is how plugin discovery runs on a remote scan.
+type PluginMode string
+
+const (
+	PluginsPassive PluginMode = "passive" // only what the site already shows: asset URLs, REST routes
+	PluginsDeep    PluginMode = "deep"    // also probes readme.txt of popular plugins
+)
 
 // Advisor turns what the fingerprint found into findings, e.g. by matching
 // versions against a vulnerability database. It runs alongside the checks.
 type Advisor interface {
 	Advise(ctx context.Context, base *url.URL, fp fingerprint.Result) (findings []Finding, warnings []string)
 }
+
+// StatusAdvisor is an Advisor that also says how complete its data was,
+// reported as Result.VulnData: ok, partial, missing or off.
+type StatusAdvisor interface {
+	Advisor
+	AdviseStatus(ctx context.Context, base *url.URL, fp fingerprint.Result) (findings []Finding, warnings []string, status string)
+}
+
+// ResponseAdvisor sees the body of a finding's response and may add
+// findings, e.g. known-vulnerable packages in an exposed composer.lock.
+type ResponseAdvisor interface {
+	AdviseResponse(ctx context.Context, f Finding, body []byte) (findings []Finding, warnings []string)
+}
+
+// Confidence says whether a finding is confirmed or only likely. The JSON
+// values are "high" and "low".
+type Confidence string
+
+const (
+	ConfidenceHigh Confidence = "high" // confirmed
+	ConfidenceLow  Confidence = "low"  // likely, e.g. a version a distro may have patched
+)
+
+// Confirmed reports whether the finding is confirmed rather than likely.
+// Anything but "low" counts as confirmed, matching how checks default.
+func (c Confidence) Confirmed() bool { return c != ConfidenceLow }
 
 // Advisory is one known vulnerability behind an advisor finding.
 type Advisory struct {
@@ -87,7 +133,7 @@ type Finding struct {
 	ID         string     `json:"id"`
 	Title      string     `json:"title"`
 	Severity   Severity   `json:"severity"`
-	Confidence string     `json:"confidence"`
+	Confidence Confidence `json:"confidence"`
 	Caveat     string     `json:"caveat,omitempty"` // why confidence is low, e.g. "a distro build may already include the fix"
 	Target     string     `json:"target"`
 	URL        string     `json:"url"`
@@ -99,6 +145,10 @@ type Finding struct {
 	Tags       []string   `json:"tags,omitempty"`
 	Advisories []Advisory `json:"advisories,omitempty"`
 	Source     string     `json:"source,omitempty"` // data provider, for attribution
+
+	Fingerprint string            `json:"fingerprint,omitempty"` // stable identity for baselines, set by report.Stamp
+	Fixes       map[string]string `json:"fixes,omitempty"`       // server config snippets by server: nginx, apache
+	Line        int               `json:"line,omitempty"`        // 1-based line in a local file
 }
 
 // Evidence shows why a finding fired. Secrets in it are always masked.
@@ -122,6 +172,13 @@ type Result struct {
 	Duration    time.Duration      `json:"-"`
 	Findings    []Finding          `json:"findings"`
 	Warnings    []string           `json:"warnings,omitempty"`
+
+	// Complete is true when every planned request ran. StoppedBy says why
+	// not: interrupted, max-time, waf, home-status or budget.
+	Complete  bool   `json:"complete"`
+	StoppedBy string `json:"stopped_by,omitempty"`
+	BlockedBy string `json:"blocked_by,omitempty"` // WAF or bot wall in the way, e.g. cloudflare
+	VulnData  string `json:"vuln_data,omitempty"`  // ok, partial, missing or off
 }
 
 // Counts returns the number of findings per severity.
@@ -259,25 +316,31 @@ feed:
 	close(ch)
 	wg.Wait()
 
-	slices.SortStableFunc(res.Findings, func(a, b Finding) int {
+	SortFindings(res.Findings)
+	res.Score = Score(res.Findings)
+	res.Requests = ss.requests.Load()
+	res.Errors = ss.errors.Load()
+	res.Throttled = ss.throttled.Load()
+	res.Duration = time.Since(start)
+	res.Complete = ctx.Err() == nil
+	return res, ctx.Err()
+}
+
+// SortFindings orders findings for reports: most severe first, confirmed
+// before likely within a severity, then by ID and path.
+func SortFindings(fs []Finding) {
+	slices.SortStableFunc(fs, func(a, b Finding) int {
 		if d := a.Severity.Rank() - b.Severity.Rank(); d != 0 {
 			return d
 		}
-		// Confirmed findings before "likely" ones within a severity.
-		if al, bl := a.Confidence == "low", b.Confidence == "low"; al != bl {
-			if al {
+		if ac, bc := a.Confidence.Confirmed(), b.Confidence.Confirmed(); ac != bc {
+			if bc {
 				return 1
 			}
 			return -1
 		}
 		return strings.Compare(a.ID+a.Path, b.ID+b.Path)
 	})
-	res.Score = Score(res.Findings)
-	res.Requests = ss.requests.Load()
-	res.Errors = ss.errors.Load()
-	res.Throttled = ss.throttled.Load()
-	res.Duration = time.Since(start)
-	return res, ctx.Err()
 }
 
 func (ss *session) run(ctx context.Context, c *Check, p string) (Finding, bool) {
@@ -304,6 +367,7 @@ func (ss *session) run(ctx context.Context, c *Check, p string) (Finding, bool) 
 		Fix:        strings.TrimSpace(c.Fix),
 		References: c.References,
 		Tags:       c.Tags,
+		Fixes:      c.FixServer.fixes(),
 	}
 	if c.Extract.Secrets {
 		f.Evidence.Secrets = matchers.FindSecrets(r.Body)

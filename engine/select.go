@@ -120,7 +120,7 @@ func Score(findings []Finding) int {
 	}
 	byID := map[string]*agg{}
 	for _, f := range findings {
-		low := f.Confidence == "low"
+		low := !f.Confidence.Confirmed()
 		a, ok := byID[f.ID]
 		if !ok {
 			byID[f.ID] = &agg{f.Severity, low}
