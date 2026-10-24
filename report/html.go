@@ -209,7 +209,7 @@ func htmlSiteFor(i int, r Report, old *Report, compared bool, sinceName string) 
 
 func htmlFindingFor(f engine.Finding) htmlFinding {
 	hf := htmlFinding{
-		Title: f.Title, ID: f.ID, Severity: f.Severity, Confidence: f.Confidence, Place: Place(f),
+		Title: f.Title, ID: f.ID, Severity: f.Severity, Confidence: string(f.Confidence), Place: Place(f),
 		Request: f.Evidence.Request, Status: f.Evidence.Status, Matched: f.Evidence.Matched[:matchedLimit(f)],
 		Impact: f.Impact, Fix: strings.TrimSpace(f.Fix), Source: f.Source,
 	}

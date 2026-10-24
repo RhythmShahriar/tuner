@@ -102,7 +102,7 @@ func Build(res diff.Result, since string, lowest engine.Severity, version string
 		}
 		it := Item{
 			Target: safe(stripUser(e.Target)), Fingerprint: e.Fingerprint, ID: safe(f.ID), Title: safe(f.Title),
-			Severity: f.Severity, Was: e.Was, Confidence: safe(f.Confidence),
+			Severity: f.Severity, Was: e.Was, Confidence: safe(string(f.Confidence)),
 			Location: safe(stripUser(report.Place(f))), Fix: safeBlock(f.Fix),
 		}
 		for _, a := range e.NewAdvisories {

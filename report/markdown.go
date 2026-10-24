@@ -56,7 +56,7 @@ func writeMarkdown(w io.Writer, reports []Report, o WriteOptions) error {
 		b.WriteString("\n## Details\n")
 		for _, f := range r.Findings {
 			fmt.Fprintf(&b, "\n### %s %s\n\n", sevEmoji(f.Severity), MDText(f.Title))
-			fmt.Fprintf(&b, "- **Check:** %s · **Severity:** %s · **Confidence:** %s\n", MDCode(f.ID), MDText(string(f.Severity)), MDText(f.Confidence))
+			fmt.Fprintf(&b, "- **Check:** %s · **Severity:** %s · **Confidence:** %s\n", MDCode(f.ID), MDText(string(f.Severity)), MDText(string(f.Confidence)))
 			if f.Confidence == "low" && f.Caveat != "" {
 				fmt.Fprintf(&b, "- **Why only likely:** %s\n", MDText(strings.TrimPrefix(f.Caveat, "likely: ")))
 			}
