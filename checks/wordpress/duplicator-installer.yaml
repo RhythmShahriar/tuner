@@ -1,0 +1,28 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: wp-duplicator-installer
+name: Duplicator installer left on the site
+severity: high
+confidence: medium
+tags: [wordpress, backup]
+request:
+  path: ["/installer.php", "/installer-backup.php", "/dup-installer/main.installer.php"]
+match:
+  all:
+    - status: 200
+    - regex: '(?i)\bduplicator\b'
+    - regex: '(?i)\binstall'
+    - not_baseline: true
+impact: The Duplicator installer can overwrite the site and its database. It also reveals paths and the name of the package archive.
+fix: |
+  Delete installer.php, installer-backup.php, the dup-installer folder and
+  any *_archive.zip or *.daf file from the web root. Duplicator's "Remove
+  installation files" button does this.
+fix_server:
+  nginx: |
+    location ~ ^/(installer(-backup)?\.php|dup-installer/) { deny all; }
+  apache: |
+    RedirectMatch 404 ^/(installer(-backup)?\.php|dup-installer/)
+references:
+  - https://cwe.mitre.org/data/definitions/459.html

@@ -1,0 +1,26 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: leak-ds-store-subdir
+name: .DS_Store file exposed in a subfolder
+severity: low
+tags: [leak, disclosure]
+request:
+  path: ["/wp-content/.DS_Store", "/wp-content/uploads/.DS_Store", "/wp-content/themes/.DS_Store", "/wp-content/plugins/.DS_Store", "/assets/.DS_Store", "/images/.DS_Store"]
+match:
+  all:
+    - status: 200
+    - magic: "0000000142756431"
+    - not_baseline: true
+impact: macOS folder metadata lists file names in the folder, including hidden backups and plugin names.
+fix: |
+  Delete .DS_Store files from the server, deploy without them and deny dotfiles.
+fix_server:
+  nginx: |
+    location ~ /\.(?!well-known) { deny all; }
+  apache: |
+    <FilesMatch "^\.">
+      Require all denied
+    </FilesMatch>
+references:
+  - https://cwe.mitre.org/data/definitions/538.html

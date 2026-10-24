@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "version": "2026.10.01-100000",
+  "commit": "0123456789abcdef0123456789abcdef01234567",
+  "created": "2026-10-01T10:00:00Z",
+  "min_tuner": "0.2.0",
+  "checks": 1,
+  "retired": [
+    "leak-old"
+  ]
+}

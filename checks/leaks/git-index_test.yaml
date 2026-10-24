@@ -1,0 +1,14 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+positive:
+  - name: index readable
+    routes:
+      /.git/index: {body_hex: "4449524300000002000000010000000000000000"}
+negative:
+  - name: not found
+    routes: {}
+  - name: soft-404 catch-all
+    default: {status: 200, body: "<html>Not found</html>"}
+  - name: catch-all that serves the same file for every path
+    default: {status: 200, body_hex: "44495243000000020000000100000000"}

@@ -1,0 +1,31 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: php-ini-exposed
+name: PHP settings file exposed
+severity: low
+tags: [php, disclosure]
+request:
+  path: ["/.user.ini", "/php.ini"]
+match:
+  all:
+    - status: 200
+    # Names only: the match stops at "=".
+    - regex: '(?mi)^[ \t]*(?:auto_prepend_file|auto_append_file|upload_max_filesize|post_max_size|memory_limit|max_execution_time|display_errors|error_log|open_basedir|disable_functions|session\.save_path)[ \t]*='
+    - not_regex: '(?i)<(?:!doctype|html|head|body)[\s>]'
+    - not_baseline: true
+extract:
+  secrets: true
+impact: PHP settings such as disabled functions, open_basedir and log paths are readable, which helps plan an attack. An auto_prepend_file line can point at injected code.
+fix: |
+  Deny .user.ini and php.ini in the web server. PHP reads them from disk,
+  so this changes nothing for PHP.
+fix_server:
+  nginx: |
+    location ~* /(\.user|php)\.ini$ { deny all; }
+  apache: |
+    <FilesMatch "^(\.user|php)\.ini$">
+      Require all denied
+    </FilesMatch>
+references:
+  - https://www.php.net/manual/en/configuration.file.per-user.php

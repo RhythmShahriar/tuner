@@ -15,5 +15,10 @@ fix: |
   Allow only TLS 1.2 and 1.3.
   nginx:  ssl_protocols TLSv1.2 TLSv1.3;
   apache: SSLProtocol -all +TLSv1.2 +TLSv1.3
+fix_server:
+  nginx: |
+    ssl_protocols TLSv1.2 TLSv1.3;
+  apache: |
+    SSLProtocol -all +TLSv1.2 +TLSv1.3
 references:
   - https://datatracker.ietf.org/doc/html/rfc8996

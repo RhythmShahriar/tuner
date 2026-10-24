@@ -1,0 +1,15 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+positive:
+  - name: status page public
+    routes:
+      /server-status: {body: "<html><head><title>Apache Status</title></head><body><h1>Apache Server Status for shop.example.test</h1></body></html>"}
+negative:
+  - name: not found
+    routes: {}
+  - name: forbidden
+    routes:
+      /server-status: {status: 403, body: "<title>403 Forbidden</title>"}
+  - name: catch-all that serves the status page for every path
+    default: {status: 200, body: "<html><title>Apache Status</title></html>"}

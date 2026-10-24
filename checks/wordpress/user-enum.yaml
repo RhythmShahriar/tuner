@@ -13,6 +13,7 @@ match:
   all:
     - status: 200
     - regex: '"slug"\s*:\s*"[^"]+"'
+    - not_baseline: true
 impact: Login names are public, which halves the work of a password-guessing attack.
 fix: |
   Restrict the users endpoint to logged-in users, e.g. with a security plugin, or:
@@ -20,3 +21,5 @@ fix: |
       if ( ! is_user_logged_in() ) { unset( $e['/wp/v2/users'], $e['/wp/v2/users/(?P<id>[\d]+)'] ); }
       return $e;
   } );
+references:
+  - https://developer.wordpress.org/rest-api/reference/users/

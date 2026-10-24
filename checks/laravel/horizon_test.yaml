@@ -1,0 +1,15 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+positive:
+  - name: dashboard public
+    routes:
+      /horizon: {body: "<html><head><title>Horizon - Shop</title></head><body><div id=\"horizon\"></div><script>window.Horizon = {\"path\":\"horizon\"};</script></body></html>"}
+negative:
+  - name: not found
+    routes: {}
+  - name: gate says no
+    routes:
+      /horizon: {status: 403}
+  - name: catch-all that serves the dashboard for every path
+    default: {status: 200, body: "<html><title>Horizon</title></html>"}

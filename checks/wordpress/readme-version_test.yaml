@@ -1,0 +1,17 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+positive:
+  - name: old readme with version
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
+      /readme.html: {body: "<html><head><title>WordPress &rsaquo; ReadMe</title></head><body><h1 id=\"logo\"><a href=\"https://wordpress.org/\"><img alt=\"WordPress\" src=\"wp-admin/images/wordpress-logo.png\" /></a><br /> Version 4.9.8</h1></body></html>"}
+negative:
+  - name: current readme without version
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
+      /readme.html: {body: "<html><head><title>WordPress &#8250; ReadMe</title></head><body><h1 id=\"logo\"><img alt=\"WordPress\" src=\"wp-admin/images/wordpress-logo.png\" /></h1></body></html>"}
+  - name: catch-all that serves the same readme for every path
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
+    default: {status: 200, body: "<h1>WordPress<br /> Version 4.9.8</h1>"}

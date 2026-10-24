@@ -1,0 +1,19 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+positive:
+  - name: old copy listed by nginx
+    routes:
+      /old/: {body: "<html><head><title>Index of /old/</title></head><body><h1>Index of /old/</h1><hr><pre><a href=\"../\">../</a>\n<a href=\"wp-config.php\">wp-config.php</a>\n<a href=\"wp-content/\">wp-content/</a>\n</pre></body></html>"}
+  - name: staging listed by Apache
+    routes:
+      /staging/: {body: "<html><head><title>Index of /staging</title></head><body><h1>Index of /staging</h1></body></html>"}
+negative:
+  - name: not found
+    routes: {}
+  - name: forbidden
+    routes:
+      /old/: {status: 403}
+      /staging/: {status: 403}
+  - name: catch-all that lists every path
+    default: {status: 200, body: "<html><head><title>Index of {{path}}</title></head></html>"}

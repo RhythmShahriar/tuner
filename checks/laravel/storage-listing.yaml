@@ -1,0 +1,25 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: laravel-storage-listing
+name: Laravel storage folder listed
+severity: high
+tags: [laravel, leak]
+request:
+  path: ["/storage/logs/", "/storage/framework/"]
+match:
+  all:
+    - status: 200
+    - regex: '<title>Index of /storage/(?:logs|framework)'
+    - not_baseline: true
+impact: Logs, cached views and session files can be browsed. They hold errors, queries and session data.
+fix: |
+  Point the document root at public/, so storage/ is out of reach. The
+  public disk link at /storage serves storage/app/public only.
+fix_server:
+  nginx: |
+    location ~ ^/storage/(logs|framework)/ { deny all; }
+  apache: |
+    RedirectMatch 404 ^/storage/(logs|framework)/
+references:
+  - https://laravel.com/docs/deployment#server-configuration

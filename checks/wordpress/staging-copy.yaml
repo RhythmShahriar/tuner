@@ -1,0 +1,29 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: wp-staging-copy
+name: Old or staging WordPress copy reachable
+severity: medium
+tags: [wordpress, backup]
+request:
+  path: ["/staging/wp-login.php", "/old/wp-login.php", "/wp-old/wp-login.php", "/dev/wp-login.php", "/test/wp-login.php", "/new/wp-login.php"]
+match:
+  all:
+    - status: 200
+    - regex: '<form[^>]+id="loginform"'
+    - not_baseline: true
+impact: A second WordPress install is live next to the site. Copies are rarely updated, so their core and plugins are easy targets. They often share the database password.
+fix: |
+  Delete the copy, or put it behind a password or an IP allow list.
+  Staging belongs on its own host name with access control.
+fix_server:
+  nginx: |
+    # Edit the list first: it blocks every folder it names. Keep only the
+    # folders that hold a copy and none your live site uses.
+    location ~ ^/(staging|old|wp-old|dev|test|new)/ { deny all; }
+  apache: |
+    # Edit the list first: it blocks every folder it names. Keep only the
+    # folders that hold a copy and none your live site uses.
+    RedirectMatch 404 ^/(staging|old|wp-old|dev|test|new)/
+references:
+  - https://developer.wordpress.org/advanced-administration/security/hardening/

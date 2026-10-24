@@ -1,0 +1,13 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+positive:
+  - name: logs listed
+    routes:
+      /storage/logs/: {body: "<html><head><title>Index of /storage/logs/</title></head><body><h1>Index of /storage/logs/</h1><hr><pre><a href=\"../\">../</a>\n<a href=\"laravel.log\">laravel.log</a>\n</pre></body></html>"}
+negative:
+  - name: not found
+    routes: {}
+  - name: forbidden
+    routes:
+      /storage/logs/: {status: 403}

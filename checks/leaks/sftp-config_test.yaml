@@ -1,0 +1,15 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+positive:
+  - name: VS Code SFTP settings readable
+    routes:
+      /.vscode/sftp.json: {body: '{"name": "shop", "host": "ftp.shop.example.test", "protocol": "sftp", "username": "deploy", "remotePath": "/var/www"}'}
+negative:
+  - name: not found
+    routes: {}
+  - name: docs page with an example
+    routes:
+      /sftp-config.json: {body: '<html><body><pre>{"host": "example.com"}</pre></body></html>'}
+  - name: catch-all that serves the same JSON for every path
+    default: {status: 200, body: '{"host": "x"}'}

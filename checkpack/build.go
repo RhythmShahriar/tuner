@@ -42,11 +42,15 @@ func CurrentBuild() BuildInfo {
 // pack is rebuilt from master on every checks change, and releases are
 // cut from master.
 func (p *Pack) Supersedes(b BuildInfo) bool {
+	return p.supersedes(b)
+}
+
+func (m Manifest) supersedes(b BuildInfo) bool {
 	switch {
 	case b.Modified:
 		return false
 	case b.Time.IsZero():
 		return true
 	}
-	return p.Created.After(b.Time)
+	return m.Created.After(b.Time)
 }

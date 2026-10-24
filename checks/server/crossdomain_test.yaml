@@ -1,0 +1,15 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+positive:
+  - name: every domain allowed
+    routes:
+      /crossdomain.xml: {body: "<?xml version=\"1.0\"?>\n<cross-domain-policy>\n  <allow-access-from domain=\"*\" />\n</cross-domain-policy>\n"}
+negative:
+  - name: not found
+    routes: {}
+  - name: own domain only
+    routes:
+      /crossdomain.xml: {body: "<cross-domain-policy><allow-access-from domain=\"*.shop.example.test\" /></cross-domain-policy>"}
+  - name: catch-all that serves the same file for every path
+    default: {status: 200, body: "<allow-access-from domain=\"*\" />"}

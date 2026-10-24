@@ -1,0 +1,31 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: php-phpmyadmin
+name: phpMyAdmin login page public
+severity: medium
+tags: [php, database, admin]
+request:
+  path: ["/phpmyadmin/", "/phpMyAdmin/", "/pma/", "/myadmin/", "/dbadmin/"]
+match:
+  all:
+    - status: 200
+    - not_baseline: true
+  any:
+    - regex: '<title>phpMyAdmin\b'
+    - regex: 'name="pma_username"'
+impact: The database admin login is open to the internet, so anyone can guess passwords against it. Old phpMyAdmin versions have known flaws.
+fix: |
+  Limit phpMyAdmin to your IP address or a VPN, add HTTP authentication in
+  front of it, or remove it and reach the database over an SSH tunnel.
+fix_server:
+  nginx: |
+    # To keep access, add "allow <your IP>;" before deny all.
+    location ~* ^/(phpmyadmin|pma|myadmin|dbadmin)/ { deny all; }
+  apache: |
+    # To keep access, use "Require ip <your IP>" instead.
+    <LocationMatch "(?i)^/(phpmyadmin|pma|myadmin|dbadmin)/">
+      Require all denied
+    </LocationMatch>
+references:
+  - https://docs.phpmyadmin.net/en/latest/setup.html#securing-your-phpmyadmin-installation

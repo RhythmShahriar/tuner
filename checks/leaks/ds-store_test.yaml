@@ -8,3 +8,5 @@ positive:
 negative:
   - name: soft-404 catch-all
     default: {status: 200, body: "<html>Not found</html>"}
+  - name: catch-all that serves the same file for every path
+    default: {status: 200, body_hex: "00000001427564310000100000000800"}

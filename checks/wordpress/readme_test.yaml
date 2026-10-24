@@ -10,3 +10,7 @@ negative:
   - name: removed
     routes:
       /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
+  - name: catch-all that serves the readme for every path
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
+    default: {status: 200, body: "<html><title>WordPress &rsaquo; ReadMe</title></html>"}

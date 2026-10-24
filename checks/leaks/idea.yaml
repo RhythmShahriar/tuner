@@ -1,0 +1,26 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: leak-idea
+name: JetBrains .idea folder exposed
+severity: medium
+tags: [leak, source]
+request:
+  path: ["/.idea/workspace.xml", "/.idea/dataSources.xml"]
+match:
+  all:
+    - status: 200
+    - regex: '<project version="4">'
+    - not_baseline: true
+impact: IDE project files list source paths, recent files, run settings and database connections.
+fix: |
+  Deploy without the .idea folder and deny dotfiles.
+fix_server:
+  nginx: |
+    location ~ /\.(?!well-known) { deny all; }
+  apache: |
+    <FilesMatch "^\.">
+      Require all denied
+    </FilesMatch>
+references:
+  - https://cwe.mitre.org/data/definitions/538.html

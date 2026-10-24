@@ -11,5 +11,17 @@ match:
   all:
     - status: 200
     - regex: '(?i)<title>[^<]*Adminer'
+    - not_baseline: true
 impact: A public database login page invites password guessing against the database.
 fix: Remove Adminer when you're done with it, or restrict it to your IP address.
+fix_server:
+  nginx: |
+    # To keep access, add "allow <your IP>;" before deny all.
+    location ~* ^/(_?adminer\.php|adminer/) { deny all; }
+  apache: |
+    # To keep access, use "Require ip <your IP>" instead.
+    <LocationMatch "(?i)^/(_?adminer\.php|adminer/)">
+      Require all denied
+    </LocationMatch>
+references:
+  - https://www.adminer.org/en/

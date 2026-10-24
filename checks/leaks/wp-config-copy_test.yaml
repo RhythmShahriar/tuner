@@ -1,0 +1,19 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+positive:
+  - name: numbered copy readable
+    expect_secrets: true
+    routes:
+      /wp-config.php.1:
+        body: |
+          <?php
+          define( 'DB_NAME', 'shop' );
+          define( 'DB_PASSWORD', 'tr0ub4dor-and-3' );
+negative:
+  - name: not found
+    routes: {}
+  - name: soft-404 catch-all
+    default: {status: 200, body: "<html>Not found</html>"}
+  - name: catch-all that shows a sample config for every path
+    default: {status: 200, body: "<pre>define( 'DB_NAME', 'database_name_here' );</pre>"}

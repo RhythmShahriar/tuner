@@ -1,0 +1,15 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+positive:
+  - name: log public
+    routes:
+      /elmah.axd: {body: "<html><head><title>Error log for /LM/W3SVC/1/ROOT on WEB01 (Page #1)</title></head><body><a href=\"https://elmah.github.io/\">ELMAH</a></body></html>"}
+negative:
+  - name: not found
+    routes: {}
+  - name: remote access off
+    routes:
+      /elmah.axd: {status: 403}
+  - name: catch-all that serves the log for every path
+    default: {status: 200, body: "<title>Error log for x</title> ELMAH"}

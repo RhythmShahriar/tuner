@@ -1,0 +1,26 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: laravel-debugbar
+name: Laravel Debugbar request history public
+severity: high
+tags: [laravel, debug]
+request:
+  path: ["/_debugbar/open"]
+match:
+  all:
+    - status: 200
+    - regex: '"utime"\s*:'
+    - regex: '"(?:method|uri)"\s*:'
+    - not_baseline: true
+impact: Debugbar keeps recent requests with their queries, session data and headers. This endpoint hands them to anyone.
+fix: |
+  Set APP_DEBUG=false and DEBUGBAR_ENABLED=false in production and install
+  barryvdh/laravel-debugbar with --dev.
+fix_server:
+  nginx: |
+    location ~ ^/_debugbar/ { deny all; }
+  apache: |
+    RedirectMatch 404 ^/_debugbar/
+references:
+  - https://github.com/barryvdh/laravel-debugbar

@@ -1,0 +1,12 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+positive:
+  - name: status public
+    routes:
+      /nginx_status: {body: "Active connections: 3 \nserver accepts handled requests\n 10 10 20 \nReading: 0 Writing: 1 Waiting: 2 \n"}
+negative:
+  - name: not found
+    routes: {}
+  - name: catch-all that serves the same text for every path
+    default: {status: 200, body: "Active connections: 1\n"}

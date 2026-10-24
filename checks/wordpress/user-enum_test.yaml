@@ -11,3 +11,7 @@ negative:
     routes:
       /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
       /wp-json/wp/v2/users: {status: 401, body: '{"code":"rest_cannot_access"}'}
+  - name: catch-all that serves the same JSON for every path
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
+    default: {status: 200, body: '[{"id":1,"slug":"admin"}]'}

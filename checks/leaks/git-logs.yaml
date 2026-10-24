@@ -1,0 +1,28 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: leak-git-logs
+name: .git logs or HEAD files exposed
+severity: high
+tags: [leak, source]
+request:
+  path: ["/.git/logs/HEAD", "/.git/ORIG_HEAD", "/.git/FETCH_HEAD"]
+match:
+  all:
+    - status: 200
+    - not_baseline: true
+  any:
+    - regex: '\A[0-9a-f]{40} [0-9a-f]{40} '
+    - regex: '\A[0-9a-f]{40}\s'
+extract:
+  secrets: true
+impact: The files confirm a readable .git folder and show commit IDs, authors and remote URLs, which may hold tokens.
+fix: |
+  Deny access to .git, or deploy without it.
+fix_server:
+  nginx: |
+    location ~ /\.git { deny all; }
+  apache: |
+    RedirectMatch 404 /\.git
+references:
+  - https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/02-Configuration_and_Deployment_Management_Testing/04-Review_Old_Backup_and_Unreferenced_Files_for_Sensitive_Information

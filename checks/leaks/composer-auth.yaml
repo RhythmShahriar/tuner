@@ -16,3 +16,13 @@ extract:
   secrets: true
 impact: Private package registry tokens are readable.
 fix: Remove auth.json from the web root and revoke the tokens in it.
+fix_server:
+  nginx: |
+    location = /auth.json { deny all; }
+  apache: |
+    <Files "auth.json">
+      Require all denied
+    </Files>
+references:
+  - https://cwe.mitre.org/data/definitions/538.html
+  - https://getcomposer.org/doc/articles/authentication-for-private-packages.md

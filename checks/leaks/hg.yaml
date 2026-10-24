@@ -1,0 +1,28 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: leak-hg
+name: .hg (Mercurial) directory exposed
+severity: high
+tags: [leak, source]
+request:
+  path: ["/.hg/requires", "/.hg/hgrc"]
+match:
+  all:
+    - status: 200
+    - not_baseline: true
+  any:
+    - regex: '\A(?:revlogv1|store|fncache|dotencode|generaldelta|sparserevlog|share-safe)\r?\n'
+    - regex: '(?m)^\[paths\]'
+extract:
+  secrets: true
+impact: The repository can be downloaded with its full history, often including old credentials.
+fix: |
+  Deny access to .hg, or deploy without it.
+fix_server:
+  nginx: |
+    location ~ /\.(hg|bzr)(/|$) { deny all; }
+  apache: |
+    RedirectMatch 404 /\.(hg|bzr)(/|$)
+references:
+  - https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/02-Configuration_and_Deployment_Management_Testing/04-Review_Old_Backup_and_Unreferenced_Files_for_Sensitive_Information

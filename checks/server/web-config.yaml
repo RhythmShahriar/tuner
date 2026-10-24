@@ -1,0 +1,29 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: srv-web-config
+name: IIS web.config exposed
+severity: medium
+tags: [server, leak, secrets]
+request:
+  path: ["/web.config"]
+match:
+  all:
+    - status: 200
+    - regex: '<configuration[\s>]'
+    - regex: '<(?:system\.webServer|appSettings|connectionStrings|system\.web)[\s>]'
+    - not_baseline: true
+extract:
+  secrets: true
+impact: The IIS config of a migrated site is readable, with rewrite rules and sometimes connection strings and keys.
+fix: |
+  Delete web.config if the site no longer runs on IIS, or deny it.
+fix_server:
+  nginx: |
+    location ~* /web\.config$ { deny all; }
+  apache: |
+    <Files "web.config">
+      Require all denied
+    </Files>
+references:
+  - https://learn.microsoft.com/en-us/iis/configuration/

@@ -15,3 +15,12 @@ impact: Reveals the exact PHP version, making known vulnerabilities easy to targ
 fix: |
   php.ini: expose_php = Off
   nginx:   fastcgi_hide_header X-Powered-By;
+fix_server:
+  nginx: |
+    fastcgi_hide_header X-Powered-By;
+  apache: |
+    Header unset X-Powered-By
+    Header always unset X-Powered-By
+references:
+  - https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Headers_Cheat_Sheet.html
+  - https://www.php.net/manual/en/ini.core.php#ini.expose-php

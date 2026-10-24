@@ -19,3 +19,12 @@ fix: |
   Delete the dump from the web root and keep backups outside it.
   nginx:  location ~* \.sql$ { deny all; }
   apache: <FilesMatch "\.sql$"> Require all denied </FilesMatch>
+fix_server:
+  nginx: |
+    location ~* \.sql$ { deny all; }
+  apache: |
+    <FilesMatch "\.sql$">
+      Require all denied
+    </FilesMatch>
+references:
+  - https://cwe.mitre.org/data/definitions/530.html

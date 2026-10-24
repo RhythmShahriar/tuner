@@ -16,3 +16,5 @@ fix: |
   Mark session cookies HttpOnly.
   php.ini: session.cookie_httponly = 1
   laravel: 'http_only' => true in config/session.php
+references:
+  - https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html

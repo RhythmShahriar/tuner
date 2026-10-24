@@ -17,3 +17,10 @@ fix: |
   Turn off auto-indexing.
   nginx:  autoindex off;
   apache: Options -Indexes
+fix_server:
+  nginx: |
+    autoindex off;
+  apache: |
+    Options -Indexes
+references:
+  - https://cwe.mitre.org/data/definitions/548.html

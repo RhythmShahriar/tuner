@@ -1,0 +1,28 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: wp-wpforms-uploads
+name: WPForms uploads listed
+severity: medium
+tags: [wordpress, leak, privacy]
+requires: [wordpress]
+request:
+  path: ["/wp-content/uploads/wpforms/"]
+match:
+  all:
+    - status: 200
+    - regex: '<title>Index of /wp-content/uploads/wpforms'
+    - not_baseline: true
+impact: Files people sent through forms, such as CVs and ID scans, can be browsed by anyone.
+fix: |
+  Turn off directory listing for the folder. The .htaccess file WPForms
+  writes there only works on Apache.
+fix_server:
+  nginx: |
+    location ~ ^/wp-content/uploads/wpforms/ { autoindex off; }
+  apache: |
+    <LocationMatch "^/wp-content/uploads/wpforms/">
+      Options -Indexes
+    </LocationMatch>
+references:
+  - https://cwe.mitre.org/data/definitions/548.html

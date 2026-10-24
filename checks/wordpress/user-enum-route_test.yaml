@@ -1,0 +1,16 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+positive:
+  - name: users listed by query
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
+      /?rest_route=/wp/v2/users: {body: '[{"id":1,"name":"Admin","slug":"admin"}]'}
+negative:
+  - name: endpoint locked down
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
+      /?rest_route=/wp/v2/users: {status: 401, body: '{"code":"rest_cannot_access"}'}
+  - name: query ignored
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}

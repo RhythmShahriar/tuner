@@ -1,0 +1,17 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+positive:
+  - name: backup folder listed
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
+      /wp-content/uploads/: {body: "<html><head><title>Index of /wp-content/uploads/</title></head><body><h1>Index of /wp-content/uploads/</h1><hr><pre><a href=\"../\">../</a>\n<a href=\"2026/\">2026/</a>\n<a href=\"backwpup-4f2a9c-backups/\">backwpup-4f2a9c-backups/</a>\n<a href=\"backwpup-4f2a9c-logs/\">backwpup-4f2a9c-logs/</a>\n</pre></body></html>"}
+negative:
+  - name: no BackWPup folders
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
+      /wp-content/uploads/: {body: "<html><head><title>Index of /wp-content/uploads/</title></head><body><h1>Index of /wp-content/uploads/</h1><hr><pre><a href=\"../\">../</a>\n<a href=\"2026/\">2026/</a>\n</pre></body></html>"}
+  - name: listing off
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
+      /wp-content/uploads/: {status: 403}

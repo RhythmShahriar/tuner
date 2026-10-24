@@ -1,0 +1,22 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: laravel-horizon
+name: Laravel Horizon dashboard public
+severity: medium
+tags: [laravel, admin]
+request:
+  path: ["/horizon", "/horizon/dashboard"]
+match:
+  all:
+    - status: 200
+    - not_baseline: true
+  any:
+    - regex: 'window\.Horizon\s*='
+    - regex: '(?i)<title>[^<]*\bHorizon\b[^<]*</title>'
+impact: Anyone can see queued jobs and their data and retry or delete failed jobs.
+fix: |
+  Limit who passes the viewHorizon gate in HorizonServiceProvider. Outside
+  the local environment, Horizon denies everyone the gate does not allow.
+references:
+  - https://laravel.com/docs/horizon#dashboard-authorization

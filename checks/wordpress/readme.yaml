@@ -12,5 +12,15 @@ match:
   all:
     - status: 200
     - regex: '(?i)<title>WordPress[^<]*ReadMe'
+    - not_baseline: true
 impact: Confirms WordPress and can hint at the installed version.
 fix: Delete readme.html after each core update, or deny it in the web server.
+fix_server:
+  nginx: |
+    location = /readme.html { deny all; }
+  apache: |
+    <Files "readme.html">
+      Require all denied
+    </Files>
+references:
+  - https://developer.wordpress.org/advanced-administration/security/hardening/

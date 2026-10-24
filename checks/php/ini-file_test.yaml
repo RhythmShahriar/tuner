@@ -1,0 +1,18 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+positive:
+  - name: .user.ini readable
+    routes:
+      /.user.ini: {body: "upload_max_filesize = 64M\npost_max_size = 64M\nauto_prepend_file = /home/shop/public_html/wordfence-waf.php\n"}
+  - name: php.ini readable
+    routes:
+      /php.ini: {body: "[PHP]\nmemory_limit = 256M\ndisplay_errors = Off\n"}
+negative:
+  - name: not found
+    routes: {}
+  - name: docs page that shows ini lines
+    routes:
+      /php.ini: {body: "<html><body><pre>\nmemory_limit = 256M\n</pre></body></html>"}
+  - name: catch-all that serves the same settings for every path
+    default: {status: 200, body: "memory_limit = 256M\n"}

@@ -1,0 +1,27 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: srv-apache-status
+name: Apache server-status page public
+severity: medium
+tags: [server, disclosure]
+request:
+  path: ["/server-status"]
+match:
+  all:
+    - status: 200
+    - regex: '<title>Apache Status</title>'
+    - not_baseline: true
+impact: The page shows every request being served, with client IP addresses, URLs (query strings and tokens included) and virtual hosts.
+fix: |
+  Allow mod_status from localhost only, or turn it off (a2dismod status).
+fix_server:
+  nginx: |
+    # Only when nginx proxies to Apache.
+    location = /server-status { deny all; }
+  apache: |
+    <Location "/server-status">
+      Require local
+    </Location>
+references:
+  - https://httpd.apache.org/docs/2.4/mod/mod_status.html

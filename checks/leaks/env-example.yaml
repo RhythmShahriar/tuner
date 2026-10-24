@@ -1,0 +1,37 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: leak-env-example
+name: Example .env file with real secrets
+severity: high
+tags: [leak, secrets, php, laravel]
+request:
+  path: ["/.env.example", "/.env.sample", "/.env.dist", "/.env.template"]
+match:
+  all:
+    - status: 200
+    - not_regex: '(?i)<(?:!doctype|html|head|body)[\s>]'
+    - not_baseline: true
+  # Formats that are never placeholders. Evidence goes through the masking
+  # rules, which hide each of these values.
+  any:
+    - regex: '(?m)^APP_KEY=base64:[A-Za-z0-9+/]{43}='
+    - regex: '\b(?:AKIA|ASIA)[0-9A-Z]{16}\b'
+    - regex: '\b(?:sk|rk)_live_[0-9a-zA-Z]{16,}'
+    - regex: '\bgh[pousr]_[A-Za-z0-9]{36,}'
+    - regex: '\bxox[abposr]-[0-9A-Za-z-]{10,}'
+extract:
+  secrets: true
+impact: The example file was filled with real keys, which are now public. Example files are usually not covered by dotfile rules that list .env only.
+fix: |
+  Rotate every key in the file, put placeholders back in the example and
+  deny dotfiles in the web server.
+fix_server:
+  nginx: |
+    location ~ /\.(?!well-known) { deny all; }
+  apache: |
+    <FilesMatch "^\.">
+      Require all denied
+    </FilesMatch>
+references:
+  - https://cwe.mitre.org/data/definitions/798.html

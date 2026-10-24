@@ -1,0 +1,28 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: wp-wc-logs
+name: WooCommerce logs listed
+severity: high
+tags: [wordpress, leak]
+requires: [wordpress]
+request:
+  path: ["/wp-content/uploads/wc-logs/"]
+match:
+  all:
+    - status: 200
+    - regex: '<title>Index of /wp-content/uploads/wc-logs'
+    - regex: 'href="[^"]+\.log"'
+    - not_baseline: true
+impact: WooCommerce logs can hold order details, customer emails and payment gateway responses.
+fix: |
+  Turn off directory listing and deny the folder. WooCommerce 8.6 and newer
+  can also keep logs in the database (WooCommerce, Status, Logs, Settings).
+fix_server:
+  nginx: |
+    location ~ ^/wp-content/uploads/wc-logs/ { deny all; }
+  apache: |
+    RedirectMatch 404 ^/wp-content/uploads/wc-logs/
+references:
+  - https://woocommerce.com/document/understanding-the-woocommerce-system-status-report/
+  - https://cwe.mitre.org/data/definitions/532.html

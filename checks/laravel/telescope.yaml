@@ -1,0 +1,23 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: laravel-telescope
+name: Laravel Telescope dashboard public
+severity: high
+tags: [laravel, debug]
+request:
+  path: ["/telescope", "/telescope/requests"]
+match:
+  all:
+    - status: 200
+    - not_baseline: true
+  any:
+    - regex: 'window\.Telescope\s*='
+    - regex: '(?i)<title>[^<]*\bTelescope\b[^<]*</title>'
+impact: Telescope shows every request, query, job, mail and exception, often with session data, tokens and personal data.
+fix: |
+  Install Telescope for local use only (composer require laravel/telescope --dev
+  and register it only when APP_ENV=local), or limit who passes the viewTelescope
+  gate in TelescopeServiceProvider.
+references:
+  - https://laravel.com/docs/telescope#dashboard-authorization

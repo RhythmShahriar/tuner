@@ -1,0 +1,27 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: wp-duplicator-archive
+name: Duplicator backup archives listed
+severity: critical
+tags: [wordpress, backup, leak]
+requires: [wordpress]
+request:
+  path: ["/wp-content/backups-dup-lite/", "/wp-content/backups-dup-pro/", "/wp-snapshots/"]
+match:
+  all:
+    - status: 200
+    - regex: '<title>Index of /(?:wp-content/backups-dup-(?:lite|pro)|wp-snapshots)'
+    - regex: 'href="[^"]+_(?:archive\.(?:zip|daf)|installer\.php)"'
+    - not_baseline: true
+impact: The listing links to Duplicator packages, each a full copy of the site and its database.
+fix: |
+  Delete old packages, keep new ones in remote storage and deny the
+  package folders.
+fix_server:
+  nginx: |
+    location ~ ^/(wp-content/backups-dup-(lite|pro)|wp-snapshots)/ { deny all; }
+  apache: |
+    RedirectMatch 404 ^/(wp-content/backups-dup-(lite|pro)|wp-snapshots)/
+references:
+  - https://cwe.mitre.org/data/definitions/530.html

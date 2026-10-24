@@ -1,0 +1,31 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: wp-uploads-php-listed
+name: PHP file listed in uploads
+severity: high
+tags: [wordpress, malware, disclosure]
+requires: [wordpress]
+request:
+  path: ["/wp-content/uploads/"]
+match:
+  all:
+    - status: 200
+    - regex: '<title>Index of /wp-content/uploads'
+    - regex: '(?i)href="[^"?]+\.(?:php[0-9]?|phtml|phar)"'
+    - not_baseline: true
+impact: Uploads should hold media only. A PHP file there is often a web shell left by an attacker. The open listing shows it to anyone.
+fix: |
+  Check every PHP file in wp-content/uploads, remove the ones you did not
+  put there and find out how they got in. Then stop PHP from running in
+  uploads and turn off directory listing.
+fix_server:
+  nginx: |
+    location ~* ^/wp-content/uploads/.*\.(php[0-9]?|phtml|phar)$ { deny all; }
+  apache: |
+    <LocationMatch "(?i)^/wp-content/uploads/.*\.(php[0-9]?|phtml|phar)$">
+      Require all denied
+    </LocationMatch>
+references:
+  - https://developer.wordpress.org/advanced-administration/security/hardening/
+  - https://cwe.mitre.org/data/definitions/434.html

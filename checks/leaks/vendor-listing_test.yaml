@@ -1,0 +1,13 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+positive:
+  - name: vendor listed
+    routes:
+      /vendor/: {body: "<html><head><title>Index of /vendor/</title></head><body><h1>Index of /vendor/</h1><hr><pre><a href=\"../\">../</a>\n<a href=\"autoload.php\">autoload.php</a>\n<a href=\"composer/\">composer/</a>\n<a href=\"guzzlehttp/\">guzzlehttp/</a>\n</pre></body></html>"}
+negative:
+  - name: not found
+    routes: {}
+  - name: forbidden
+    routes:
+      /vendor/: {status: 403}

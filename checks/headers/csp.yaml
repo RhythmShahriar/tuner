@@ -16,3 +16,10 @@ impact: Without a CSP, an XSS bug can load scripts from anywhere.
 fix: |
   Start with a report-only policy and tighten it:
   nginx:  add_header Content-Security-Policy-Report-Only "default-src 'self'" always;
+fix_server:
+  nginx: |
+    add_header Content-Security-Policy-Report-Only "default-src 'self'" always;
+  apache: |
+    Header always set Content-Security-Policy-Report-Only "default-src 'self'"
+references:
+  - https://cheatsheetseries.owasp.org/cheatsheets/Content_Security_Policy_Cheat_Sheet.html

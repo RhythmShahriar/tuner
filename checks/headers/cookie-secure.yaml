@@ -17,3 +17,5 @@ fix: |
   Mark cookies Secure on HTTPS sites.
   php.ini: session.cookie_secure = 1
   laravel: SESSION_SECURE_COOKIE=true
+references:
+  - https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html

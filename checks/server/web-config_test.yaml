@@ -1,0 +1,14 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+positive:
+  - name: config readable
+    routes:
+      /web.config: {body: "<?xml version=\"1.0\"?>\n<configuration>\n  <system.webServer>\n    <rewrite><rules></rules></rewrite>\n  </system.webServer>\n</configuration>\n"}
+negative:
+  - name: not found
+    routes: {}
+  - name: soft-404 catch-all
+    default: {status: 200, body: "<html>Not found</html>"}
+  - name: catch-all that serves the same file for every path
+    default: {status: 200, body: "<configuration><system.webServer></system.webServer></configuration>"}

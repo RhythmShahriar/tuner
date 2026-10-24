@@ -1,0 +1,63 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+positive:
+  - name: real app key
+    expect_secrets: true
+    routes:
+      /.env.example:
+        body: |
+          APP_NAME=Shop
+          APP_KEY=base64:c2hvcC1leGFtcGxlLXRlc3QtYXBwLWtleS0wMTIzNDU=
+  - name: real AWS key
+    expect_secrets: true
+    routes:
+      /.env.sample:
+        body: |
+          AWS_ACCESS_KEY_ID=AKIAQWERTYUIOPASDFGH
+          AWS_DEFAULT_REGION=eu-west-1
+  # Fixture values are kept shorter than or unlike the real formats so
+  # secret scanners don't flag this file.
+  - name: live Stripe secret key
+    expect_secrets: true
+    routes:
+      /.env.dist:
+        body: |
+          STRIPE_SECRET=sk_live_FixtureOnly000000
+  - name: live Stripe restricted key
+    expect_secrets: true
+    routes:
+      /.env.dist:
+        body: |
+          STRIPE_KEY=rk_live_FixtureOnly000000
+  - name: GitHub token
+    expect_secrets: true
+    routes:
+      /.env.template:
+        body: |
+          GITHUB_TOKEN=ghp_000000000000000000000000000000000000
+  - name: Slack bot token
+    expect_secrets: true
+    routes:
+      /.env.example:
+        body: |
+          SLACK_BOT_TOKEN=xoxb-fixture-not-a-real-token
+negative:
+  - name: not found
+    routes: {}
+  - name: placeholders only
+    routes:
+      /.env.example:
+        body: |
+          APP_NAME=Laravel
+          APP_KEY=
+          DB_PASSWORD=secret
+          AWS_ACCESS_KEY_ID=
+          STRIPE_SECRET=sk_test_FixtureOnly000000
+          GITHUB_TOKEN=ghp_short
+          SLACK_BOT_TOKEN=xoxb-
+  - name: docs page with a sample key
+    routes:
+      /.env.example: {body: "<html><body><pre>APP_KEY=base64:c2hvcC1leGFtcGxlLXRlc3QtYXBwLWtleS0wMTIzNDU=</pre></body></html>"}
+  - name: catch-all that serves the same file for every path
+    default: {status: 200, body: "APP_KEY=base64:c2hvcC1leGFtcGxlLXRlc3QtYXBwLWtleS0wMTIzNDU=\n"}

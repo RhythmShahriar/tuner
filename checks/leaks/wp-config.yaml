@@ -22,6 +22,7 @@ match:
   all:
     - status: 200
     - regex: 'define\(\s*[''"]DB_(?:NAME|USER|PASSWORD|HOST)[''"]'
+    - not_baseline: true
 extract:
   secrets: true
 impact: Database credentials and authentication salts are readable, which allows full site takeover.
@@ -30,5 +31,12 @@ fix: |
   password and regenerate salts (https://api.wordpress.org/secret-key/1.1/salt/).
   nginx:  location ~* wp-config { deny all; }
   apache: <FilesMatch "wp-config"> Require all denied </FilesMatch>
+fix_server:
+  nginx: |
+    location ~* wp-config { deny all; }
+  apache: |
+    <FilesMatch "wp-config">
+      Require all denied
+    </FilesMatch>
 references:
   - https://developer.wordpress.org/advanced-administration/security/hardening/

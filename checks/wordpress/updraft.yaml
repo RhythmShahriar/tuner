@@ -1,0 +1,28 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: wp-updraft-backups
+name: UpdraftPlus backups listed
+severity: critical
+tags: [wordpress, backup, leak]
+requires: [wordpress]
+request:
+  path: ["/wp-content/updraft/"]
+match:
+  all:
+    - status: 200
+    - regex: '<title>Index of /wp-content/updraft'
+    - regex: 'href="backup_[^"]+\.(?:zip|gz)"'
+    - not_baseline: true
+impact: The listing links to full site backups, the database with password hashes and personal data included.
+fix: |
+  Send UpdraftPlus backups to remote storage and delete the local copies.
+  The .htaccess file UpdraftPlus writes there only works on Apache, so on
+  nginx deny the folder.
+fix_server:
+  nginx: |
+    location ~ ^/wp-content/updraft/ { deny all; }
+  apache: |
+    RedirectMatch 404 ^/wp-content/updraft/
+references:
+  - https://cwe.mitre.org/data/definitions/530.html

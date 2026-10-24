@@ -1,0 +1,18 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+positive:
+  - name: package listed
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
+      /wp-content/backups-dup-lite/: {body: "<html><head><title>Index of /wp-content/backups-dup-lite/</title></head><body><h1>Index of /wp-content/backups-dup-lite/</h1><hr><pre><a href=\"../\">../</a>\n<a href=\"20261001_shop_8f3e2a1b_20261001120000_archive.zip\">20261001_shop_8f3e2a1b_20261001120000_archive.zip</a>\n<a href=\"index.php\">index.php</a>\n</pre></body></html>"}
+negative:
+  - name: no packages
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
+      /wp-content/backups-dup-lite/: {body: "<html><head><title>Index of /wp-content/backups-dup-lite/</title></head><body><h1>Index of /wp-content/backups-dup-lite/</h1><hr><pre><a href=\"../\">../</a>\n<a href=\"index.php\">index.php</a>\n</pre></body></html>"}
+  - name: forbidden
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
+      /wp-content/backups-dup-lite/: {status: 403}
+      /wp-snapshots/: {status: 403}
