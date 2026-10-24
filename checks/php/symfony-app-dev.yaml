@@ -1,0 +1,28 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: php-symfony-app-dev
+name: Symfony dev front controller public
+severity: high
+tags: [php, symfony, debug]
+request:
+  path: ["/app_dev.php", "/frontend_dev.php", "/backend_dev.php"]
+match:
+  all:
+    - status: 200
+    - not_baseline: true
+  any:
+    - regex: 'id="sf-toolbar-'
+    - regex: '/_wdt/[0-9a-f]+'
+    - regex: 'sfWebDebug'
+impact: The site runs in debug mode through this file, with the debug toolbar and profiler showing requests, queries and configuration.
+fix: |
+  Delete app_dev.php and the other *_dev.php front controllers from
+  production deploys.
+fix_server:
+  nginx: |
+    location ~ ^/(app|frontend|backend)_dev\.php(/|$) { deny all; }
+  apache: |
+    RedirectMatch 404 ^/(app|frontend|backend)_dev\.php(/|$)
+references:
+  - https://symfony.com/doc/current/profiler.html

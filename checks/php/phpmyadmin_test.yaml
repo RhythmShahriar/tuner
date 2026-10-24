@@ -1,0 +1,15 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+positive:
+  - name: login page public
+    routes:
+      /phpmyadmin/: {body: '<html><head><title>phpMyAdmin</title></head><body><form method="post"><input type="text" name="pma_username" id="input_username"></form></body></html>'}
+negative:
+  - name: not found
+    routes: {}
+  - name: forbidden
+    routes:
+      /phpmyadmin/: {status: 403}
+  - name: catch-all that serves the login page for every path
+    default: {status: 200, body: "<html><title>phpMyAdmin</title></html>"}

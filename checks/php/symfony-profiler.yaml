@@ -1,0 +1,27 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: php-symfony-profiler
+name: Symfony profiler public
+severity: high
+tags: [php, symfony, debug]
+request:
+  path: ["/_profiler/"]
+match:
+  all:
+    - status: 200
+    - not_baseline: true
+  any:
+    - regex: '(?i)<title>Symfony Profiler'
+    - regex: 'class="sf-toolbar'
+impact: The profiler shows every recent request with its headers, session, queries and environment, secrets included.
+fix: |
+  Run production with APP_ENV=prod and APP_DEBUG=0, and install
+  symfony/web-profiler-bundle with --dev only.
+fix_server:
+  nginx: |
+    location ~ ^/(_profiler|_wdt)(/|$) { deny all; }
+  apache: |
+    RedirectMatch 404 ^/(_profiler|_wdt)(/|$)
+references:
+  - https://symfony.com/doc/current/profiler.html

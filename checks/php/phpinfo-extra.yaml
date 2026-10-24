@@ -1,0 +1,18 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: php-phpinfo-extra
+name: phpinfo() page exposed at another name
+severity: medium
+tags: [php, disclosure]
+request:
+  path: ["/pi.php", "/infos.php", "/phpversion.php", "/php-info.php", "/phpinfo/", "/wp-content/phpinfo.php"]
+match:
+  all:
+    - status: 200
+    - regex: '<title>(?:PHP [0-9.]+ - )?phpinfo\(\)</title>'
+    - not_baseline: true
+impact: Shows the PHP version, loaded modules, server paths and environment variables, which may include secrets.
+fix: Delete the file. phpinfo() pages should never be left on a live server.
+references:
+  - https://www.php.net/manual/en/function.phpinfo.php

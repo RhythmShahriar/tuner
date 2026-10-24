@@ -1,0 +1,15 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+positive:
+  - name: toolbar shows
+    routes:
+      /app_dev.php: {body: "<html><body>Shop<div id=\"sf-toolbar-0a1b2c\" class=\"sf-toolbar\"></div><script>Sfjs.load('sf-toolbar-0a1b2c', '/app_dev.php/_wdt/0a1b2c');</script></body></html>"}
+negative:
+  - name: blocked by the default guard
+    routes:
+      /app_dev.php: {status: 403, body: "You are not allowed to access this file. Check app_dev.php for more information."}
+  - name: soft-404 catch-all
+    default: {status: 200, body: "<html>Not found</html>"}
+  - name: catch-all that shows the toolbar for every path
+    default: {status: 200, body: "<div id=\"sf-toolbar-0a1b2c\"></div>"}
