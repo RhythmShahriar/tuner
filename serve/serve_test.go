@@ -447,7 +447,9 @@ func TestWebhookSignature(t *testing.T) {
 		got <- delivery{b, r.Header.Clone()}
 	}))
 	defer recv.Close()
-	h := newHarness(t, func(c *Config) { c.WebhookSecret = secret })
+	// The receiver is on loopback, which a scan's webhook may reach only
+	// when the server allows it.
+	h := newHarness(t, func(c *Config) { c.WebhookSecret, c.WebhookAllowPrivate = secret, true })
 	h.runner.lines = []string{`{"id":"leak-dotenv","title":"Exposed .env","severity":"critical","url":"https://example.com/.env","evidence":{"matched":["APP_KEY=****"]}}`}
 	tg := h.verified("example.com")
 	_, sc := h.do("POST", "/v0/scans", map[string]any{"target_id": tg["id"], "webhook_url": recv.URL + "/hook?key=abc"})
@@ -876,5 +878,62 @@ func TestFileVerificationPlainHTTP(t *testing.T) {
 	code, body := h.do("POST", "/v0/targets/"+tg["id"].(string)+"/verify", map[string]string{"method": "file"})
 	if code != http.StatusOK || body["verified_by"] != "file" {
 		t.Errorf("http file proof: %d %v", code, body)
+	}
+}
+
+// TestWebhookPrivateRefused covers a scan's webhook_url on a private or
+// local address: refused up front when literal, and at the dial when a
+// name resolves to one, so the receiver never hears from the server.
+func TestWebhookPrivateRefused(t *testing.T) {
+	var hits atomic.Int32
+	recv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits.Add(1) }))
+	defer recv.Close()
+	h := newHarness(t, func(c *Config) { c.WebhookSecret = "s" })
+	tg := h.verified("example.com")
+	for _, u := range []string{recv.URL, "http://169.254.169.254/latest/meta-data", "http://[::1]:20170/", "http://10.1.2.3/", "http://localhost:20170/"} {
+		code, body := h.do("POST", "/v0/scans", map[string]any{"target_id": tg["id"], "webhook_url": u})
+		if code != http.StatusBadRequest || !strings.Contains(fmt.Sprint(body["error"]), "--webhook-allow-private") {
+			t.Errorf("%s: %d %v", u, code, body)
+		}
+	}
+
+	// A name is checked on the address it resolves to.
+	port := recv.Listener.Addr().(*net.TCPAddr).Port
+	named := fmt.Sprintf("http://tuner-test.localtest.invalid:%d/hook", port)
+	client := &http.Client{Timeout: 5 * time.Second, Transport: publicTransport(&http.Transport{})}
+	tr := client.Transport.(*http.Transport)
+	dial := tr.DialContext
+	tr.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return dial(ctx, network, fmt.Sprintf("127.0.0.1:%d", port)) // stands in for DNS
+	}
+	err := h.srv.post(client, named, "s_1", []byte("{}"))
+	var perm permanentError
+	if !errors.As(err, &perm) || !strings.Contains(err.Error(), "private or local address") {
+		t.Errorf("post to a private address: %v", err)
+	}
+	if hits.Load() != 0 {
+		t.Errorf("receiver got %d requests", hits.Load())
+	}
+
+	for _, a := range []string{"8.8.8.8", "2606:4700::1111"} {
+		if !publicHost(a) {
+			t.Errorf("%s refused", a)
+		}
+	}
+	for _, a := range []string{"127.0.0.1", "::ffff:10.0.0.1", "100.64.1.1", "0.1.2.3", "fe80::1", "LOCALHOST", "a.localhost."} {
+		if publicHost(a) {
+			t.Errorf("%s allowed", a)
+		}
+	}
+}
+
+// TestWebhookBadURL checks that a URL that can't make a request reads as
+// such, not as "HTTP 0".
+func TestWebhookBadURL(t *testing.T) {
+	h := newHarness(t, nil)
+	err := h.srv.post(&http.Client{Timeout: time.Second}, "http://a b/\x7f", "s_1", nil)
+	var perm permanentError
+	if !errors.As(err, &perm) || err.Error() != "bad webhook URL" {
+		t.Errorf("err %v", err)
 	}
 }

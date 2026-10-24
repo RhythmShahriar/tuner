@@ -81,6 +81,11 @@ type Config struct {
 	// name its own too. WebhookSecret signs them (HMAC-SHA256).
 	WebhookURL    string
 	WebhookSecret string
+	// WebhookAllowPrivate lets a scan request's webhook_url reach
+	// loopback, private and link-local addresses. Off, a token holder
+	// can't make the server POST to its own network or a cloud metadata
+	// service. WebhookURL is the operator's and is never limited.
+	WebhookAllowPrivate bool
 	// WebhookRetry is the wait before each retry of a failed delivery
 	// (default 5s, 30s, 2m).
 	WebhookRetry []time.Duration

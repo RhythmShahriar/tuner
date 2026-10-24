@@ -13,9 +13,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strconv"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/RhythmShahriar/tuner/engine"
@@ -89,11 +93,15 @@ func payload(rec scanRecord, now time.Time) WebhookPayload {
 
 // deliver POSTs the completion to u, retrying network errors and 5xx or
 // 429 replies after each WebhookRetry wait. Redirects are not followed:
-// the signature is for this URL only.
-func (s *Server) deliver(u string, rec scanRecord) {
+// the signature is for this URL only. publicOnly refuses to connect to a
+// private or local address, for a URL a scan request named.
+func (s *Server) deliver(u string, rec scanRecord, publicOnly bool) {
 	client := *s.cfg.HTTP
 	client.Timeout = 10 * time.Second
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	if publicOnly {
+		client.Transport = publicTransport(client.Transport)
+	}
 	host := u
 	if pu, err := url.Parse(u); err == nil {
 		host = pu.Host // the full URL may carry a secret: log the host only
@@ -125,10 +133,78 @@ func (s *Server) deliver(u string, rec scanRecord) {
 	}
 }
 
-// permanentError is a reply that a retry won't change, such as 400.
-type permanentError struct{ code int }
+// permanentError is a failure that a retry won't change, such as a 400
+// reply or a URL that can't be used.
+type permanentError struct{ msg string }
 
-func (e permanentError) Error() string { return "HTTP " + strconv.Itoa(e.code) }
+func (e permanentError) Error() string { return e.msg }
+
+func httpError(code int) permanentError { return permanentError{"HTTP " + strconv.Itoa(code)} }
+
+// errPrivateAddr is a webhook host that resolves to an address the scan
+// request may not reach: loopback, private, link-local (such as a cloud
+// metadata service) or otherwise not public.
+var errPrivateAddr = errors.New("private or local address")
+
+// nonPublic lists the ranges beyond what netip's Is* methods cover that
+// aren't reachable public hosts.
+var nonPublic = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"), // carrier-grade NAT
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"), // benchmarking
+	netip.MustParsePrefix("240.0.0.0/4"),
+}
+
+// publicAddr reports whether a is a public unicast address.
+func publicAddr(a netip.Addr) bool {
+	a = a.Unmap()
+	if !a.IsValid() || a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast() || a.IsUnspecified() || a.IsMulticast() ||
+		a.IsLinkLocalMulticast() || a.IsInterfaceLocalMulticast() {
+		return false
+	}
+	for _, p := range nonPublic {
+		if p.Contains(a) {
+			return false
+		}
+	}
+	return true
+}
+
+// publicHost reports whether a webhook host can be refused right away: a
+// literal private address or localhost. Other names are checked when
+// they are dialed, so a name that resolves to one is refused too.
+func publicHost(host string) bool {
+	if a, err := netip.ParseAddr(host); err == nil {
+		return publicAddr(a)
+	}
+	h := strings.ToLower(strings.TrimSuffix(host, "."))
+	return h != "localhost" && !strings.HasSuffix(h, ".localhost")
+}
+
+// publicTransport copies rt (the default transport when it isn't an
+// *http.Transport) into one that dials public addresses only. The check
+// runs on the address actually dialed, after DNS, so a name can't be
+// pointed at a private address between a check and the connection. A
+// proxy is not used: it would make the connection on our behalf.
+func publicTransport(rt http.RoundTripper) http.RoundTripper {
+	base, ok := rt.(*http.Transport)
+	if !ok {
+		base = http.DefaultTransport.(*http.Transport)
+	}
+	t := base.Clone()
+	t.Proxy = nil
+	d := &net.Dialer{Timeout: 10 * time.Second, Control: func(_, address string, _ syscall.RawConn) error {
+		ap, err := netip.ParseAddrPort(address)
+		if err != nil || !publicAddr(ap.Addr()) {
+			return errPrivateAddr
+		}
+		return nil
+	}}
+	t.DialContext = d.DialContext
+	t.DialTLSContext = nil
+	return t
+}
 
 func (s *Server) post(client *http.Client, u, id string, body []byte) error {
 	// Not tied to s.ctx: a shutdown still lets the last try go out.
@@ -136,7 +212,7 @@ func (s *Server) post(client *http.Client, u, id string, body []byte) error {
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
 	if err != nil {
-		return permanentError{}
+		return permanentError{"bad webhook URL"}
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", s.cfg.UserAgent)
@@ -149,6 +225,9 @@ func (s *Server) post(client *http.Client, u, id string, body []byte) error {
 		if errors.As(err, &ue) {
 			err = ue.Err // the URL may hold a token
 		}
+		if errors.Is(err, errPrivateAddr) {
+			return permanentError{"the host resolves to a private or local address; start serve with --webhook-allow-private to allow it"}
+		}
 		return err
 	}
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
@@ -159,6 +238,6 @@ func (s *Server) post(client *http.Client, u, id string, body []byte) error {
 	case c == http.StatusTooManyRequests || c >= 500:
 		return fmt.Errorf("HTTP %d", c)
 	default:
-		return permanentError{c}
+		return httpError(c)
 	}
 }

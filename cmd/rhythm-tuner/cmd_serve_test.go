@@ -128,8 +128,11 @@ func TestServeFlags(t *testing.T) {
 	t.Setenv("TUNER_SERVE_TOKEN", "test-token-0123456789")
 	t.Setenv("TUNER_WEBHOOK_SECRET", "hook-secret")
 	cfg, _, err := planServe([]string{"--listen", "0.0.0.0:9000", "--webhook", "https://hooks.example/x", "--data", t.TempDir()})
-	if err != nil || cfg.WebhookSecret != "hook-secret" || cfg.WebhookURL != "https://hooks.example/x" {
+	if err != nil || cfg.WebhookSecret != "hook-secret" || cfg.WebhookURL != "https://hooks.example/x" || cfg.WebhookAllowPrivate {
 		t.Errorf("%+v %v", cfg, err)
+	}
+	if cfg, _, err := planServe([]string{"--webhook-allow-private", "--data", t.TempDir()}); err != nil || !cfg.WebhookAllowPrivate {
+		t.Errorf("--webhook-allow-private: %+v %v", cfg, err)
 	}
 	if cache, _ := os.UserCacheDir(); cache != "" {
 		cfg, _, _ := planServe(nil)

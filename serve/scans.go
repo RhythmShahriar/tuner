@@ -227,8 +227,13 @@ func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "webhooks need the server started with a signing secret (TUNER_WEBHOOK_SECRET)")
 			return
 		}
-		if u, err := url.Parse(req.WebhookURL); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+		u, err := url.Parse(req.WebhookURL)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
 			writeError(w, http.StatusBadRequest, "webhook_url: want an http or https URL")
+			return
+		}
+		if !s.cfg.WebhookAllowPrivate && !publicHost(u.Hostname()) {
+			writeError(w, http.StatusBadRequest, "webhook_url: "+u.Hostname()+" is a private or local address; start serve with --webhook-allow-private to allow it")
 			return
 		}
 	}
@@ -427,10 +432,11 @@ func (s *Server) finish(sc *scan, status string, exit int, msg string) {
 	s.store.dropActive(sc.id)
 	s.logf("scan %s %s%s", sc.id, status, suffix(msg))
 	rec := sc.record()
-	for _, u := range []string{s.cfg.WebhookURL, hook} {
-		if u != "" {
-			s.hooks.Go(func() { s.deliver(u, rec) })
-		}
+	if u := s.cfg.WebhookURL; u != "" {
+		s.hooks.Go(func() { s.deliver(u, rec, false) }) // the operator's choice
+	}
+	if hook != "" {
+		s.hooks.Go(func() { s.deliver(hook, rec, !s.cfg.WebhookAllowPrivate) })
 	}
 }
 

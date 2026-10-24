@@ -62,11 +62,16 @@ Flags:
       --webhook <url>        POST every finished scan here, signed
       --webhook-secret <s>   HMAC-SHA256 key for webhook signatures; prefer
                              TUNER_WEBHOOK_SECRET, which ps can't show
+      --webhook-allow-private
+                             let a scan's webhook_url reach loopback,
+                             private and link-local addresses (default off)
       --exec <binary>        Tuner binary to run scans with (default: this one)
 
 Webhooks carry X-Tuner-Signature: sha256=<hex HMAC-SHA256 of the body>,
 X-Tuner-Event: scan.completed and X-Tuner-Delivery: <scan id>. They are
 retried after 5s, 30s and 2m when the receiver fails or answers 5xx/429.
+A scan's own webhook_url must be a public address unless the server runs
+with --webhook-allow-private; --webhook is yours and may be any address.
 
 Examples:
   TUNER_SERVE_TOKEN=$(openssl rand -hex 32) rhythm tuner serve --listen 0.0.0.0:8080 --data /var/lib/tuner
@@ -113,6 +118,7 @@ func planServe(args []string) (serve.Config, string, error) {
 	maxQueue := fs.Int("max-queue", serve.DefaultMaxQueue, "")
 	webhook := fs.String("webhook", "", "")
 	secret := fs.String("webhook-secret", os.Getenv("TUNER_WEBHOOK_SECRET"), "")
+	allowPrivate := fs.Bool("webhook-allow-private", false, "")
 	exe := fs.String("exec", "", "")
 	pos, err := parseInterspersed(fs, args)
 	if err != nil {
@@ -157,7 +163,7 @@ func planServe(args []string) (serve.Config, string, error) {
 		// Scans run in the data folder, so nothing they might write
 		// lands in the server's working directory.
 		Runner:     serve.ExecRunner(*exe, *dataDir),
-		WebhookURL: *webhook, WebhookSecret: *secret,
+		WebhookURL: *webhook, WebhookSecret: *secret, WebhookAllowPrivate: *allowPrivate,
 		UserAgent: fmt.Sprintf("rhythm-tuner/%s (+https://rythm.sh/tuner)", version),
 		Version:   version,
 	}, *listen, nil
