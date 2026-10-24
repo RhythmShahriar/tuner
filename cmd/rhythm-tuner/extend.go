@@ -5,7 +5,6 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"io"
 	"strings"
 
@@ -82,13 +81,14 @@ func builtinCommand(name string) bool {
 	return false
 }
 
-// commandUsage lists the registered commands in the usage layout.
-func commandUsage() string {
-	var b strings.Builder
+// commandUsage lists the registered commands for the Usage list; name is
+// what starts Tuner, as cmdName gives it.
+func commandUsage(name string) []usageLine {
+	var lines []usageLine
 	for _, c := range commands {
-		fmt.Fprintf(&b, "  %-34s %s\n", "rhythm tuner "+c.Name, c.Summary)
+		lines = append(lines, usageLine{cmd: name + " " + c.Name, summary: c.Summary})
 	}
-	return b.String()
+	return lines
 }
 
 // extensionHelp joins every scan extension's help section.

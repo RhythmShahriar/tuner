@@ -1091,3 +1091,58 @@ func TestHelpAndReadmeClaims(t *testing.T) {
 		}
 	}
 }
+
+// TestMain names the binary "rhythm tuner" for every test, as the router
+// does, so messages read the same however the test binary is called.
+func TestMain(m *testing.M) {
+	if os.Getenv(invokedAsEnv) == "" {
+		os.Setenv(invokedAsEnv, "rhythm tuner")
+	}
+	os.Exit(m.Run())
+}
+
+func TestCommandName(t *testing.T) {
+	old := argv0
+	defer func() { argv0 = old }()
+	for _, c := range []struct{ env, argv0, want string }{
+		{"", "/go/bin/rhythm-tuner", "rhythm-tuner"},
+		{"", `C:\Users\me\go\bin\rhythm-tuner.EXE`, "rhythm-tuner"},
+		{"", "./tuner", "tuner"},
+		{"", "", "rhythm-tuner"},
+		{"rhythm tuner", "/usr/local/bin/rhythm-tuner", "rhythm tuner"},
+		{"rhythm t", "/usr/local/bin/rhythm-tuner", "rhythm t"},
+		{"rhythm\x1b[2Jtuner", "/go/bin/rhythm-tuner", "rhythm-tuner"},
+	} {
+		t.Setenv(invokedAsEnv, c.env)
+		argv0 = c.argv0
+		if got := cmdName(); got != c.want {
+			t.Errorf("env %q argv0 %q: %q, want %q", c.env, c.argv0, got, c.want)
+		}
+	}
+
+	t.Setenv(invokedAsEnv, "")
+	argv0 = "/go/bin/rhythm-tuner"
+	_, out, _ := tuner(t, "--help")
+	if !strings.Contains(out, "  rhythm-tuner scan <url>... [flags] scan one or more sites\n") ||
+		!strings.Contains(out, "  rhythm-tuner scan example.com --profile quick") || strings.Contains(out, "rhythm tuner scan") {
+		t.Errorf("go install name:\n%s", out)
+	}
+	_, _, errs := tuner(t, "scan")
+	if !strings.Contains(errs, "try: rhythm-tuner scan example.com") {
+		t.Errorf("hint: %s", errs)
+	}
+
+	t.Setenv(invokedAsEnv, "rhythm tuner")
+	_, out, _ = tuner(t, "--help")
+	if !strings.Contains(out, "  rhythm tuner scan <url>... [flags] scan one or more sites\n") || strings.Contains(out, "rhythm-tuner scan") {
+		t.Errorf("router name:\n%s", out)
+	}
+	// A long alias keeps the descriptions lined up after it.
+	t.Setenv(invokedAsEnv, "rhythm a-very-long-tool-name")
+	_, out, _ = tuner(t, "--help")
+	if !strings.Contains(out, "  rhythm a-very-long-tool-name scan <url>... [flags] scan one or more sites\n"+
+		"  rhythm a-very-long-tool-name scan <dir> [flags]    scan a site's files on the server\n") ||
+		!strings.Contains(out, "\n"+strings.Repeat(" ", 53)+"PHP vulnerability data now\n") {
+		t.Errorf("long name:\n%s", out)
+	}
+}

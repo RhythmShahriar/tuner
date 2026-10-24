@@ -62,6 +62,8 @@ irm https://rythm.sh/install.ps1 | iex
 go install github.com/RhythmShahriar/tuner/cmd/rhythm-tuner@latest
 ```
 
+Installed with Go? You have the `rhythm-tuner` binary without the `rhythm` CLI, so run `rhythm-tuner scan yoursite.com` wherever this page says `rhythm tuner scan`. Help and hints use the name you started Tuner with.
+
 The installers and `rhythm update` check every download against the release's `checksums.txt`. That file comes from the same release, so it catches a broken download, not a tampered release. Releases are also signed with cosign. Nothing checks the signature for you yet, so [verify a release by hand](https://github.com/RhythmShahriar/rhythm#verify-a-release) if that matters to you. Prefer a manual install? Grab a binary from [Releases](https://github.com/RhythmShahriar/tuner/releases/latest).
 
 ## Scan
@@ -76,6 +78,8 @@ That's it. Tuner fingerprints the site, learns how it answers "not found", runs 
 |---|---|
 | Save a report for a client or an issue | `rhythm tuner scan yoursite.com -o report.md` |
 | A quick look (about 30 requests) | `rhythm tuner scan yoursite.com --profile quick` |
+| Scan a site folder on the server | `rhythm tuner scan /var/www/yoursite` |
+| Scan your own dev server fast | `rhythm tuner scan localhost:8080 --rate 0` |
 | Scan a staging site behind basic auth | `rhythm tuner scan staging.yoursite.com -H "Authorization: Basic …"` |
 | Go gentle on a fragile host or firewall | `rhythm tuner scan yoursite.com --rate 2` |
 | Scan all your clients' sites | `rhythm tuner scan -l sites.txt -o all.md` |

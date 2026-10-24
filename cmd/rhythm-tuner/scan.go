@@ -85,7 +85,7 @@ type scanOptions struct {
 func scanFlagSet(o *scanOptions, stderr io.Writer) *flag.FlagSet {
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.Usage = func() { fmt.Fprintln(stderr, "run 'rhythm tuner --help' for all flags") }
+	fs.Usage = func() { fmt.Fprintf(stderr, "run '%s --help' for all flags\n", cmdName()) }
 	both := func(short, long string, f func(name string)) { f(short); f(long) }
 
 	fs.BoolVar(&o.json, "json", false, "")
@@ -211,7 +211,7 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 	}
 	p.targets = dedupe(p.targets)
 	if len(p.targets) == 0 {
-		return nil, usagef("scan needs a target\n  try: rhythm tuner scan example.com")
+		return nil, usagef("scan needs a target\n  try: %s scan example.com", cmdName())
 	}
 	allLocal := true
 	for _, t := range p.targets {

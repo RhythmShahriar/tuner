@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/charmbracelet/x/term"
 
@@ -57,18 +58,80 @@ func run(args []string, stdout, stderr io.Writer) int {
 	return exitUsage
 }
 
-func usage(w io.Writer) {
-	fmt.Fprintln(w, kit.Banner("rhythm tuner", version))
-	fmt.Fprint(w, `Find what's out of tune in your WordPress & PHP sites.
+// invokedAsEnv is set by the rhythm router to what the user typed, such
+// as "rhythm tuner" or "rhythm t", so help and hints name a command that
+// works. A binary run on its own goes by its file name instead.
+const invokedAsEnv = "RHYTHM_INVOKED_AS"
 
-Usage:
-  rhythm tuner                       interactive picker
-  rhythm tuner scan <url>... [flags] scan one or more sites
-  rhythm tuner scan <dir> [flags]    scan a site's files on the server
-  rhythm tuner checks [flags]        list the checks (rhythm tuner checks --help)
-  rhythm tuner update [--clear]      refresh the check pack and the WordPress and
-                                     PHP vulnerability data now
-`+commandUsage()+`
+// argv0 is how the binary was started. Tests change it.
+var argv0 = os.Args[0]
+
+// cmdName is the command people type to run Tuner: "rhythm tuner" through
+// the rhythm router, else the binary's own name, such as rhythm-tuner
+// after go install.
+func cmdName() string {
+	if s := strings.TrimSpace(os.Getenv(invokedAsEnv)); s != "" && len(s) <= 64 && printable(s) {
+		return s
+	}
+	base := argv0[strings.LastIndexAny(argv0, `/\`)+1:]
+	if len(base) > 4 && strings.EqualFold(base[len(base)-4:], ".exe") {
+		base = base[:len(base)-4]
+	}
+	if base == "" || !printable(base) {
+		return "rhythm-tuner"
+	}
+	return base
+}
+
+// printable reports whether s has no control characters, so it can go in
+// help text without moving the cursor or ringing the bell.
+func printable(s string) bool {
+	return !strings.ContainsFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f })
+}
+
+// usageLine is one command in the Usage list: what to type, a summary
+// and any more summary lines.
+type usageLine struct {
+	cmd, summary string
+	more         []string
+}
+
+// formatUsage lines up the summaries one column after the longest command,
+// and no earlier than the flag descriptions below them.
+func formatUsage(lines []usageLine) string {
+	width := 34
+	for _, l := range lines {
+		width = max(width, len(l.cmd))
+	}
+	var b strings.Builder
+	for _, l := range lines {
+		fmt.Fprintf(&b, "  %-*s %s\n", width, l.cmd, l.summary)
+		for _, m := range l.more {
+			fmt.Fprintf(&b, "%s%s\n", strings.Repeat(" ", width+3), m)
+		}
+	}
+	return b.String()
+}
+
+func usage(w io.Writer) {
+	name := cmdName()
+	lines := []usageLine{
+		{cmd: name, summary: "interactive picker"},
+		{cmd: name + " scan <url>... [flags]", summary: "scan one or more sites"},
+		{cmd: name + " scan <dir> [flags]", summary: "scan a site's files on the server"},
+		{cmd: name + " checks [flags]", summary: "list the checks (" + name + " checks --help)"},
+		{cmd: name + " update [--clear]", summary: "refresh the check pack and the WordPress and", more: []string{"PHP vulnerability data now"}},
+	}
+	fmt.Fprintln(w, kit.Banner("rhythm tuner", version))
+	fmt.Fprint(w, "Find what's out of tune in your WordPress & PHP sites.\n\nUsage:\n"+
+		formatUsage(append(lines, commandUsage(name)...)))
+	fmt.Fprint(w, strings.ReplaceAll(helpBody(), "rhythm tuner", name))
+}
+
+// helpBody is the help after the Usage list. Every "rhythm tuner" in it
+// becomes the name Tuner was started as.
+func helpBody() string {
+	return `
 Output:
       --json               JSON report (an array when scanning several targets)
       --jsonl              one JSON finding per line, streamed as found
@@ -132,7 +195,7 @@ Batch and CI:
       --allow-partial      let --fail-on pass a scan that was blocked or cut
                            short (otherwise exit 3)
 
-`+extensionHelp()+`Vulnerability data comes from WPVulnerability (CC0), api.wordpress.org and
+` + extensionHelp() + `Vulnerability data comes from WPVulnerability (CC0), api.wordpress.org and
 php.net; Composer packages are matched with OSV.dev. New checks arrive as a
 check pack from Tuner's GitHub releases (checksummed, not signed; built-in
 checks only with --no-check-updates). Both are cached under your user cache
@@ -150,5 +213,5 @@ Examples:
   rhythm tuner scan staging.example.com -H "Authorization: Basic dXNlcjpwYXNz" -k
   rhythm tuner scan example.com --sarif --fail-on high > tuner.sarif
   rhythm tuner scan /var/www/example.com --php /usr/bin/php8.3
-`)
+`
 }
