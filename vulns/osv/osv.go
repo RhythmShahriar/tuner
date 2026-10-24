@@ -126,9 +126,9 @@ func (o *Client) Warning(r Result) string {
 	case r.Unreachable && (r.Failed > 0 || r.Stale > 0):
 		return vulns.UnreachableWarning("Composer ", r.Failed, r.Total, r.Stale, r.Oldest, time.Now())
 	case r.Failed > 0 && o.Offline:
-		return fmt.Sprintf("vulnerability data not cached for %d Composer packages; run once online to cache it", r.Failed)
+		return fmt.Sprintf("vulnerability data not cached for %s; run once online to cache it", vulns.Count(r.Failed, "Composer package"))
 	case r.Failed > 0:
-		return fmt.Sprintf("couldn't fetch vulnerability data for %d Composer packages (%v)", r.Failed, r.Err)
+		return fmt.Sprintf("couldn't fetch vulnerability data for %s (%v)", vulns.Count(r.Failed, "Composer package"), r.Err)
 	}
 	return ""
 }

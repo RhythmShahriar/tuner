@@ -127,7 +127,8 @@ func TestPHPVersionHiddenQuiet(t *testing.T) {
 	// newlines (which the terminal shows as U+FFFD).
 	f = newFakeAPI(t, map[string]string{"/php/8.2.0/": "!404", "/php/8.3.0/": "!404", "/php/8.4.0/": "!404", "/php/8.5.0/": "!404"})
 	_, warnings = newAdvisor(f, t.TempDir()).Advise(context.Background(), base, fingerprint.Result{Tech: []string{"php"}})
-	if len(warnings) != 1 || strings.ContainsAny(warnings[0], "\n\r\uFFFD") || strings.Count(warnings[0], "unexpected response") != 1 {
+	if len(warnings) != 1 || strings.ContainsAny(warnings[0], "\n\r\uFFFD") || strings.Count(warnings[0], "unexpected response") != 1 ||
+		!strings.HasPrefix(warnings[0], "couldn't fetch vulnerability data for 1 component (") {
 		t.Errorf("branches down: warnings %q", warnings)
 	}
 }

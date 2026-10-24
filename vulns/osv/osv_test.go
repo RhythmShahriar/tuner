@@ -6,6 +6,7 @@ package osv
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -186,5 +187,24 @@ func TestParsePackageKey(t *testing.T) {
 		if _, ok := parsePackageKey(key); ok {
 			t.Errorf("parsePackageKey(%q) accepted", key)
 		}
+	}
+}
+
+// One failed package is "1 Composer package", not "1 Composer packages".
+func TestOSVWarningCount(t *testing.T) {
+	o := &Client{}
+	for _, tc := range []struct {
+		r    Result
+		want string
+	}{
+		{Result{Total: 1, Failed: 1, Err: errors.New("HTTP 500")}, "couldn't fetch vulnerability data for 1 Composer package (HTTP 500)"},
+		{Result{Total: 3, Failed: 2, Err: errors.New("HTTP 500")}, "couldn't fetch vulnerability data for 2 Composer packages (HTTP 500)"},
+	} {
+		if got := o.Warning(tc.r); got != tc.want {
+			t.Errorf("Warning(%+v) = %q, want %q", tc.r, got, tc.want)
+		}
+	}
+	if got := (&Client{Offline: true}).Warning(Result{Total: 1, Failed: 1}); got != "vulnerability data not cached for 1 Composer package; run once online to cache it" {
+		t.Errorf("offline: %q", got)
 	}
 }

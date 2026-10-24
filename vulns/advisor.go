@@ -226,14 +226,14 @@ func (a *Advisor) AdviseStatus(ctx context.Context, base *url.URL, fp fingerprin
 		// Cache times are wall-clock times, unlike the advisor's clock.
 		warnings = append(warnings, UnreachableWarning("", failed, looked, stale, oldest, time.Now()))
 	case failed > 0 && offline && old > 0:
-		warnings = append(warnings, fmt.Sprintf("vulnerability data not cached for %d components (%d cached by an older Tuner); run once online to cache it", failed, old))
+		warnings = append(warnings, fmt.Sprintf("vulnerability data not cached for %s (%d cached by an older Tuner); run once online to cache it", Count(failed, "component"), old))
 	case failed > 0 && offline:
-		warnings = append(warnings, fmt.Sprintf("vulnerability data not cached for %d components; run once online to cache it", failed))
+		warnings = append(warnings, fmt.Sprintf("vulnerability data not cached for %s; run once online to cache it", Count(failed, "component")))
 	case failed > 0:
-		warnings = append(warnings, fmt.Sprintf("couldn't fetch vulnerability data for %d components (%s)", failed, firstErr))
+		warnings = append(warnings, fmt.Sprintf("couldn't fetch vulnerability data for %s (%s)", Count(failed, "component"), firstErr))
 	}
 	if stale > 0 && !unreachable {
-		warnings = append(warnings, fmt.Sprintf("used cached vulnerability data older than %s for %d components", a.Client.TTL, stale))
+		warnings = append(warnings, fmt.Sprintf("used cached vulnerability data older than %s for %s", a.Client.TTL, Count(stale, "component")))
 	}
 	if w := a.Client.Wordfence; w != nil && wfAsked {
 		if err := w.Err(); err != nil {
@@ -263,6 +263,14 @@ func (l *lookup) addStale(info cache.Info) {
 	if l.staleAt.IsZero() || info.Fetched.Before(l.staleAt) {
 		l.staleAt = info.Fetched
 	}
+}
+
+// Count says how many of noun there are: "1 component", "3 components".
+func Count(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 // UnreachableWarning is the one warning a scan gets when a data service
