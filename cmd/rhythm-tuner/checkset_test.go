@@ -9,7 +9,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -207,5 +211,92 @@ func TestScanInsecurePack(t *testing.T) {
 		if rep.CheckSet != "pack" || !strings.Contains(errs, insecureWarning) {
 			t.Errorf("insecure: %+v\n%s", rep, errs)
 		}
+	}
+}
+
+// hangingHost points Tuner at a pack host that accepts requests and never
+// answers, and counts them.
+func hangingHost(t *testing.T) *atomic.Int32 {
+	t.Helper()
+	var hits atomic.Int32
+	done := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		select {
+		case <-r.Context().Done():
+		case <-done:
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(done) }) // runs first, so Close doesn't wait
+	t.Setenv("TUNER_CHECKS_URL", srv.URL)
+	return &hits
+}
+
+// expirePack makes the cached pack older than the TTL.
+func expirePack(t *testing.T) {
+	t.Helper()
+	path := filepath.Join(checkpack.DefaultCacheDir(), "pack.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var st map[string]any
+	if err := json.Unmarshal(data, &st); err != nil {
+		t.Fatal(err)
+	}
+	st["checked"] = time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339)
+	data, _ = json.Marshal(st)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHangingPackHostBacksOff(t *testing.T) {
+	packRelease(t, packCheck, "0.2.0")
+	if set, err := loadCheckSet("", true, false, "test", nil); err != nil || set.source != setPack {
+		t.Fatalf("set=%+v err=%v", set, err)
+	}
+	expirePack(t)
+	hits := hangingHost(t)
+
+	start := time.Now()
+	set, err := loadCheckSet("", true, false, "test", nil)
+	if took := time.Since(start); took > 3500*time.Millisecond {
+		t.Errorf("first run waited %v", took)
+	}
+	want := "check pack host unreachable, using pack from 2026-10-01"
+	if err != nil || set.source != setPack || !slices.Contains(set.alerts, want) || !slices.Contains(set.warnings, want) {
+		t.Fatalf("first run: set=%+v err=%v", set, err)
+	}
+
+	// Within the back-off: no request, no repeat of the warning.
+	n := hits.Load()
+	set, err = loadCheckSet("", true, false, "test", nil)
+	if err != nil || set.source != setPack || len(set.warnings) != 0 || hits.Load() != n {
+		t.Errorf("second run: set=%+v err=%v, %d requests", set, err, hits.Load()-n)
+	}
+}
+
+func TestUnreachablePackHostWithoutCache(t *testing.T) {
+	trustTestKey(t)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		conn, _, _ := w.(http.Hijacker).Hijack()
+		conn.Close()
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("TUNER_CHECKS_URL", srv.URL)
+
+	set, err := loadCheckSet("", true, false, "test", nil)
+	want := []string{"check pack host unreachable, using built-in checks"}
+	if err != nil || set.source != setBuiltIn || !slices.Equal(set.alerts, want) {
+		t.Fatalf("set=%+v err=%v", set, err)
+	}
+	n := hits.Load()
+	if set, _ := loadCheckSet("", true, false, "test", nil); len(set.warnings) != 0 || hits.Load() != n {
+		t.Errorf("second run: %+v, %d requests", set.warnings, hits.Load()-n)
 	}
 }

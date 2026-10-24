@@ -24,11 +24,20 @@ const (
 	// DefaultBase is the rolling release CI publishes packs to.
 	DefaultBase = "https://github.com/RhythmShahriar/tuner/releases/download/checks-latest"
 	DefaultTTL  = 24 * time.Hour
+
+	// Backoff is how long a failed refresh is not retried. Without it a
+	// host that hangs or a firewall that drops the traffic would delay
+	// every scan by the whole fetch timeout.
+	Backoff = time.Hour
 )
 
 // ErrNotCached means there's no usable cached pack and the client may not
 // fetch one (offline).
 var ErrNotCached = errors.New("no check pack cached")
+
+// ErrUnreachable wraps network failures: the release could not be reached
+// or stopped answering, as opposed to answering with something wrong.
+var ErrUnreachable = errors.New("check pack host unreachable")
 
 // Client fetches and caches check packs, like vulns.Client does for
 // vulnerability data: a fresh cache is used as is, a stale one is
@@ -52,6 +61,16 @@ type Client struct {
 	// BuiltIn lists the IDs of the binary's own checks. A pack must carry
 	// each one or retire it in its manifest.
 	BuiltIn []string
+	// Now is the clock; nil means time.Now. Tests use it to expire the
+	// TTL and the back-off.
+	Now func() time.Time
+}
+
+func (c *Client) now() time.Time {
+	if c.Now != nil {
+		return c.Now().UTC()
+	}
+	return time.Now().UTC()
 }
 
 // Pack is a verified pack, ready to scan with.
@@ -81,6 +100,7 @@ func DefaultCacheDir() string {
 // pack cached under it.
 type state struct {
 	Checked  time.Time `json:"checked"`
+	Failed   time.Time `json:"failed,omitzero"`    // last refresh that failed; no retry until Backoff has passed
 	Rejected string    `json:"rejected,omitempty"` // the newest pack, when this binary can't use it
 	Manifest *Manifest `json:"manifest,omitempty"`
 	SHA256   string    `json:"sha256,omitempty"`
@@ -115,11 +135,18 @@ func (c *Client) Get(ctx context.Context) (*Pack, error) {
 		return nil, ErrNoTrustedKeys
 	}
 	st := c.load()
-	if st != nil && (c.Offline || (!c.Force && time.Since(st.Checked) < c.TTL)) {
+	now := c.now()
+	backingOff := st != nil && !c.Force && now.Sub(st.Failed) < Backoff
+	if st != nil && (c.Offline || backingOff || (!c.Force && now.Sub(st.Checked) < c.TTL)) {
 		p, err := c.open(st)
 		// A pack cached before packs were signed, or under a key this
 		// build no longer trusts, is replaced rather than kept for a day.
-		if c.Offline || !errors.Is(err, errSignature) {
+		if c.Offline || backingOff || !errors.Is(err, errSignature) {
+			if backingOff && err != nil {
+				// Already reported when the refresh failed; quiet until
+				// the back-off ends.
+				return nil, ErrNotCached
+			}
 			return p, err
 		}
 	}
@@ -135,7 +162,7 @@ func (c *Client) Get(ctx context.Context) (*Pack, error) {
 	case errors.Is(err, ErrRejected):
 		// Remember the verdict so every scan doesn't download the same
 		// pack again; keep the last good one.
-		keep := st.keep(&state{Checked: time.Now().UTC(), Rejected: err.Error()})
+		keep := st.keep(&state{Checked: now, Rejected: err.Error()})
 		_ = c.save(keep)
 		if p, perr := c.open(keep); perr == nil {
 			return p, nil
@@ -143,7 +170,13 @@ func (c *Client) Get(ctx context.Context) (*Pack, error) {
 		return nil, err
 	}
 	// Network, checksum or signature trouble: maybe the release is
-	// mid-upload, so fall back to the cache without recording a check, and retry next run.
+	// mid-upload or the network is down. Fall back to the cache without
+	// recording a check, and back off before trying again.
+	failed := &state{Failed: now}
+	if st != nil {
+		failed = st.keep(&state{Checked: st.Checked, Rejected: st.Rejected, Failed: now})
+	}
+	_ = c.save(failed)
 	if st != nil {
 		if p, perr := c.open(st); perr == nil {
 			p.Stale, p.Warning = true, fmt.Errorf("couldn't refresh the check pack: %w", err)
@@ -186,7 +219,7 @@ func (c *Client) fetch(ctx context.Context, st *state) (*state, error) {
 	if err := m.Compatible(c.Tuner); err != nil {
 		return nil, err
 	}
-	now := time.Now().UTC()
+	now := c.now()
 	next := &state{Checked: now, Manifest: &m, Sums: rawSums, Sig: sig}
 	if st != nil && len(st.Archive) > 0 && st.SHA256 == sums[ArchiveName] {
 		next.SHA256, next.Archive = st.SHA256, st.Archive
@@ -255,7 +288,7 @@ func (c *Client) open(st *state) (*Pack, error) {
 	}
 	p := &Pack{
 		Manifest: *st.Manifest, FS: o.fsys, Loaded: o.loaded, Checked: st.Checked,
-		Stale: time.Since(st.Checked) > c.TTL,
+		Stale: c.now().Sub(st.Checked) > c.TTL,
 	}
 	if st.Rejected != "" {
 		p.Warning = errors.New(st.Rejected)
@@ -279,7 +312,7 @@ func (c *Client) get(ctx context.Context, name string, limit int64) ([]byte, err
 	}
 	resp, err := hc.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrUnreachable, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
@@ -287,12 +320,19 @@ func (c *Client) get(ctx context.Context, name string, limit int64) ([]byte, err
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", name, err)
+		return nil, fmt.Errorf("%w: %s: %w", ErrUnreachable, name, err)
 	}
 	if int64(len(data)) > limit {
 		return nil, fmt.Errorf("%s: larger than %d bytes", name, limit)
 	}
 	return data, nil
+}
+
+// Cached reports whether a pack is cached, usable or not. Callers use it
+// to wait less for a refresh when there is something to fall back on.
+func (c *Client) Cached() bool {
+	st := c.load()
+	return st != nil && len(st.Archive) > 0
 }
 
 func (c *Client) path() string {

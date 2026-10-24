@@ -31,7 +31,19 @@ type checkSet struct {
 	pack     *checkpack.Manifest // when source is setPack
 	checks   []*engine.Check
 	warnings []string // pack trouble; the run goes on with what's here
+	// alerts are the warnings that matter even with -q, such as an
+	// unreachable pack host, which would otherwise look like an
+	// unexplained delay. Each is also in warnings.
+	alerts []string
 }
+
+// How long a scan waits for the check pack release. There is always a set
+// of checks to fall back on, so the wait is short; only a first fetch,
+// with no pack cached yet, gets longer, since it downloads the archive.
+const (
+	packWait      = 3 * time.Second
+	packFirstWait = 10 * time.Second
+)
 
 // describe is one line for people, e.g. "pack 2026.10.23-142501 (36 checks, …)".
 func (s *checkSet) describe(dir string) string {
@@ -62,18 +74,26 @@ func loadCheckSet(dir string, updates, offline bool, ua string, proxy *url.URL) 
 		return set, nil
 	}
 
-	// Short: an unreachable release must not hold up every scan.
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	// Short: an unreachable release must not hold up every scan, and after
+	// a failure the client backs off for checkpack.Backoff.
 	pc := packClient(ua, proxy, offline, false)
+	wait := packFirstWait
+	if pc.Cached() {
+		wait = packWait
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), wait)
+	defer cancel()
 	if pc.Insecure {
-		set.warnings = append(set.warnings, insecureWarning)
+		set.alert(insecureWarning)
 	}
 	p, err := pc.Get(ctx)
 	switch {
 	case errors.Is(err, checkpack.ErrNotCached), errors.Is(err, checkpack.ErrNoTrustedKeys):
 		// Offline and nothing cached, or a build without a signing key
 		// (a fork or a dev build): expected, not worth a warning.
+		return set, nil
+	case errors.Is(err, checkpack.ErrUnreachable):
+		set.alert("check pack host unreachable, using built-in checks")
 		return set, nil
 	case err != nil:
 		set.warnings = append(set.warnings, fmt.Sprintf("check pack: %v; using built-in checks", err))
@@ -82,10 +102,21 @@ func loadCheckSet(dir string, updates, offline bool, ua string, proxy *url.URL) 
 	if p.Supersedes(checkpack.CurrentBuild()) {
 		set.source, set.pack, set.checks = setPack, &p.Manifest, p.Loaded
 	}
-	if p.Warning != nil {
+	switch {
+	case errors.Is(p.Warning, checkpack.ErrUnreachable) && set.source == setPack:
+		set.alert("check pack host unreachable, using pack from " + p.Created.Format("2006-01-02"))
+	case errors.Is(p.Warning, checkpack.ErrUnreachable):
+		set.alert("check pack host unreachable, using built-in checks")
+	case p.Warning != nil:
 		set.warnings = append(set.warnings, fmt.Sprintf("%v; using %s", p.Warning, set.describe("")))
 	}
 	return set, nil
+}
+
+// alert records a warning that is shown even with -q.
+func (s *checkSet) alert(msg string) {
+	s.warnings = append(s.warnings, msg)
+	s.alerts = append(s.alerts, msg)
 }
 
 // insecureWarning is shown on every run with TUNER_CHECKS_INSECURE=1, so

@@ -110,9 +110,11 @@ func (r *release) total() int {
 func (r *release) client(dir string) *Client {
 	return &Client{
 		BaseURL: r.URL + "/checks-latest", CacheDir: dir, Tuner: "0.3.0", UserAgent: "test",
-		Keys: []ed25519.PublicKey{testKey.Public().(ed25519.PublicKey)},
+		Keys: testKeys(),
 	}
 }
+
+func testKeys() []ed25519.PublicKey { return []ed25519.PublicKey{testKey.Public().(ed25519.PublicKey)} }
 
 // withSums recomputes and re-signs the checksum file, as a broken CI run
 // or someone holding the signing key would. The checks after the
@@ -210,18 +212,20 @@ func TestTamperedChecksum(t *testing.T) {
 	if _, err := rel.client(dir).Get(context.Background()); err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
 		t.Fatalf("err = %v, want checksum mismatch", err)
 	}
-	if _, err := os.Stat(dir + "/pack.json"); err == nil {
+	c := rel.client(dir)
+	if c.Cached() {
 		t.Error("tampered pack was cached")
 	}
 
 	// With a good pack cached, a mismatch (maybe a mid-upload release)
 	// falls back to it, marked stale.
 	rel.set(good)
-	c := rel.client(dir)
+	c.Force = true // past the back-off the failure started
 	if _, err := c.Get(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	rel.set(bad)
+	c.Force = false
 	c.TTL = time.Nanosecond
 	p, err := c.Get(context.Background())
 	if err != nil || !p.Stale || p.Warning == nil || p.Loaded[0].Severity != "low" {
