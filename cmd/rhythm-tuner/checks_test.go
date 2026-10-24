@@ -107,3 +107,49 @@ func TestChecksSubcommandErrors(t *testing.T) {
 		t.Errorf("empty dir lint: exit %d:\n%s", code, out)
 	}
 }
+
+func TestChecksExportNuclei(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "nuclei")
+	code, out, errOut := checksCmd("export", "--nuclei", dir, "--no-check-updates")
+	if code != exitOK || !regexp.MustCompile(`^Wrote \d+ Nuclei templates and README.md to `+regexp.QuoteMeta(dir)+`\.\n`).MatchString(out) ||
+		!regexp.MustCompile(`(?m)^  tls-cert-expired +TLS conditions need a TLS probe`).MatchString(out) ||
+		!strings.HasSuffix(out, "Run them with: nuclei -t "+dir+" -u <url>\n") {
+		t.Fatalf("exit %d %s:\n%s", code, errOut, out)
+	}
+	tmpl, err := os.ReadFile(filepath.Join(dir, "tuner-leak-dotenv.yaml"))
+	if err != nil || !bytes.Contains(tmpl, []byte("id: tuner-leak-dotenv\n")) {
+		t.Errorf("template: %v\n%s", err, tmpl)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "tuner-tls-cert-expired.yaml")); err == nil {
+		t.Error("skipped check was written")
+	}
+	readme, err := os.ReadFile(filepath.Join(dir, "README.md"))
+	if err != nil || !bytes.Contains(readme, []byte("MIT License")) {
+		t.Errorf("README: %v\n%s", err, readme)
+	}
+
+	// --id narrows the export and a run replaces its own files.
+	code, out, _ = checksCmd("export", "--nuclei", dir, "--no-check-updates", "--id", "leak-git*")
+	if code != exitOK || !strings.HasPrefix(out, "Wrote 3 Nuclei templates and README.md to ") || strings.Contains(out, "Skipped") {
+		t.Errorf("--id: exit %d:\n%s", code, out)
+	}
+}
+
+func TestChecksExportUsage(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{nil, "checks export needs --nuclei <dir>"},
+		{[]string{"--nuclei", "x", "extra"}, `checks export takes no arguments, got "extra"`},
+		{[]string{"--bogus"}, "checks export: flag provided but not defined: -bogus"},
+		{[]string{"--nuclei", "x", "--id", "nope-*"}, `no check matches "nope-*"`},
+	} {
+		if code, _, errOut := checksCmd(append([]string{"export", "--no-check-updates"}, tc.args...)...); code != exitUsage || !strings.Contains(errOut, tc.want) {
+			t.Errorf("%v: exit %d, stderr %q", tc.args, code, errOut)
+		}
+	}
+	if code, out, _ := checksCmd("export", "--help"); code != exitOK || !strings.HasPrefix(out, "Usage:\n  rhythm tuner checks export --nuclei <dir>") {
+		t.Errorf("help: exit %d:\n%s", code, out)
+	}
+}

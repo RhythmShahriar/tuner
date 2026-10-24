@@ -19,10 +19,11 @@ import (
 	"github.com/RhythmShahriar/tuner/checks"
 	"github.com/RhythmShahriar/tuner/engine"
 	"github.com/RhythmShahriar/tuner/engine/checktest"
+	"github.com/RhythmShahriar/tuner/export"
 )
 
 // listChecks prints the checks a scan with the same flags would run, or
-// runs one of the contributor subcommands: new, test and lint.
+// runs one of the subcommands: new, test, lint and export.
 func listChecks(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 {
 		switch args[0] {
@@ -32,6 +33,8 @@ func listChecks(args []string, stdout, stderr io.Writer) int {
 			return checksTest(args[1:], stdout, stderr)
 		case "lint":
 			return checksLint(args[1:], stdout, stderr)
+		case "export":
+			return checksExport(args[1:], stdout, stderr)
 		}
 	}
 	var (
@@ -123,6 +126,7 @@ const checksUsage = `Usage:
   rhythm tuner checks new <id> [dir]   write a new check and its fixtures
   rhythm tuner checks test [dir]       run checks against their fixtures
   rhythm tuner checks lint [dir]       check checks against the house rules
+  rhythm tuner checks export --nuclei <dir>   write checks as Nuclei templates
 
 Lists the checks a scan with the same flags would run. Unlike scan, the
 profile defaults to deep, so every check is listed. test and lint read the
@@ -355,4 +359,114 @@ fixtures). dir defaults to the current folder. Both pass checks test and
 checks lint as written. It never replaces a file. The ID is lower-case
 words joined by hyphens and starts with leak-, wp-, php-, laravel-, hdr-,
 tls- or srv-, e.g. leak-old-backup.
+`
+
+// checksExport writes the checks a scan would use as Nuclei templates,
+// one file per check plus a README with the license. It reports the
+// checks a template can't express.
+func checksExport(args []string, stdout, stderr io.Writer) int {
+	var (
+		out, dir           string
+		tags, ids          listFlag
+		offline, noUpdates bool
+	)
+	flags := flag.NewFlagSet("checks export", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	flags.StringVar(&out, "nuclei", "", "")
+	flags.StringVar(&dir, "checks", "", "")
+	flags.Var(&tags, "tags", "")
+	flags.Var(&ids, "id", "")
+	flags.BoolVar(&offline, "offline", false, "")
+	flags.BoolVar(&noUpdates, "no-check-updates", false, "")
+	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			fmt.Fprint(stdout, checksExportUsage)
+			return exitOK
+		}
+		fmt.Fprintf(stderr, "rhythm tuner: checks export: %v\n\n%s", err, checksExportUsage)
+		return exitUsage
+	}
+	switch {
+	case flags.NArg() > 0:
+		fmt.Fprintf(stderr, "rhythm tuner: checks export takes no arguments, got %q\n\n%s", flags.Arg(0), checksExportUsage)
+		return exitUsage
+	case out == "":
+		fmt.Fprintf(stderr, "rhythm tuner: checks export needs --nuclei <dir>\n\n%s", checksExportUsage)
+		return exitUsage
+	}
+
+	ua := fmt.Sprintf("rhythm-tuner/%s (+https://rythm.sh/tuner)", version)
+	set, err := loadCheckSet(dir, !noUpdates, offline, ua, nil)
+	if err != nil {
+		fmt.Fprintln(stderr, "rhythm tuner: loading checks:", err)
+		return exitError
+	}
+	for _, w := range set.warnings {
+		fmt.Fprintln(stderr, "rhythm tuner:", w)
+	}
+	sel, err := engine.Select(set.checks, engine.Selector{Profile: engine.ProfileDeep, Tags: tags, IDs: ids})
+	if err != nil {
+		fmt.Fprintln(stderr, "rhythm tuner:", err)
+		return exitUsage
+	}
+
+	opts := export.Options{Version: version}
+	templates := export.Nuclei(sel, opts)
+	if err := os.MkdirAll(out, 0o755); err != nil { //nolint:gosec // templates are meant to be shared, like checks
+		fmt.Fprintln(stderr, "rhythm tuner:", err)
+		return exitError
+	}
+	files := map[string][]byte{"README.md": export.NucleiREADME(templates, opts, checks.License)}
+	var written int
+	var skipped []export.Template
+	for _, t := range templates {
+		if t.Skipped != "" {
+			skipped = append(skipped, t)
+			continue
+		}
+		files[t.File] = t.Data
+		written++
+	}
+	for name, data := range files {
+		if err := os.WriteFile(filepath.Join(out, name), data, 0o644); err != nil { //nolint:gosec // as for MkdirAll
+			fmt.Fprintln(stderr, "rhythm tuner:", err)
+			return exitError
+		}
+	}
+
+	noun := "templates"
+	if written == 1 {
+		noun = "template"
+	}
+	fmt.Fprintf(stdout, "Wrote %d Nuclei %s and README.md to %s.\n", written, noun, out)
+	if len(skipped) > 0 {
+		fmt.Fprintf(stdout, "Skipped %d checks a template can't express:\n", len(skipped))
+		tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
+		for _, t := range skipped {
+			fmt.Fprintf(tw, "  %s\t%s\n", t.CheckID, t.Skipped)
+		}
+		if err := tw.Flush(); err != nil {
+			return exitError
+		}
+	}
+	fmt.Fprintf(stdout, "Run them with: nuclei -t %s -u <url>\n", out)
+	return exitOK
+}
+
+const checksExportUsage = `Usage:
+  rhythm tuner checks export --nuclei <dir> [flags]
+
+Writes the checks a scan would use as Nuclei templates, tuner-<id>.yaml in
+dir (created if needed), plus README.md with how they differ from Tuner
+and the MIT license they ship under. Existing files with those names are
+replaced. Checks that need TLS, scheme or cookie conditions, or only the
+soft-404 comparison, are listed and left out.
+
+Flags:
+      --nuclei <dir>       write Nuclei templates to dir
+      --id <list>          only these checks; globs allowed
+      --tags <list>        only checks with these tags
+      --checks <dir>       export checks from a directory
+      --offline            use only a cached check pack
+      --no-check-updates   ignore check packs; export the built-in checks
 `
