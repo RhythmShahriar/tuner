@@ -203,7 +203,13 @@ func editDistance(a, b string) int {
 }
 
 // checkPrefetchTarget validates a --prefetch target the way scan does.
+// It runs before anything is fetched, so a typo costs no requests. A
+// target starting with "-" is a mistyped flag (--prefetch=-x, or a flag
+// after --prefetch): no hostname starts with a hyphen.
 func checkPrefetchTarget(t string) error {
+	if strings.HasPrefix(t, "-") {
+		return fmt.Errorf("%q is not a valid URL or hostname; --prefetch needs a site or a folder, e.g. rhythm tuner update --prefetch ./site", t)
+	}
 	if isLocalPath(t) {
 		_, err := local.Root(t)
 		return err

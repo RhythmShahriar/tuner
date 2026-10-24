@@ -201,6 +201,9 @@ func TestUpdateUsage(t *testing.T) {
 		{[]string{"update", "--prefetch"}, "--prefetch needs a site or a folder"},
 		{[]string{"update", "example.com"}, "update takes no targets; to cache data for example.com, run: rhythm tuner update --prefetch example.com"},
 		{[]string{"update", "--prefetch", "./no-such-dir"}, "no such directory"},
+		{[]string{"update", "--prefetch=-x"}, `"-x" is not a valid URL or hostname; --prefetch needs a site or a folder`},
+		{[]string{"update", "--prefetch", "-v"}, `"-v" is not a valid URL or hostname`},
+		{[]string{"update", "--prefetch", "example.com", "--prefetch=--php"}, `"--php" is not a valid URL or hostname`},
 		{[]string{"update", "--clear", "--prefetch", "example.com"}, "pick one of --clear and --prefetch"},
 	}
 	for _, c := range cases {
