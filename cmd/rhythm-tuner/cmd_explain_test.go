@@ -145,3 +145,26 @@ func TestSuggestIDs(t *testing.T) {
 		}
 	}
 }
+
+// explain reads the cached pack but never fetches one, so a hanging pack
+// host costs it nothing.
+func TestExplainNeverFetches(t *testing.T) {
+	packRelease(t, packCheck, "0.2.0")
+	var out, errb bytes.Buffer
+	if code := cmdExplain([]string{"pack-dotenv"}, &out, &errb); code != exitUsage || !strings.Contains(errb.String(), `no check or rule "pack-dotenv"`) {
+		t.Errorf("before a scan cached the pack: exit %d: %s", code, errb.String())
+	}
+	scanReport(t, leakySite(t).URL) // caches the pack
+	out.Reset()
+	errb.Reset()
+	if code := cmdExplain([]string{"pack-dotenv"}, &out, &errb); code != exitOK || !strings.Contains(out.String(), "pack-dotenv: .env exposed (from the pack)") {
+		t.Errorf("cached pack: exit %d:\n%s%s", code, out.String(), errb.String())
+	}
+
+	hits := hangingHost(t)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	out.Reset()
+	if code := cmdExplain([]string{"leak-dotenv"}, &out, &errb); code != exitOK || hits.Load() != 0 {
+		t.Errorf("exit %d, %d requests to the pack host", code, hits.Load())
+	}
+}

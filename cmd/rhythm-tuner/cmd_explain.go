@@ -27,14 +27,16 @@ const findingReference = "https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Fi
 // that lands; until then only tests call it.
 func cmdExplain(args []string, stdout, stderr io.Writer) int {
 	var (
-		dir                        string
-		asJSON, offline, noUpdates bool
+		dir               string
+		asJSON, noUpdates bool
 	)
 	flags := flag.NewFlagSet("explain", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	flags.StringVar(&dir, "checks", "", "")
 	flags.BoolVar(&asJSON, "json", false, "")
-	flags.BoolVar(&offline, "offline", false, "")
+	// explain never fetches, so --offline changes nothing; it's accepted
+	// because people pass the same flags as to scan.
+	flags.Bool("offline", false, "")
 	flags.BoolVar(&noUpdates, "no-check-updates", false, "")
 	pos, err := parseInterspersed(flags, args)
 	if err != nil {
@@ -51,8 +53,10 @@ func cmdExplain(args []string, stdout, stderr io.Writer) int {
 	}
 	id := strings.TrimSpace(pos[0])
 
+	// Offline: looking up a finding must not wait on the pack host. The
+	// cached pack is what the last scan used, or close to it.
 	ua := fmt.Sprintf("rhythm-tuner/%s (+https://rythm.sh/tuner)", version)
-	set, err := loadCheckSet(dir, !noUpdates, offline, ua, nil)
+	set, err := loadCheckSet(dir, !noUpdates, true, ua, nil)
 	if err != nil {
 		fmt.Fprintln(stderr, "rhythm tuner: loading checks:", err)
 		return exitError
@@ -88,14 +92,15 @@ const explainUsage = `Usage:
   rhythm tuner explain <id> [flags]
 
 Shows what a finding means and how to fix it: severity, impact, the full
-fix with nginx and Apache snippets, references and the wiki page. Works
-offline; <id> is a check ID such as leak-dotenv or a vulnerability rule
-such as vuln-plugin-akismet.
+fix with nginx and Apache snippets, references and the wiki page. <id> is
+a check ID such as leak-dotenv or a vulnerability rule such as
+vuln-plugin-akismet. It never goes online: it reads the cached check pack
+when one is newer than the built-in checks (refresh it with rhythm tuner
+update).
 
 Flags:
       --json               machine-readable output
       --checks <dir>       explain a check from a directory
-      --offline            use only a cached check pack
       --no-check-updates   ignore check packs; use the built-in checks
 `
 
