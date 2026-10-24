@@ -491,3 +491,24 @@ func TestNoSinceStillCompares(t *testing.T) {
 		t.Errorf("not compared: %+v", run)
 	}
 }
+
+// TestDigestCountsDuplicates covers two findings with the same key: each
+// counts as new or fixed, matching the findings total.
+func TestDigestCountsDuplicates(t *testing.T) {
+	dir := t.TempDir()
+	old := filepath.Join(dir, "old.json")
+	cur := filepath.Join(dir, "new.json")
+	os.WriteFile(old, []byte(`{"target":"a","findings":[{"id":"x","severity":"low"},{"id":"x","severity":"low"},{"id":"y","severity":"low"}]}`), 0o600)
+	os.WriteFile(cur, []byte(`{"target":"a","findings":[{"id":"x","severity":"low"},{"id":"y","severity":"low"},{"id":"y","severity":"low"},{"id":"y","severity":"low"}]}`), 0o600)
+	d, err := digest(cur, old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Findings != 4 || d.New != 2 || d.Fixed != 1 {
+		t.Errorf("digest %+v", d)
+	}
+	// The same findings again: nothing new, nothing fixed.
+	if d, _ := digest(old, old); d.New != 0 || d.Fixed != 0 {
+		t.Errorf("unchanged %+v", d)
+	}
+}

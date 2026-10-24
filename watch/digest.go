@@ -93,15 +93,17 @@ func findingKey(target string, f engine.Finding) string {
 	return strings.Join([]string{target, f.ID, f.Path, f.URL, strings.Join(ids, ",")}, "\x00")
 }
 
-// keys lists the findings of the sites in only (all sites when only is nil).
-func keys(sites []siteReport, only map[string]bool) map[string]bool {
-	m := map[string]bool{}
+// keys counts the findings of the sites in only (all sites when only is
+// nil) by key. Two findings can share a key, so each is counted: one of
+// a pair going away is one fix.
+func keys(sites []siteReport, only map[string]bool) map[string]int {
+	m := map[string]int{}
 	for _, s := range sites {
 		if only != nil && !only[s.Target] {
 			continue
 		}
 		for _, f := range s.Findings {
-			m[findingKey(s.Target, f)] = true
+			m[findingKey(s.Target, f)]++
 		}
 	}
 	return m
@@ -136,15 +138,11 @@ func digest(path, prev string) (Digest, error) {
 	}
 	now, before := keys(sites, nil), keys(old, scanned)
 	d.Compared = true
-	for k := range now {
-		if !before[k] {
-			d.New++
-		}
+	for k, n := range now {
+		d.New += max(n-before[k], 0)
 	}
-	for k := range before {
-		if !now[k] {
-			d.Fixed++
-		}
+	for k, n := range before {
+		d.Fixed += max(n-now[k], 0)
 	}
 	return d, nil
 }
