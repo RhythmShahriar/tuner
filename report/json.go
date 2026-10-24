@@ -87,10 +87,22 @@ func New(res *engine.Result, version string) Report {
 		Tool:       "rhythm-tuner",
 		Version:    SafeText(version),
 		DurationMS: res.Duration.Milliseconds(),
-		Summary:    clean.Counts(),
+		Summary:    summary(&clean),
 		Complete:   true, // until engine.Result says otherwise (contract D1)
 		Result:     &clean,
 	}
+}
+
+// summary counts findings per severity with every severity present, so
+// a script reads .summary.critical as 0 rather than null on a clean run.
+func summary(res *engine.Result) map[engine.Severity]int {
+	c := res.Counts()
+	for _, s := range engine.Severities {
+		if _, ok := c[s]; !ok {
+			c[s] = 0
+		}
+	}
+	return c
 }
 
 // Status says whether a scan saw everything it set out to. A report that
