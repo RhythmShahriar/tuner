@@ -122,6 +122,9 @@ Batch and CI:
       --stdin              read targets from stdin
       --parallel <n>       sites scanned at once (default 4)
       --fail-on <level>    exit 1 if a finding is at or above this severity
+      --min-confidence <c> confirmed or likely (default "likely"); with
+                           confirmed, --fail-on skips likely findings such
+                           as CVEs a distro PHP build may have patched
       --baseline <file>    hide findings already in this JSON report
       --allow-missing-vulns
                            let --fail-on pass a site whose vulnerability data

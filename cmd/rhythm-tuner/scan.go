@@ -73,6 +73,9 @@ type scanOptions struct {
 	parallel int
 	failOn   string
 	baseline string
+	// minConfidence is confirmed or likely: the least confidence a
+	// finding needs to count for --fail-on.
+	minConfidence string
 
 	// allowMissingVulns and allowPartial let --fail-on pass a run it
 	// would otherwise not trust; see scanExit.
@@ -123,6 +126,7 @@ func scanFlagSet(o *scanOptions, stderr io.Writer) *flag.FlagSet {
 	fs.BoolVar(&o.stdin, "stdin", false, "")
 	fs.IntVar(&o.parallel, "parallel", 4, "")
 	fs.StringVar(&o.failOn, "fail-on", "", "")
+	fs.StringVar(&o.minConfidence, "min-confidence", confidenceLikely, "")
 	fs.StringVar(&o.baseline, "baseline", "", "")
 	fs.BoolVar(&o.allowMissingVulns, "allow-missing-vulns", false, "")
 	fs.BoolVar(&o.allowPartial, "allow-partial", false, "")
@@ -141,6 +145,9 @@ type scanPlan struct {
 	format   string // json, jsonl, sarif, md, or "" for the terminal view only
 	failOn   engine.Severity
 	baseline report.Baseline
+	// confirmedOnly makes --fail-on count only confirmed findings
+	// (--min-confidence confirmed). Likely ones are still reported.
+	confirmedOnly bool
 
 	// local is the base for local scans; scanTarget copies it and fills in
 	// PHP, Advisor, OSV and Select.
@@ -283,6 +290,13 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 		if p.failOn = engine.Severity(o.failOn); p.failOn.Rank() < 0 {
 			return nil, usagef("--fail-on %q: want one of %v", o.failOn, engine.Severities)
 		}
+	}
+	switch o.minConfidence {
+	case confidenceLikely:
+	case confidenceConfirmed:
+		p.confirmedOnly = true
+	default:
+		return nil, usagef("--min-confidence %q: want confirmed or likely", o.minConfidence)
 	}
 	if o.baseline != "" {
 		if p.baseline, err = report.LoadBaseline(o.baseline); err != nil {
@@ -599,7 +613,7 @@ func scanExit(ctx context.Context, p *scanPlan, reports []report.Report, failed 
 	}
 	if p.failOn != "" {
 		for _, r := range reports {
-			if w := r.Worst(); w != "" && w.Rank() <= p.failOn.Rank() {
+			if w := gateWorst(r.Findings, p.confirmedOnly); w != "" && w.Rank() <= p.failOn.Rank() {
 				return exitFindings
 			}
 		}
@@ -615,6 +629,33 @@ func scanExit(ctx context.Context, p *scanPlan, reports []report.Report, failed 
 		return exitError
 	}
 	return exitOK
+}
+
+// The --min-confidence values. A finding is likely when its check or the
+// advisor marked it low confidence, such as a CVE matched on a distro PHP
+// build that may carry the fix already; every other finding is confirmed.
+const (
+	confidenceConfirmed = "confirmed"
+	confidenceLikely    = "likely"
+)
+
+// confirmed reports whether a finding counts as confirmed. It becomes
+// f.Confidence.Confirmed() once the engine types its confidence.
+func confirmed(f engine.Finding) bool { return f.Confidence != "low" }
+
+// gateWorst is the worst severity --fail-on looks at: among every finding,
+// or only the confirmed ones.
+func gateWorst(findings []engine.Finding, confirmedOnly bool) engine.Severity {
+	var w engine.Severity
+	for _, f := range findings {
+		if confirmedOnly && !confirmed(f) {
+			continue
+		}
+		if w == "" || f.Severity.Rank() < w.Rank() {
+			w = f.Severity
+		}
+	}
+	return w
 }
 
 // reportFile is a report being written next to its destination. It

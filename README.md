@@ -80,6 +80,7 @@ That's it. Tuner fingerprints the site, learns how it answers "not found", runs 
 | Go gentle on a fragile host or firewall | `rhythm tuner scan yoursite.com --rate 2` |
 | Scan all your clients' sites | `rhythm tuner scan -l sites.txt -o all.md` |
 | Fail a CI build on serious findings | `rhythm tuner scan yoursite.com --fail-on high` |
+| Fail CI only on confirmed findings, not *likely* ones | `rhythm tuner scan yoursite.com --fail-on high --min-confidence confirmed` |
 
 Every flag is in the [CLI reference](https://github.com/RhythmShahriar/rhythm/wiki/Tuner-CLI-Reference), and the [documentation wiki](https://github.com/RhythmShahriar/rhythm/wiki) covers everything else.
 
