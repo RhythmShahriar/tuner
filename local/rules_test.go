@@ -137,6 +137,36 @@ func TestRuleEvidenceIsMaskedAndShort(t *testing.T) {
 	}
 }
 
+func TestCraftedNamesAreCleaned(t *testing.T) {
+	// Anyone who can upload picks the file name. Escape sequences and
+	// bidi overrides in it must not reach the report as raw bytes.
+	name := "x\x1b[31mRED\x1b[0m\u202e.php"
+	root := tree(t, map[string]string{
+		"wp-content/uploads/2024/" + name:       "<?php eval(base64_decode($_POST['x']));",
+		"wp-content/plugins/p\x1b]0;t\x07/.env": "APP_KEY=x",
+	})
+	res := scanTree(t, root, Options{Exec: noPHP})
+	if len(res.Findings) == 0 {
+		t.Fatal("no findings")
+	}
+	seen := false
+	for _, f := range res.Findings {
+		b, _ := json.Marshal(f)
+		if strings.ContainsAny(f.Title+f.Path+f.Evidence.Request+strings.Join(f.Evidence.Matched, "")+f.Impact+f.Fix, "\x1b\x07\u202e") {
+			t.Errorf("raw control or format character in %s", b)
+		}
+		if f.Path == "/wp-content/uploads/2024/x.[31mRED.[0m..php" {
+			seen = true
+		}
+	}
+	if !seen {
+		t.Errorf("no finding about the cleaned upload name in %v", ids(res))
+	}
+	if got := cleanText("a\nb\tc\x1b", true); got != "a\nb\tc." {
+		t.Errorf("multiline cleanText %q", got)
+	}
+}
+
 func TestRuleExemptionsNeedTheWholeFile(t *testing.T) {
 	// "<?php", then more padding than is read, then a shell: the head
 	// alone looks like a "Silence is golden" index file.

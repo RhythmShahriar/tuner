@@ -25,6 +25,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/RhythmShahriar/tuner/engine"
 	"github.com/RhythmShahriar/tuner/fingerprint"
@@ -294,19 +295,47 @@ func (s *scan) warn(format string, a ...any) {
 }
 
 // finding builds a finding about the file at abs.
+//
+// File and folder names come from the site tree. Anyone who can
+// upload a file picks its name, so every text field is cleaned with
+// cleanText: a name with escape sequences or bidi overrides would
+// otherwise change colors in the report or reorder its lines, in a
+// terminal or in Markdown.
 func (s *scan) finding(id string, sev engine.Severity, abs, title string, ev []string, impact, fix string, tags ...string) engine.Finding {
+	rel := cleanText(s.rel(abs), false)
+	matched := make([]string, len(ev))
+	for i, line := range ev {
+		matched[i] = cleanText(line, false)
+	}
 	return engine.Finding{
 		ID:         id,
-		Title:      title,
+		Title:      cleanText(title, false),
 		Severity:   sev,
 		Confidence: confidenceHigh,
 		URL:        fileURL(abs).String(),
-		Path:       s.rel(abs),
-		Evidence:   engine.Evidence{Request: "read " + s.rel(abs), Matched: ev},
-		Impact:     impact,
-		Fix:        fix,
+		Path:       rel,
+		Evidence:   engine.Evidence{Request: "read " + rel, Matched: matched},
+		Impact:     cleanText(impact, true),
+		Fix:        cleanText(fix, true),
 		Tags:       append([]string{"local"}, tags...),
 	}
+}
+
+// cleanText makes s safe to print: invalid UTF-8 becomes "?" and control
+// and format characters become ".". Format characters include the bidi
+// overrides that would reorder how a crafted name shows. multiline keeps
+// line breaks and tabs, for the authored impact and fix texts.
+func cleanText(s string, multiline bool) string {
+	s = strings.ToValidUTF8(s, "?")
+	return strings.Map(func(r rune) rune {
+		if multiline && (r == '\n' || r == '\t') {
+			return r
+		}
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return '.'
+		}
+		return r
+	}, s)
 }
 
 // rel renders abs relative to the root as "/path", or as is when outside it.

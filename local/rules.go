@@ -17,7 +17,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"unicode"
 	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
@@ -512,13 +511,7 @@ func snippet(b []byte, at int) string {
 		end = at + nl
 	}
 	end = min(end, len(b))
-	s := strings.ToValidUTF8(string(b[at:end]), "?")
-	s = strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
-			return '.'
-		}
-		return r
-	}, strings.TrimRight(s, "\r"))
+	s := cleanText(strings.TrimRight(string(b[at:end]), "\r"), false)
 	s = matchers.Redact(s)
 	if len(s) > maxSnippet {
 		cut := maxSnippet
