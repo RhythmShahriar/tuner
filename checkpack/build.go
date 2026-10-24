@@ -42,7 +42,7 @@ func CurrentBuild() BuildInfo {
 // pack is rebuilt from master on every checks change, and releases are
 // cut from master.
 func (p *Pack) Supersedes(b BuildInfo) bool {
-	return p.Manifest.supersedes(b)
+	return p.supersedes(b)
 }
 
 func (m Manifest) supersedes(b BuildInfo) bool {
