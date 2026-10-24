@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:">
+<meta name="referrer" content="no-referrer">
+<meta name="generator" content="rhythm-tuner 1.2.3">
+<title>Acme Agency security report: 3 sites</title>
+<style>
+:root {
+  --bg: #f6f6f4; --card: #ffffff; --text: #1b1b1f; --muted: #5f5f6b; --line: #e2e2dd;
+  --critical: #b3261e; --high: #c2570c; --medium: #9a6b00; --low: #2f5f9e; --info: #5f5f6b;
+  --good: #1e7a46; --fair: #9a6b00; --poor: #b3261e; --new: #6b3fa0;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #131316; --card: #1c1c21; --text: #ececf1; --muted: #a2a2ad; --line: #2e2e36;
+    --critical: #ff6b61; --high: #ff9a4d; --medium: #e6b84a; --low: #7aa7e6; --info: #a2a2ad;
+    --good: #5ccf8b; --fair: #e6b84a; --poor: #ff6b61; --new: #b48cf0;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
+header.page { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+header.page img { max-height: 56px; max-width: 200px; }
+h1 { font-size: 26px; margin: 0; }
+h2 { font-size: 21px; margin: 0 0 4px; overflow-wrap: anywhere; }
+h3 { font-size: 16px; margin: 24px 0 8px; text-transform: uppercase; letter-spacing: .04em; }
+h4 { font-size: 16px; margin: 0 0 6px; overflow-wrap: anywhere; }
+.muted { color: var(--muted); }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 20px; margin: 16px 0; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
+th { color: var(--muted); font-weight: 600; }
+.score { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 12px 0; }
+.score b { font-size: 40px; line-height: 1; }
+.good { color: var(--good); } .fair { color: var(--fair); } .poor { color: var(--poor); }
+.up { color: var(--good); } .down { color: var(--poor); } .same { color: var(--muted); }
+.counts { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 0; padding: 0; list-style: none; }
+.counts li { border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; font-size: 13px; }
+.notes { border-left: 4px solid var(--high); padding: 8px 12px; margin: 12px 0; background: var(--bg); }
+.notes p { margin: 2px 0; }
+.sev { display: inline-block; min-width: 76px; text-align: center; border-radius: 4px; padding: 1px 6px; font-size: 12px; font-weight: 700; color: #fff; }
+.sev.likely { background: transparent !important; border: 1px solid currentColor; }
+.sev-critical { background: var(--critical); color: #fff; } .sev.likely.sev-critical { color: var(--critical); }
+.sev-high { background: var(--high); } .sev.likely.sev-high { color: var(--high); }
+.sev-medium { background: var(--medium); } .sev.likely.sev-medium { color: var(--medium); }
+.sev-low { background: var(--low); } .sev.likely.sev-low { color: var(--low); }
+.sev-info { background: var(--info); } .sev.likely.sev-info { color: var(--info); }
+.new { display: inline-block; border-radius: 4px; padding: 0 6px; font-size: 12px; font-weight: 700; color: #fff; background: var(--new); }
+article.finding { border-top: 1px solid var(--line); padding: 14px 0; }
+article.finding:first-of-type { border-top: 0; }
+.where { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; overflow-wrap: anywhere; }
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+code { overflow-wrap: anywhere; }
+pre { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 0; }
+ul.evidence { margin: 6px 0; padding-left: 18px; }
+.fix { margin-top: 10px; }
+.fix strong { display: block; }
+a { color: inherit; }
+footer { margin-top: 32px; font-size: 13px; color: var(--muted); }
+@media print {
+  body { background: #fff; }
+  .card { border: 0; padding: 0; break-inside: auto; }
+  article.finding { break-inside: avoid; }
+  a { text-decoration: none; }
+}
+</style>
+</head>
+<body>
+<main>
+<header class="page">
+<img src="data:image/svg&#43;xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMCAxMCI&#43;PGRlZnM&#43;PGxpbmVhckdyYWRpZW50IGlkPSJnIj48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiNmMDAiPjwvc3RvcD48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48cmVjdCB3aWR0aD0iMTAiIGhlaWdodD0iMTAiIGZpbGw9InVybCgjZykiPjwvcmVjdD48dGV4dCB4PSIxIiB5PSI4Ij5BJmFtcDtCPC90ZXh0Pjwvc3ZnPg==" alt="Acme Agency">
+<div>
+<h1>Acme Agency security report: 3 sites</h1>
+<p class="muted">Prepared by Acme Agency with rhythm-tuner 1.2.3 · compared with last-week.json</p>
+</div>
+</header>
+<section class="card">
+<h2>Overview</h2>
+<table>
+<thead><tr><th>Site</th><th>Score</th><th>Critical</th><th>High</th><th>Medium</th><th>Low</th><th>Info</th><th>New</th></tr></thead>
+<tbody>
+<tr><td><a href="#site-1">https://a.test</a></td><td class="poor">41 <span class="down">-19</span></td><td>1</td><td>1</td><td>0</td><td>1</td><td>0</td><td>2</td></tr>
+<tr><td><a href="#site-2">https://b.test</a></td><td class="fair">85</td><td>0</td><td>0</td><td>1</td><td>0</td><td>0</td><td>1</td></tr>
+<tr><td>https://down.test</td><td colspan="7" class="muted">not scanned: connection refused</td></tr>
+</tbody>
+</table>
+</section>
+<section class="card" id="site-1">
+<h2>https://a.test</h2>
+<p class="muted">WordPress 6.9 · PHP 8.1.2 · &lt;img src=x onerror=alert(3)&gt; · 40 checks · 61 requests</p>
+<div class="score"><b class="poor">41</b><span class="muted">/ 100 tune score</span><span class="down">down 19 since last-week.json (was 60)</span></div>
+<ul class="counts">
+<li><span class="sev sev-critical">CRITICAL</span> 1</li>
+<li><span class="sev sev-high">HIGH</span> 1</li>
+<li><span class="sev sev-medium">MEDIUM</span> 0</li>
+<li><span class="sev sev-low">LOW</span> 1</li>
+<li><span class="sev sev-info">INFO</span> 0</li>
+<li><span class="new">NEW</span> 2</li>
+</ul>
+<details>
+<summary>Plugins and themes (1)</summary>
+<table>
+<thead><tr><th>Type</th><th>Slug</th><th>Version</th><th>Source</th></tr></thead>
+<tbody>
+<tr><td>plugin</td><td>gallery</td><td>1.5</td><td>readme</td></tr>
+</tbody>
+</table>
+</details>
+<h3>CRITICAL (1)</h3>
+<article class="finding">
+<h4><span class="sev sev-critical">CRITICAL</span> <span class="new">NEW</span> .env file exposed &lt;img src=x onerror=alert(1)&gt;</h4>
+<div class="where">https://a.test/.env</div>
+<p class="muted">Check <code>leak-dotenv</code> · confidence high</p>
+<ul class="evidence">
+<li>Request: <code>GET /.env</code> → 200</li>
+<li>Evidence: <code>DB_PASSWORD=…</code></li>
+<li>Secret (masked): <code>DB_PASSWORD=hu•••••</code></li>
+</ul>
+<p>Anyone can read the database password.</p>
+<div class="fix"><strong>Fix</strong><pre>Delete the file:
+
+    rm .env</pre></div>
+<ul class="evidence">
+<li><a href="https://owasp.org/www-project-top-ten/" rel="noopener noreferrer">https://owasp.org/www-project-top-ten/</a></li>
+<li>javascript:alert(2)</li>
+</ul>
+</article>
+<h3>HIGH (1)</h3>
+<article class="finding">
+<h4><span class="sev sev-high">HIGH</span> <span class="new">NEW</span> gallery 1.5: 2 known vulnerabilities</h4>
+<div class="where">https://a.test/wp-content/plugins/gallery/</div>
+<p class="muted">Check <code>vuln-plugin-gallery</code> · confidence high</p>
+<table>
+<thead><tr><th>Severity</th><th>CVE</th><th>Advisory</th><th>Fixed in</th></tr></thead>
+<tbody>
+<tr><td>medium</td><td>CVE-2025-1</td><td><a href="https://www.cve.org/CVERecord?id=CVE-2025-1" rel="noopener noreferrer">Stored XSS</a></td><td>1.5.1</td></tr>
+<tr><td>high</td><td>CVE-2026-2</td><td><span class="new">NEW</span> SQL injection &lt;b&gt;bold&lt;/b&gt; <strong>actively exploited</strong></td><td>1.6</td></tr>
+</tbody>
+</table>
+<p class="muted">Data: WPVulnerability</p>
+<div class="fix"><strong>Fix</strong><pre>Update gallery to 1.6 or later.</pre></div>
+</article>
+<h3>LOW (1)</h3>
+<article class="finding">
+<h4><span class="sev sev-low">LOW</span> XML-RPC is on</h4>
+<div class="where">https://a.test/xmlrpc.php</div>
+<p class="muted">Check <code>xmlrpc</code> · confidence high</p>
+<div class="fix"><strong>Fix</strong><pre>Block xmlrpc.php.</pre></div>
+</article>
+<h3>Fixed since last-week.json (1)</h3>
+<ul class="evidence">
+<li><span class="sev sev-high">HIGH</span> Git config exposed <span class="where">https://a.test/.git/config</span></li>
+</ul>
+</section>
+<section class="card" id="site-2">
+<h2>https://b.test</h2>
+<p class="muted">PHP 8.1.2 · 40 checks · 61 requests</p>
+<div class="notes">
+<p>Incomplete: stopped by --max-time</p>
+</div>
+<div class="score"><b class="fair">85</b><span class="muted">/ 100 tune score</span></div>
+<ul class="counts">
+<li><span class="sev sev-critical">CRITICAL</span> 0</li>
+<li><span class="sev sev-high">HIGH</span> 0</li>
+<li><span class="sev sev-medium">MEDIUM</span> 1</li>
+<li><span class="sev sev-low">LOW</span> 0</li>
+<li><span class="sev sev-info">INFO</span> 0</li>
+<li><span class="new">NEW</span> 1</li>
+</ul>
+<h3>MEDIUM (1)</h3>
+<article class="finding">
+<h4><span class="sev sev-medium likely">MEDIUM, LIKELY</span> <span class="new">NEW</span> PHP 8.1.2: 1 known vulnerability</h4>
+<div class="where">https://b.test/</div>
+<p class="muted">Check <code>vuln-php</code> · confidence low</p>
+<p><strong>Why only likely:</strong> a distro build may already include the fix</p>
+</article>
+</section>
+<footer>A clean report means none of Tuner's checks found a problem. It is not proof that a site is secure.</footer>
+</main>
+</body>
+</html>

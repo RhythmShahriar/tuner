@@ -34,6 +34,12 @@ type WriteOptions struct {
 	Version string        // the rhythm-tuner version, for SARIF's tool driver
 	Root    string        // the scan root of a local scan, for fingerprints
 	Brand   Brand
+
+	// Since is an earlier scan of the same targets. The html writer marks
+	// the findings that are new since then, lists the fixed ones and shows
+	// how each score moved. Other writers ignore it.
+	Since     []Report
+	SinceName string // what to call the earlier scan, e.g. its file name
 }
 
 // Writer renders reports in one format.
@@ -50,7 +56,7 @@ var (
 )
 
 // Extensions that name a format without being its main extension.
-var extAliases = map[string]string{".ndjson": "jsonl", ".markdown": "md"}
+var extAliases = map[string]string{".ndjson": "jsonl", ".markdown": "md", ".htm": "html"}
 
 // RegisterWriter adds a report format. name is what --format style flags
 // and Write take; ext (with its dot) is the file extension that picks it for -o.
@@ -72,7 +78,7 @@ func Write(format string, w io.Writer, reports []Report, o WriteOptions) error {
 	// Reports from New are clean already; the options carry error text
 	// and names that come straight from the command line or the network.
 	o.Failed = sanitized(o.Failed)
-	o.Version, o.Brand = SafeText(o.Version), sanitized(o.Brand)
+	o.Version, o.Brand, o.SinceName = SafeText(o.Version), sanitized(o.Brand), SafeText(o.SinceName)
 	return e.fn(w, reports, o)
 }
 
@@ -115,4 +121,5 @@ func init() {
 	RegisterWriter("jsonl", ".jsonl", func(io.Writer, []Report, WriteOptions) error { return nil })
 	RegisterWriter("sarif", ".sarif", writeSARIF)
 	RegisterWriter("md", ".md", writeMarkdown)
+	RegisterWriter("html", ".html", writeHTML)
 }
