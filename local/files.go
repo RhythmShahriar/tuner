@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/RhythmShahriar/tuner/engine"
@@ -54,7 +55,8 @@ func (s *scan) walk(ctx context.Context) []engine.Finding {
 			return nil // unreadable: skip it, keep going
 		}
 		if entries++; entries > s.opts.MaxEntries {
-			s.warn("stopped looking for stray files after %d entries; scan a smaller folder to cover the rest", s.opts.MaxEntries)
+			s.warn("stopped looking for stray files after %s entries; scan a smaller folder to cover the rest", thousands(s.opts.MaxEntries))
+			s.stoppedBy = "budget"
 			return fs.SkipAll
 		}
 		if entries%1024 == 0 && ctx.Err() != nil {
@@ -225,6 +227,19 @@ func (s *scan) file(p, name string, d fs.DirEntry) *engine.Finding {
 func (s *scan) findingPtr(id string, sev engine.Severity, p, title string, ev []string, impact, fix string, tags ...string) *engine.Finding {
 	f := s.finding(id, sev, p, title, ev, impact, fix, tags...)
 	return &f
+}
+
+// thousands renders n with comma separators, e.g. 250,000.
+func thousands(n int) string {
+	s := strconv.Itoa(n)
+	start := 0
+	if n < 0 {
+		start = 1
+	}
+	for i := len(s) - 3; i > start; i -= 3 {
+		s = s[:i] + "," + s[i:]
+	}
+	return s
 }
 
 func sizeNote(n int64) string {

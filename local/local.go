@@ -67,10 +67,18 @@ type Options struct {
 // Scan scans the directory root. The fingerprint and then each finding
 // are reported through h.
 func Scan(ctx context.Context, root string, opts Options, h engine.Hooks) (*engine.Result, error) {
+	res, _, err := scanStatus(ctx, root, opts, h)
+	return res, err
+}
+
+// scanStatus is Scan, also saying how complete the scan was. engine.Result
+// can't carry that yet; once it gains Complete, StoppedBy and VulnData,
+// Scan copies the status into them.
+func scanStatus(ctx context.Context, root string, opts Options, h engine.Hooks) (*engine.Result, status, error) {
 	start := time.Now()
 	abs, err := Root(root)
 	if err != nil {
-		return nil, err
+		return nil, status{}, err
 	}
 	s := &scan{opts: opts, root: abs, base: &url.URL{Scheme: "file", Path: filepath.ToSlash(abs)}}
 	if s.opts.MaxEntries <= 0 {
@@ -124,14 +132,10 @@ func Scan(ctx context.Context, root string, opts Options, h engine.Hooks) (*engi
 	}
 	findings = append(findings, s.laravelEnv()...)
 	findings = append(findings, s.walk(ctx)...)
-	findings = append(findings, s.composer(ctx)...)
+	osv := s.vulnStep(func() { findings = append(findings, s.composer(ctx)...) })
 	findings = append(findings, s.sessionUploadProgress(ctx)...)
 	findings, _ = engine.Filtered(static(findings), opts.Select).Advise(ctx, s.base, *fp)
-	if opts.Advisor != nil && ctx.Err() == nil {
-		more, warnings := opts.Advisor.Advise(ctx, s.base, *fp)
-		findings = append(findings, more...)
-		s.warnings = append(s.warnings, warnings...)
-	}
+	advisor := s.advise(ctx, *fp, &findings)
 
 	for _, f := range findings {
 		f.Target = res.Target
@@ -145,7 +149,8 @@ func Scan(ctx context.Context, root string, opts Options, h engine.Hooks) (*engi
 	res.Warnings = s.warnings
 	res.Score = engine.Score(res.Findings)
 	res.Duration = time.Since(start)
-	return res, ctx.Err()
+	st := status{complete: s.stoppedBy == "", stoppedBy: s.stoppedBy, vulnData: combineVulnData(advisor, osv)}
+	return res, st, ctx.Err()
 }
 
 // Root resolves a local target to an absolute directory, expanding a
@@ -186,6 +191,8 @@ type scan struct {
 	checks   int       // local checks evaluated, for the summary
 	warnings []string
 	skipped  map[string]bool // special files already warned about
+	// stoppedBy is "budget" once a walk stopped at MaxEntries.
+	stoppedBy string
 }
 
 func (s *scan) warn(format string, a ...any) {

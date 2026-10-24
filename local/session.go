@@ -8,6 +8,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -377,17 +378,22 @@ func globSorted(pattern string) []string {
 
 // sessionCode finds runtime switches of session.serialize_handler in the
 // site's PHP files, and .user.ini/.htaccess overrides of the two settings.
-// Unlike the stray-file walk it includes vendor/: libraries manage
-// sessions too.
+// Like the stray-file walk it skips vendor/ and node_modules/: they hold
+// most of a project's files. A library that switches the handler is
+// the app's choice to call.
 func (s *scan) sessionCode(ctx context.Context) ([]handlerSwitch, []override) {
 	var switches []handlerSwitch
 	var ovs []override
 	entries := 0
-	_ = filepath.WalkDir(s.root, func(p string, d fs.DirEntry, err error) error {
+	var unreadable []string
+	err := filepath.WalkDir(s.root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil
+			unreadable = append(unreadable, s.rel(p)+": "+errText(err))
+			return nil // keep going
 		}
 		if entries++; entries > s.opts.MaxEntries {
+			s.warn("stopped after %s entries; the session check may be incomplete", thousands(s.opts.MaxEntries))
+			s.stoppedBy = "budget"
 			return fs.SkipAll
 		}
 		if entries%1024 == 0 && ctx.Err() != nil {
@@ -397,7 +403,7 @@ func (s *scan) sessionCode(ctx context.Context) ([]handlerSwitch, []override) {
 		if d.IsDir() {
 			switch {
 			case p == s.root:
-			case name == "node_modules" || name == ".git" || name == ".svn" || name == ".hg":
+			case name == "node_modules" || name == "vendor" || name == ".git" || name == ".svn" || name == ".hg":
 				return fs.SkipDir
 			case name == "cache" && filepath.Base(filepath.Dir(p)) == "wp-content":
 				return fs.SkipDir
@@ -427,6 +433,13 @@ func (s *scan) sessionCode(ctx context.Context) ([]handlerSwitch, []override) {
 		}
 		return nil
 	})
+	if err != nil && ctx.Err() == nil {
+		s.warn("session check: walking %s: %v", s.rel(s.root), err)
+	}
+	if len(unreadable) > 0 {
+		s.warn("the session check couldn't read %d entr%s, so it may be incomplete (first: %s)",
+			len(unreadable), plural2(len(unreadable), "y", "ies"), unreadable[0])
+	}
 	// Literal switches to php first, ones confirmed before session_start()
 	// first among those, so the evidence shows the strongest case.
 	slices.SortStableFunc(switches, func(a, b handlerSwitch) int {
@@ -488,6 +501,23 @@ func findSwitches(path string, src []byte) []handlerSwitch {
 		out = append(out, sw)
 	}
 	return out
+}
+
+// errText renders a walk error without the path the message already names.
+func errText(err error) string {
+	var pe *fs.PathError
+	if errors.As(err, &pe) {
+		return pe.Err.Error()
+	}
+	return err.Error()
+}
+
+// plural2 picks the singular or plural ending for n.
+func plural2(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 func lineAt(b []byte, off int) int { return bytes.Count(b[:off], []byte("\n")) + 1 }
