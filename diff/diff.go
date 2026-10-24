@@ -42,6 +42,14 @@ type Result struct {
 	// NotScanned lists targets of the old scan the new one doesn't have
 	// (or couldn't reach). Their findings are not counted as fixed.
 	NotScanned []string `json:"not_scanned,omitempty"`
+	// NotSeen lists old findings the new scan may have missed because it
+	// didn't finish (or had no vulnerability data, for findings with
+	// advisories). A scan stopped by a firewall would otherwise list
+	// everything it never reached as fixed.
+	NotSeen []Entry `json:"not_seen,omitempty"`
+	// Incomplete holds the new scan's status notes, e.g. "Incomplete:
+	// stopped by --max-time", with the target in front for a batch.
+	Incomplete []string `json:"incomplete,omitempty"`
 }
 
 // Compare matches the findings of two scans. Findings match on their
@@ -56,6 +64,14 @@ type Result struct {
 // target.
 func Compare(before, after []report.Report) Result {
 	res := Result{New: []Entry{}, Fixed: []Entry{}, Unchanged: []Entry{}}
+	for _, r := range after {
+		for _, n := range r.Status().Notes() {
+			if len(after) > 1 {
+				n = report.SafeText(r.Target) + ": " + n
+			}
+			res.Incomplete = append(res.Incomplete, n)
+		}
+	}
 	if len(before) == 1 && len(after) == 1 {
 		res.add(&before[0], &after[0])
 		res.sort()
@@ -127,17 +143,32 @@ func (res *Result) add(before, after *report.Report) {
 	if before == nil {
 		return
 	}
+	st := after.Status()
 	for _, f := range before.Findings {
 		if fp := report.Fingerprint(f, ""); !current[fp] {
 			current[fp] = true // a finding listed twice is fixed once
-			res.Fixed = append(res.Fixed, Entry{Target: before.Target, Fingerprint: fp, Finding: f})
+			e := Entry{Target: before.Target, Fingerprint: fp, Finding: f}
+			if missed(st, f) {
+				res.NotSeen = append(res.NotSeen, e)
+			} else {
+				res.Fixed = append(res.Fixed, e)
+			}
 		}
 	}
 }
 
+// missed reports whether a scan with status st may have missed f rather
+// than found it fixed.
+func missed(st report.Status, f engine.Finding) bool {
+	if st.Partial() {
+		return true
+	}
+	return len(f.Advisories) > 0 && (st.VulnData == "missing" || st.VulnData == "partial" || st.VulnData == "off")
+}
+
 // sort puts the most severe first, keeping the scan's order otherwise.
 func (res *Result) sort() {
-	for _, es := range [][]Entry{res.New, res.Fixed, res.Unchanged} {
+	for _, es := range [][]Entry{res.New, res.Fixed, res.Unchanged, res.NotSeen} {
 		slices.SortStableFunc(es, func(a, b Entry) int {
 			return cmp.Compare(a.Finding.Severity.Rank(), b.Finding.Severity.Rank())
 		})
@@ -152,9 +183,28 @@ func (res Result) NewAtOrAbove(level engine.Severity) bool {
 	})
 }
 
-// Summary is one line for a log, e.g. "3 new, 1 fixed since last-week.json".
+// Summary is one line for a log, e.g. "3 new, 1 fixed since last-week.json",
+// with "; 4 not seen (scan incomplete)" when the new scan didn't finish.
 func (res Result) Summary(since string) string {
-	return fmt.Sprintf("%d new, %d fixed since %s", len(res.New), len(res.Fixed), report.SafeText(since))
+	return fmt.Sprintf("%d new, %d fixed since %s", len(res.New), len(res.Fixed), report.SafeText(since)) + res.notSeen()
+}
+
+func (res Result) notSeen() string {
+	if len(res.NotSeen) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("; %d not seen (scan incomplete)", len(res.NotSeen))
+}
+
+// parts are the sections the text and Markdown writers list.
+func (res Result) parts() []struct {
+	title   string
+	entries []Entry
+} {
+	return []struct {
+		title   string
+		entries []Entry
+	}{{"New", res.New}, {"Fixed", res.Fixed}, {"Not seen, scan incomplete", res.NotSeen}}
 }
 
 // Line renders an entry for a terminal or log:
@@ -196,11 +246,11 @@ func firstOf(s []string) string {
 // old scan, e.g. its file name.
 func WriteText(w io.Writer, res Result, since string) error {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%d new, %d fixed, %d unchanged since %s\n", len(res.New), len(res.Fixed), len(res.Unchanged), report.SafeText(since))
-	for _, part := range []struct {
-		title   string
-		entries []Entry
-	}{{"New", res.New}, {"Fixed", res.Fixed}} {
+	fmt.Fprintf(&b, "%d new, %d fixed, %d unchanged since %s%s\n", len(res.New), len(res.Fixed), len(res.Unchanged), report.SafeText(since), res.notSeen())
+	for _, n := range res.Incomplete {
+		b.WriteString(report.SafeText(n) + "\n")
+	}
+	for _, part := range res.parts() {
 		if len(part.entries) == 0 {
 			continue
 		}
@@ -220,11 +270,18 @@ func WriteText(w io.Writer, res Result, since string) error {
 func WriteMarkdown(w io.Writer, res Result, since string) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Tuner changes since %s\n\n", report.MDText(since))
-	fmt.Fprintf(&b, "**%d new** · **%d fixed** · %d unchanged\n", len(res.New), len(res.Fixed), len(res.Unchanged))
-	for _, part := range []struct {
-		title   string
-		entries []Entry
-	}{{"New", res.New}, {"Fixed", res.Fixed}} {
+	fmt.Fprintf(&b, "**%d new** · **%d fixed** · %d unchanged", len(res.New), len(res.Fixed), len(res.Unchanged))
+	if len(res.NotSeen) > 0 {
+		fmt.Fprintf(&b, " · %d not seen (scan incomplete)", len(res.NotSeen))
+	}
+	b.WriteString("\n")
+	if len(res.Incomplete) > 0 {
+		b.WriteString("\n")
+		for _, n := range res.Incomplete {
+			fmt.Fprintf(&b, "> ⚠️ %s\n", report.MDText(n))
+		}
+	}
+	for _, part := range res.parts() {
 		if len(part.entries) == 0 {
 			continue
 		}
@@ -256,7 +313,7 @@ func WriteJSON(w io.Writer, res Result, since string) error {
 		Since  string         `json:"since"`
 		Counts map[string]int `json:"counts"`
 		Result
-	}{Schema, report.SafeText(since), map[string]int{"new": len(res.New), "fixed": len(res.Fixed), "unchanged": len(res.Unchanged)}, res}
+	}{Schema, report.SafeText(since), map[string]int{"new": len(res.New), "fixed": len(res.Fixed), "unchanged": len(res.Unchanged), "not_seen": len(res.NotSeen)}, res}
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
 	enc.SetIndent("", "  ")

@@ -201,3 +201,57 @@ func TestWriteJSON(t *testing.T) {
 		t.Errorf("got %s", b.String())
 	}
 }
+
+// review: a scan that stopped early must not list what it never reached
+// as fixed.
+func TestCompareIncompleteScan(t *testing.T) {
+	before := rep("https://a.test",
+		remote("leak-dotenv", "/.env", engine.Critical),
+		remote("xmlrpc", "/xmlrpc.php", engine.Low),
+	)
+	after := rep("https://a.test", remote("xmlrpc", "/xmlrpc.php", engine.Low))
+	after.SetStatus(report.Status{StoppedBy: "waf", BlockedBy: "cloudflare"})
+	res := Compare([]report.Report{before}, []report.Report{after})
+	if len(res.Fixed) != 0 || len(res.NotSeen) != 1 || res.NotSeen[0].Finding.ID != "leak-dotenv" {
+		t.Errorf("fixed %v, not seen %v", ids(res.Fixed), ids(res.NotSeen))
+	}
+	if got := res.Summary("old.json"); got != "0 new, 0 fixed since old.json; 1 not seen (scan incomplete)" {
+		t.Errorf("summary %q", got)
+	}
+	var b bytes.Buffer
+	_ = WriteText(&b, res, "old.json")
+	want := `0 new, 0 fixed, 1 unchanged since old.json; 1 not seen (scan incomplete)
+Incomplete: blocked by Cloudflare challenge
+
+Not seen, scan incomplete:
+[CRITICAL] leak-dotenv - https://a.test/.env
+`
+	if b.String() != want {
+		t.Errorf("got:\n%s\nwant:\n%s", b.String(), want)
+	}
+	b.Reset()
+	_ = WriteMarkdown(&b, res, "old.json")
+	for _, want := range []string{"· 1 not seen (scan incomplete)\n", "> ⚠️ Incomplete: blocked by Cloudflare challenge\n", "## Not seen, scan incomplete\n"} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("missing %q in:\n%s", want, b.String())
+		}
+	}
+
+	// Without vulnerability data only the advisory findings are unknown.
+	before = rep("https://a.test",
+		remote("leak-dotenv", "/.env", engine.Critical),
+		remote("vuln-plugin-gallery", "/wp-content/plugins/gallery/", engine.High, "A1"),
+	)
+	after = rep("https://a.test")
+	after.SetStatus(report.Status{Complete: true, VulnData: "missing"})
+	res = Compare([]report.Report{before}, []report.Report{after})
+	if got, want := strings.Join(ids(res.Fixed), ","), "leak-dotenv"; got != want {
+		t.Errorf("fixed %s, want %s", got, want)
+	}
+	if got := ids(res.NotSeen); len(got) != 1 || got[0] != "vuln-plugin-gallery" {
+		t.Errorf("not seen %v", got)
+	}
+	if len(res.Incomplete) != 1 || !strings.Contains(res.Incomplete[0], "vulnerability data missing") {
+		t.Errorf("incomplete %q", res.Incomplete)
+	}
+}
