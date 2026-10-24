@@ -34,13 +34,25 @@ import (
 // Bodies beyond this size are truncated; matchers only see the first part.
 const maxBody = 1 << 20
 
+// Defaults New applies to Options left at zero. Ten requests in flight
+// keep a default scan (about 100 requests) to a few seconds without
+// looking like a flood to a small shared host; ten seconds outlasts a slow
+// PHP page but not a hung connection. Callers that show defaults, such as
+// the CLI flags, should use these too.
+const (
+	DefaultConcurrency = 10
+	DefaultTimeout     = 10 * time.Second
+)
+
+// Options configure a Scanner. The zero value scans politely with the
+// defaults above, passive plugin discovery and no vulnerability matching.
 type Options struct {
 	UserAgent   string
-	Headers     http.Header // sent with every request, e.g. Cookie or Authorization; overrides UserAgent
-	Rate        float64     // requests per second to the target; 0 means unlimited until the site answers 429 or 503
-	Timeout     time.Duration
-	Concurrency int // most requests in flight at once, for the whole scan
-	Retries     int // extra attempts after a network error or a 429/503
+	Headers     http.Header   // sent with every request, e.g. Cookie or Authorization; overrides UserAgent
+	Rate        float64       // requests per second to the target; 0 means unlimited until the site answers 429 or 503
+	Timeout     time.Duration // per request, each try; 0 means DefaultTimeout
+	Concurrency int           // most requests in flight at once, for the whole scan; 0 means DefaultConcurrency
+	Retries     int           // extra attempts after a network error or a 429/503
 	Proxy       *url.URL
 	Insecure    bool         // skip TLS certificate verification
 	Profile     Profile      // quick skips plugin and theme version lookups (not the PHP probe)
@@ -67,6 +79,7 @@ type Options struct {
 // PluginMode is how plugin discovery runs on a remote scan.
 type PluginMode string
 
+// Plugin discovery modes, as --plugins takes them.
 const (
 	PluginsPassive PluginMode = "passive" // only what the site already shows: asset URLs, REST routes
 	PluginsDeep    PluginMode = "deep"    // also probes readme.txt of popular plugins
@@ -87,6 +100,10 @@ type StatusAdvisor interface {
 
 // ResponseAdvisor sees the body of a finding's response and may add
 // findings, e.g. known-vulnerable packages in an exposed composer.lock.
+// The scan calls it once per finding a check fires, with the body as read
+// (at most 1 MiB). The body is shared with the scan and must not be
+// changed or kept. Its findings are reported like the check's own: with
+// the scan's target, sorted and with evidence redacted.
 type ResponseAdvisor interface {
 	AdviseResponse(ctx context.Context, f Finding, body []byte) (findings []Finding, warnings []string)
 }
@@ -95,6 +112,7 @@ type ResponseAdvisor interface {
 // values are "high" and "low".
 type Confidence string
 
+// Confidence values.
 const (
 	ConfidenceHigh Confidence = "high" // confirmed
 	ConfidenceLow  Confidence = "low"  // likely, e.g. a version a distro may have patched
@@ -135,6 +153,8 @@ type RequestLog struct {
 	Err      error
 }
 
+// Finding is one problem found on the target: a YAML check that fired or
+// an advisor's result. Evidence never holds a secret unmasked.
 type Finding struct {
 	ID         string     `json:"id"`
 	Title      string     `json:"title"`
@@ -165,6 +185,8 @@ type Evidence struct {
 	Secrets []matchers.Secret `json:"secrets,omitempty"`
 }
 
+// Result is the outcome of one Scan: what the target runs, what was found
+// and how complete the scan was.
 type Result struct {
 	Target      string             `json:"target"`
 	Fingerprint fingerprint.Result `json:"fingerprint"`
@@ -207,6 +229,9 @@ func (r *Result) Worst() Severity {
 	return w
 }
 
+// Scanner runs a set of checks against targets. One Scanner may scan
+// several targets, also at once; scans of the same host then share the
+// request pace (Options.Rate).
 type Scanner struct {
 	checks  []*Check
 	opts    Options
@@ -214,12 +239,14 @@ type Scanner struct {
 	paces   *paces   // request pace per host, shared by every Scan
 }
 
+// New returns a Scanner for checks, filling in DefaultConcurrency and
+// DefaultTimeout where opts leaves them at zero.
 func New(checks []*Check, opts Options) *Scanner {
 	if opts.Concurrency <= 0 {
-		opts.Concurrency = 10
+		opts.Concurrency = DefaultConcurrency
 	}
 	if opts.Timeout <= 0 {
-		opts.Timeout = 10 * time.Second
+		opts.Timeout = DefaultTimeout
 	}
 	opts.Profile = Profile(strings.ToLower(string(opts.Profile)))
 	return &Scanner{checks: checks, opts: opts, resolve: defaultResolve, paces: newPaces(opts.Rate)}
@@ -318,11 +345,12 @@ func (s *Scanner) Scan(ctx context.Context, target string, h Hooks) (*Result, er
 	for range s.opts.Concurrency {
 		wg.Go(func() {
 			for j := range ch {
-				f, ok := ss.run(ctx, j.c, j.path)
+				found, warnings := ss.run(ctx, j.c, j.path)
 				ss.finished(j)
 				n := int(done.Add(1))
 				ss.emit(func() {
-					if ok {
+					res.Warnings = append(res.Warnings, warnings...)
+					for _, f := range found {
 						f.Target = res.Target
 						res.Findings = append(res.Findings, f)
 						if h.Finding != nil {
@@ -443,26 +471,25 @@ func (ss *session) drop(f *fetch) {
 	}
 }
 
-func (ss *session) run(ctx context.Context, c *Check, p string) (Finding, bool) {
+// run sends check c's request for path p and returns its finding, if it
+// fired, followed by what Options.ResponseAdvisors make of the response.
+// It runs before finished, while the body is still cached.
+func (ss *session) run(ctx context.Context, c *Check, p string) ([]Finding, []string) {
 	r, err := ss.get(ctx, c.Request.Method, p)
 	if err != nil {
-		return Finding{}, false
+		return nil, nil
 	}
 	// A block page says nothing about the site behind it.
 	v := detectWAF(r)
 	ss.waf.add(v)
 	if v != nil {
-		return Finding{}, false
+		return nil, nil
 	}
 	ok, ev := c.Match.Match(r, func() bool { return ss.isBaseline(ctx, c, p, r) })
 	if !ok {
-		return Finding{}, false
+		return nil, nil
 	}
-	// Matchers already redact before cutting evidence; this second pass
-	// covers evidence they build from other sources.
-	for i := range ev {
-		ev[i] = matchers.Redact(ev[i])
-	}
+	redact(ev)
 	f := Finding{
 		ID:         c.ID,
 		Title:      c.Name,
@@ -480,7 +507,26 @@ func (ss *session) run(ctx context.Context, c *Check, p string) (Finding, bool) 
 	if c.Extract.Secrets {
 		f.Evidence.Secrets = matchers.FindSecrets(r.Body)
 	}
-	return f, true
+	found := []Finding{f}
+	var warnings []string
+	for _, a := range ss.opts.ResponseAdvisors {
+		more, w := a.AdviseResponse(ctx, f, r.Body)
+		warnings = append(warnings, w...)
+		for _, x := range more {
+			redact(x.Evidence.Matched)
+			found = append(found, x)
+		}
+	}
+	return found, warnings
+}
+
+// redact masks secrets in evidence lines in place. Matchers already
+// redact before cutting evidence; this second pass covers evidence built
+// elsewhere, such as by a ResponseAdvisor.
+func redact(ev []string) {
+	for i := range ev {
+		ev[i] = matchers.Redact(ev[i])
+	}
 }
 
 // session is the state of one scan against one target.

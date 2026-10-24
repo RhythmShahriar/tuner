@@ -21,6 +21,7 @@ import (
 // Severity of a finding, from info to critical.
 type Severity string
 
+// Severities, as checks and JSON spell them.
 const (
 	Critical Severity = "critical"
 	High     Severity = "high"
@@ -77,12 +78,17 @@ func (f FixServer) fixes() map[string]string {
 	return m
 }
 
+// Request is what a check fetches: one request per path, GET unless
+// Method says HEAD.
 type Request struct {
 	Method string   `yaml:"method"`
 	Path   []string `yaml:"path"` // {{host}} expands to the target hostname
 }
 
+// Extract lists what a check pulls out of a matching response.
 type Extract struct {
+	// Secrets adds the masked credentials found in the body to the
+	// finding's evidence.
 	Secrets bool `yaml:"secrets"`
 }
 

@@ -86,6 +86,7 @@ type TLSMatch struct {
 // Ints accepts either a single int or a list in YAML.
 type Ints []int
 
+// UnmarshalYAML reads 200 as well as [200, 206].
 func (i *Ints) UnmarshalYAML(n *yaml.Node) error {
 	if n.Kind == yaml.ScalarNode {
 		var v int
@@ -303,6 +304,9 @@ type Block struct {
 	Any []Matcher `yaml:"any"`
 }
 
+// Compile checks the block and prepares its matchers (regexes, magic
+// bytes) for Match. ParseCheck calls it; a Block built in code needs it
+// before use.
 func (b *Block) Compile() error {
 	if len(b.All)+len(b.Any) == 0 {
 		return errors.New("match needs at least one condition in all or any")
