@@ -1,0 +1,27 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: wp-ai1wm-backups
+name: All-in-One WP Migration backups listed
+severity: critical
+tags: [wordpress, backup, leak]
+requires: [wordpress]
+request:
+  path: ["/wp-content/ai1wm-backups/"]
+match:
+  all:
+    - status: 200
+    - regex: '<title>Index of /wp-content/ai1wm-backups'
+    - regex: 'href="[^"]+\.wpress"'
+    - not_baseline: true
+impact: Each .wpress file is a full copy of the site and its database, ready to download.
+fix: |
+  Delete .wpress files once the migration is done. The plugin's .htaccess
+  protects them on Apache only, so on nginx deny the folder.
+fix_server:
+  nginx: |
+    location ~ ^/wp-content/ai1wm-backups/ { deny all; }
+  apache: |
+    RedirectMatch 404 ^/wp-content/ai1wm-backups/
+references:
+  - https://cwe.mitre.org/data/definitions/530.html

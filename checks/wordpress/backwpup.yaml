@@ -1,0 +1,27 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: wp-backwpup-listed
+name: BackWPup folders listed in uploads
+severity: high
+tags: [wordpress, backup, leak]
+requires: [wordpress]
+request:
+  path: ["/wp-content/uploads/"]
+match:
+  all:
+    - status: 200
+    - regex: '<title>Index of /wp-content/uploads'
+    - regex: 'href="backwpup-[0-9a-f]+-(?:backups|logs|temp)/"'
+    - not_baseline: true
+impact: The listing names the folders where BackWPup keeps backups and logs. If those list too, the whole site can be downloaded.
+fix: |
+  Store BackWPup backups off the server (S3, Dropbox or SFTP), delete the
+  local archives and turn off directory listing.
+fix_server:
+  nginx: |
+    location ~ ^/wp-content/uploads/backwpup- { deny all; }
+  apache: |
+    RedirectMatch 404 ^/wp-content/uploads/backwpup-
+references:
+  - https://cwe.mitre.org/data/definitions/530.html

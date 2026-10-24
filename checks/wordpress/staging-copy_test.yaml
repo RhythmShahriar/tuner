@@ -1,0 +1,12 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+positive:
+  - name: old install answers
+    routes:
+      /old/wp-login.php: {body: '<html><body class="login"><form name="loginform" id="loginform" action="https://shop.example.test/old/wp-login.php" method="post"></form></body></html>'}
+negative:
+  - name: not found
+    routes: {}
+  - name: catch-all that serves the login form for every path
+    default: {status: 200, body: '<html><form name="loginform" id="loginform" method="post"></form></html>'}

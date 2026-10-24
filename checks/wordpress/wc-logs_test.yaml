@@ -1,0 +1,17 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+positive:
+  - name: logs listed
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
+      /wp-content/uploads/wc-logs/: {body: "<html><head><title>Index of /wp-content/uploads/wc-logs/</title></head><body><h1>Index of /wp-content/uploads/wc-logs/</h1><hr><pre><a href=\"../\">../</a>\n<a href=\"fatal-errors-2026-10-01-1a2b3c4d5e.log\">fatal-errors-2026-10-01-1a2b3c4d5e.log</a>\n<a href=\"index.html\">index.html</a>\n</pre></body></html>"}
+negative:
+  - name: no logs
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
+      /wp-content/uploads/wc-logs/: {body: "<html><head><title>Index of /wp-content/uploads/wc-logs/</title></head><body><h1>Index of /wp-content/uploads/wc-logs/</h1><hr><pre><a href=\"../\">../</a>\n<a href=\"index.html\">index.html</a>\n</pre></body></html>"}
+  - name: forbidden
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
+      /wp-content/uploads/wc-logs/: {status: 403}

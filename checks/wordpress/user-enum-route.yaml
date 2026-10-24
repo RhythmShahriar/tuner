@@ -1,0 +1,25 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: wp-user-enum-rest-route
+name: User enumeration via ?rest_route=
+severity: medium
+tags: [wordpress, enumeration]
+requires: [wordpress]
+request:
+  path: ["/?rest_route=/wp/v2/users"]
+match:
+  all:
+    - status: 200
+    - regex: '"slug"\s*:\s*"[^"]+"'
+    - not_baseline: true
+impact: Login names are public, which halves the work of a password-guessing attack. Blocking /wp-json/ alone does not stop this form of the request.
+fix: |
+  Restrict the users endpoint to logged-in users in WordPress itself, which
+  covers both /wp-json/ and ?rest_route=, e.g. with a security plugin, or:
+  add_filter( 'rest_endpoints', function ( $e ) {
+      if ( ! is_user_logged_in() ) { unset( $e['/wp/v2/users'], $e['/wp/v2/users/(?P<id>[\d]+)'] ); }
+      return $e;
+  } );
+references:
+  - https://developer.wordpress.org/rest-api/reference/users/

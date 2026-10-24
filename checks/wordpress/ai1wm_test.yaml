@@ -1,0 +1,17 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+positive:
+  - name: archive listed
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
+      /wp-content/ai1wm-backups/: {body: "<html><head><title>Index of /wp-content/ai1wm-backups/</title></head><body><h1>Index of /wp-content/ai1wm-backups/</h1><hr><pre><a href=\"../\">../</a>\n<a href=\"shop-example-test-20261001-120000-abc123.wpress\">shop-example-test-20261001-120000-abc123.wpress</a>\n<a href=\"index.php\">index.php</a>\n</pre></body></html>"}
+negative:
+  - name: no archives
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
+      /wp-content/ai1wm-backups/: {body: "<html><head><title>Index of /wp-content/ai1wm-backups/</title></head><body><h1>Index of /wp-content/ai1wm-backups/</h1><hr><pre><a href=\"../\">../</a>\n<a href=\"index.php\">index.php</a>\n</pre></body></html>"}
+  - name: forbidden
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
+      /wp-content/ai1wm-backups/: {status: 403}

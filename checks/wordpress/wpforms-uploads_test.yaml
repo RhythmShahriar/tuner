@@ -1,0 +1,16 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+positive:
+  - name: form uploads listed
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
+      /wp-content/uploads/wpforms/: {body: "<html><head><title>Index of /wp-content/uploads/wpforms/</title></head><body><h1>Index of /wp-content/uploads/wpforms/</h1><hr><pre><a href=\"../\">../</a>\n<a href=\"42-0a1b2c3d4e5f/\">42-0a1b2c3d4e5f/</a>\n<a href=\"index.html\">index.html</a>\n</pre></body></html>"}
+negative:
+  - name: forbidden
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}
+      /wp-content/uploads/wpforms/: {status: 403}
+  - name: not found
+    routes:
+      /: {body: "<html><head><link rel=stylesheet href=\"/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head></html>"}

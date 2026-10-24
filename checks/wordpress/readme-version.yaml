@@ -1,0 +1,26 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: wp-readme-version
+name: WordPress version shown in readme.html
+severity: low
+tags: [wordpress, disclosure]
+requires: [wordpress]
+request:
+  path: ["/readme.html"]
+match:
+  all:
+    - status: 200
+    - regex: '(?i)<br\s*/?>\s*Version\s+[0-9]+\.[0-9.]+'
+    - not_baseline: true
+impact: The exact WordPress version is public, which points attackers at the flaws it has. Only old releases print it, so the core is likely out of date too.
+fix: Update WordPress, then delete readme.html after each core update or deny it in the web server.
+fix_server:
+  nginx: |
+    location = /readme.html { deny all; }
+  apache: |
+    <Files "readme.html">
+      Require all denied
+    </Files>
+references:
+  - https://developer.wordpress.org/advanced-administration/security/hardening/
