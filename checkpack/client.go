@@ -252,6 +252,9 @@ func (c *Client) fetch(ctx context.Context, st *state) (*state, error) {
 	if err := m.Compatible(c.Tuner); err != nil {
 		return nil, err
 	}
+	if err := c.rollback(st, m); err != nil {
+		return nil, err
+	}
 	now := c.now()
 	next := &state{Checked: now, Manifest: &m, Sums: rawSums, Sig: sig}
 	if st != nil && len(st.Archive) > 0 && st.SHA256 == sums[ArchiveName] {
@@ -274,6 +277,20 @@ func (c *Client) fetch(ctx context.Context, st *state) (*state, error) {
 		return nil, err
 	}
 	return next, nil
+}
+
+// rollback refuses a fetched manifest older than the usable cached pack.
+// An older pack signed by a trusted key is still genuine, but serving it
+// again (a stale mirror or a replayed release asset) would undo the fixes
+// in the newer one. The cache is kept.
+func (c *Client) rollback(st *state, m Manifest) error {
+	if st == nil || st.Manifest == nil || !m.Created.Before(st.Manifest.Created) {
+		return nil
+	}
+	if _, err := c.verified(st); err != nil {
+		return nil // the cached pack is unusable; anything verified beats it
+	}
+	return fmt.Errorf("%w: pack %s is older than the cached pack %s", ErrRejected, m.Version, st.Manifest.Version)
 }
 
 // verified checks a pack's signature and contents and loads its checks.

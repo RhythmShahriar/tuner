@@ -235,3 +235,28 @@ func TestKeyParsing(t *testing.T) {
 	}
 }
 
+func TestRefusesOlderPack(t *testing.T) {
+	src := source("0.2.0", map[string]string{"a/x.yaml": goodCheck})
+	rel := newRelease(t, build(t, src, t0.Add(time.Hour)))
+	c := rel.client(t.TempDir())
+	if _, err := c.Get(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// A replayed, correctly signed older release must not replace the
+	// newer cached pack.
+	rel.set(build(t, src, t0))
+	c.Force = true
+	p, err := c.Get(context.Background())
+	if err != nil || !p.Created.Equal(t0.Add(time.Hour)) {
+		t.Fatalf("p=%+v err=%v, want the newer cached pack", p, err)
+	}
+	if p.Warning == nil || !strings.Contains(p.Warning.Error(), "older than the cached pack") {
+		t.Errorf("warning = %v", p.Warning)
+	}
+
+	// A newer one is taken as usual.
+	rel.set(build(t, src, t0.Add(2*time.Hour)))
+	if p, err = c.Get(context.Background()); err != nil || p.Warning != nil || !p.Created.Equal(t0.Add(2*time.Hour)) {
+		t.Errorf("newer pack: p=%+v err=%v", p, err)
+	}
+}
