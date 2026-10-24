@@ -167,3 +167,20 @@ func TestTruncatedSecretFound(t *testing.T) {
 		t.Errorf("source text reported: %q", got)
 	}
 }
+
+func TestRawValuesInSecretFixtures(t *testing.T) {
+	body := []byte("DB_PWD=Hunter2-RealProdPassword\nexport SMTP_PW='MailPass99'\nX=1\n" +
+		`{"http-basic": {"repo": {"username": "u", "password": "s3cr3t-B4sic-Pass"}}}`)
+	got := rawValues(body, true)
+	for _, want := range []string{"Hunter2-RealProdPassword", "MailPass99", "s3cr3t-B4sic-Pass"} {
+		if !slices.Contains(got, want) {
+			t.Errorf("missing %q in %q", want, got)
+		}
+	}
+	if slices.Contains(got, "1") || slices.Contains(got, "u") {
+		t.Errorf("short values listed: %q", got)
+	}
+	if got := rawValues(body, false); slices.Contains(got, "Hunter2-RealProdPassword") {
+		t.Errorf("key values listed outside a secret fixture: %q", got)
+	}
+}

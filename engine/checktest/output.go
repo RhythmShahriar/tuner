@@ -58,19 +58,25 @@ func render(res *engine.Result) (map[string][]byte, error) {
 // envLine is a KEY=value line as in a .env file, shell profile or ini.
 var envLine = regexp.MustCompile(`(?m)^[ \t]*(?:export[ \t]+)?[A-Za-z_][A-Za-z0-9_.-]*[ \t]*=[ \t]*(.*?)[ \t]*$`)
 
+// jsonPair is a "key": "value" string pair, as in auth.json.
+var jsonPair = regexp.MustCompile(`"[^"\n]+"\s*:\s*"([^"\n]*)"`)
+
 // rawValues lists the strings from a fixture body that must never reach a
 // report: the hidden part of every secret matchers finds and, when
-// keyValues is set, every value of a KEY=value line, whatever the key.
+// keyValues is set, every value of a KEY=value line or a JSON string
+// pair, whatever the key.
 func rawValues(body []byte, keyValues bool) []string {
 	var out []string
 	for _, v := range hiddenParts(string(body), matchers.Redact(string(body))) {
 		out = append(out, windows(v)...)
 	}
 	if keyValues {
-		for _, m := range envLine.FindAllSubmatch(body, -1) {
-			v := strings.Trim(string(m[1]), `"'`)
-			if utf8.RuneCountInString(v) >= minLeak {
-				out = append(out, v)
+		for _, re := range []*regexp.Regexp{envLine, jsonPair} {
+			for _, m := range re.FindAllSubmatch(body, -1) {
+				v := strings.Trim(string(m[1]), `"'`)
+				if utf8.RuneCountInString(v) >= minLeak {
+					out = append(out, v)
+				}
 			}
 		}
 	}
