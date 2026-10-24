@@ -71,6 +71,9 @@ type Block struct {
 	Snippet string   // config text, trimmed
 	Checks  []string // check IDs, sorted
 	URLs    []string // finding URLs, in report order without repeats
+	// FromReport is set when the snippet came from a report for an ID no
+	// known check has, so nothing vouches for it but the report itself.
+	FromReport bool
 }
 
 // Bundle is the config for one server.
@@ -81,9 +84,13 @@ type Bundle struct {
 	Without  []string // check IDs found with no snippet for this server, sorted
 }
 
-// Build collects the snippets for server from findings. A finding's own
-// Fixes win; when a report predates them, the snippet comes from the check
-// with the same ID in checks (normally the built-in checks). Identical
+// Build collects the snippets for server from findings. For an ID that a
+// check in checks has (normally the built-in checks), the check's snippet
+// is used and the report's ignored: a report is only JSON that may have
+// been shared or edited, and the bundle carries Tuner's name, so it must
+// not pass on directives such as proxy_pass or include that no check
+// wrote. A finding from any other check uses the report's own Fixes and
+// its block says so. Identical
 // snippets, after trimming, become one block listing every check that
 // needs it, so two checks with the same dotfile rule give one rule.
 func Build(findings []Finding, server string, checks []*engine.Check) (*Bundle, error) {
@@ -104,11 +111,12 @@ func Build(findings []Finding, server string, checks []*engine.Check) (*Bundle, 
 			continue
 		}
 		seen[key] = true
-		snippet := strings.TrimSpace(f.Fixes[server])
-		if snippet == "" && len(f.Fixes) == 0 {
-			if c := byID[f.ID]; c != nil {
-				snippet = strings.TrimSpace(snippetFor(c.FixServer, server))
-			}
+		var snippet string
+		c := byID[f.ID]
+		if c != nil {
+			snippet = strings.TrimSpace(snippetFor(c.FixServer, server))
+		} else {
+			snippet = strings.TrimSpace(f.Fixes[server])
 		}
 		if snippet == "" {
 			without[f.ID] = true
@@ -121,6 +129,7 @@ func Build(findings []Finding, server string, checks []*engine.Check) (*Bundle, 
 			b.Blocks = append(b.Blocks, Block{Snippet: snippet})
 		}
 		blk := &b.Blocks[i]
+		blk.FromReport = blk.FromReport || c == nil
 		if !slices.Contains(blk.Checks, f.ID) {
 			blk.Checks = append(blk.Checks, f.ID)
 			slices.Sort(blk.Checks)
@@ -170,6 +179,9 @@ func (b *Bundle) Write(w io.Writer, version string) error {
 				break
 			}
 			buf.WriteString(comment("  " + u))
+		}
+		if blk.FromReport {
+			buf.WriteString(comment("Taken from the report: no Tuner check has this ID. Review it with care."))
 		}
 		buf.WriteString(inertSnippet(blk.Snippet))
 		buf.WriteString("\n")

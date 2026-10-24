@@ -69,8 +69,8 @@ func cmdFix(args []string, stdout, stderr io.Writer) int {
 			return exitError
 		}
 	}
-	// Reports from before fix_server name the check; its built-in copy
-	// supplies the snippet.
+	// The built-in checks supply the snippet for their own IDs whatever
+	// the report says, which also covers reports from before fix_server.
 	builtIn, err := engine.LoadChecks(checks.FS)
 	if err != nil {
 		fmt.Fprintln(stderr, "rhythm tuner: loading checks:", err)
@@ -115,8 +115,10 @@ const fixUsage = `Usage:
 
 Builds one config bundle from JSON reports (rhythm tuner scan --json):
 the nginx or Apache snippets that fix the findings, each snippet once,
-commented with the checks and URLs it fixes. Reports from older versions
-work too. It prints to stdout and changes nothing: review the bundle,
+commented with the checks and URLs it fixes. Snippets for Tuner's own
+checks come from this version, not from the report, so reports from older
+versions work too. A snippet the report carries for any other check is
+marked as taken from the report. It prints to stdout and changes nothing: review the bundle,
 add it to your server config and test it (nginx -t or apachectl -t).
 Use - to read a report from stdin.
 
