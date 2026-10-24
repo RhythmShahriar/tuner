@@ -1,0 +1,14 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+positive:
+  - name: workspace readable
+    routes:
+      /.idea/workspace.xml: {body: "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project version=\"4\">\n  <component name=\"ChangeListManager\">\n</project>\n"}
+negative:
+  - name: not found
+    routes: {}
+  - name: soft-404 catch-all
+    default: {status: 200, body: "<html>Not found</html>"}
+  - name: catch-all that serves the same file for every path
+    default: {status: 200, body: "<project version=\"4\"></project>"}

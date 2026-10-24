@@ -1,0 +1,38 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: leak-wp-config-copy
+name: Other copy of wp-config.php exposed
+severity: critical
+tags: [leak, secrets, wordpress]
+request:
+  path:
+    - /wp-config.php.backup
+    - /wp-config.php.bk
+    - /wp-config.php_bak
+    - /wp-config.php.1
+    - /wp-config.php.swo
+    - /wp-config.php.tmp
+    - /wp-config.php.dist
+    - /wp-config.txt
+    - /wp-config-backup.txt
+match:
+  all:
+    - status: 200
+    - regex: 'define\(\s*[''"]DB_(?:NAME|USER|PASSWORD|HOST)[''"]'
+    - not_baseline: true
+extract:
+  secrets: true
+impact: Database credentials and authentication salts are readable, which allows full site takeover.
+fix: |
+  Delete every copy of wp-config.php from the web root, then change the
+  database password and regenerate salts (https://api.wordpress.org/secret-key/1.1/salt/).
+fix_server:
+  nginx: |
+    location ~* wp-config { deny all; }
+  apache: |
+    <FilesMatch "wp-config">
+      Require all denied
+    </FilesMatch>
+references:
+  - https://developer.wordpress.org/advanced-administration/security/hardening/

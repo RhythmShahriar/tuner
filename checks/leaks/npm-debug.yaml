@@ -1,0 +1,31 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: leak-npm-debug
+name: npm or yarn debug log exposed
+severity: low
+tags: [leak, disclosure]
+request:
+  path: ["/npm-debug.log", "/yarn-error.log", "/yarn-debug.log"]
+match:
+  all:
+    - status: 200
+    - not_baseline: true
+  any:
+    - regex: '(?m)^0 info it worked if it ends with ok'
+    - regex: '(?m)^\d+ verbose cli '
+    - regex: '\AArguments: \r?\n\s+\S*node'
+extract:
+  secrets: true
+impact: Build logs show local paths, package versions and environment details, and sometimes registry tokens.
+fix: |
+  Delete the log from the server and deploy without build logs.
+fix_server:
+  nginx: |
+    location ~* (\.log|/error_log)$ { deny all; }
+  apache: |
+    <FilesMatch "(\.log|^error_log)$">
+      Require all denied
+    </FilesMatch>
+references:
+  - https://cwe.mitre.org/data/definitions/532.html

@@ -1,0 +1,28 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: leak-staging-listing
+name: Old or staging folder listed
+severity: medium
+tags: [leak, backup, disclosure]
+request:
+  path: ["/staging/", "/old/", "/wp-old/", "/backup/", "/backups/", "/bak/", "/dev/"]
+match:
+  all:
+    - status: 200
+    - regex: '<title>Index of /(?:staging|old|wp-old|backups?|bak|dev)/?</title>'
+    - not_baseline: true
+impact: Anyone can browse an old copy of the site, which often holds config files, database dumps and outdated plugins.
+fix: |
+  Delete old and staging copies from the public web root, or protect them
+  with a password. Staging belongs on its own host name with access control.
+fix_server:
+  nginx: |
+    # Keep only the folders that hold a copy.
+    location ~ ^/(staging|old|wp-old|backups?|bak|dev)/ { deny all; }
+  apache: |
+    # Keep only the folders that hold a copy.
+    RedirectMatch 404 ^/(staging|old|wp-old|backups?|bak|dev)/
+references:
+  - https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/02-Configuration_and_Deployment_Management_Testing/04-Review_Old_Backup_and_Unreferenced_Files_for_Sensitive_Information
+  - https://cwe.mitre.org/data/definitions/548.html

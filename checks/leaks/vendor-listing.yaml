@@ -1,0 +1,25 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: leak-vendor-listing
+name: Composer vendor folder listed
+severity: medium
+tags: [leak, php, disclosure]
+request:
+  path: ["/vendor/"]
+match:
+  all:
+    - status: 200
+    - regex: '<title>Index of /vendor'
+    - not_baseline: true
+impact: Every installed package is listed and its files can be fetched directly, including tests and tools never meant to run on a public server.
+fix: |
+  Keep vendor/ outside the web root (point the document root at public/),
+  or deny it.
+fix_server:
+  nginx: |
+    location ~ ^/(composer\.(json|lock)|vendor/) { deny all; }
+  apache: |
+    RedirectMatch 404 ^/(composer\.(json|lock)|vendor/)
+references:
+  - https://cwe.mitre.org/data/definitions/548.html

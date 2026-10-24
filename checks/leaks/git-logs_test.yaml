@@ -1,0 +1,18 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+positive:
+  - name: reflog readable
+    routes:
+      /.git/logs/HEAD: {body: "0000000000000000000000000000000000000000 3f786850e387550fdab836ed7e6dc881de23001b Dev <dev@shop.example.test> 1760000000 +0000\tcommit (initial): first\n"}
+  - name: FETCH_HEAD with a token in the remote
+    expect_secrets: true
+    routes:
+      /.git/FETCH_HEAD: {body: "3f786850e387550fdab836ed7e6dc881de23001b\t\tbranch 'main' of https://deploy:ghp_abcdefghijklmnopqrstuvwxyz0123456789@github.com/acme/shop\n"}
+negative:
+  - name: not found
+    routes: {}
+  - name: soft-404 catch-all
+    default: {status: 200, body: "<html>Not found</html>"}
+  - name: catch-all that serves the same file for every path
+    default: {status: 200, body: "3f786850e387550fdab836ed7e6dc881de23001b\n"}

@@ -1,0 +1,34 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+positive:
+  - name: real app key
+    expect_secrets: true
+    routes:
+      /.env.example:
+        body: |
+          APP_NAME=Shop
+          APP_KEY=base64:c2hvcC1leGFtcGxlLXRlc3QtYXBwLWtleS0wMTIzNDU=
+  - name: real AWS key
+    expect_secrets: true
+    routes:
+      /.env.sample:
+        body: |
+          AWS_ACCESS_KEY_ID=AKIAQWERTYUIOPASDFGH
+          AWS_DEFAULT_REGION=eu-west-1
+negative:
+  - name: not found
+    routes: {}
+  - name: placeholders only
+    routes:
+      /.env.example:
+        body: |
+          APP_NAME=Laravel
+          APP_KEY=
+          DB_PASSWORD=secret
+          AWS_ACCESS_KEY_ID=
+  - name: docs page with a sample key
+    routes:
+      /.env.example: {body: "<html><body><pre>APP_KEY=base64:c2hvcC1leGFtcGxlLXRlc3QtYXBwLWtleS0wMTIzNDU=</pre></body></html>"}
+  - name: catch-all that serves the same file for every path
+    default: {status: 200, body: "APP_KEY=base64:c2hvcC1leGFtcGxlLXRlc3QtYXBwLWtleS0wMTIzNDU=\n"}

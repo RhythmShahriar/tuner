@@ -1,0 +1,29 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: leak-node-manifest
+name: Node package files exposed on a PHP site
+severity: low
+tags: [leak, disclosure]
+requires: [php]
+request:
+  path: ["/package.json", "/package-lock.json", "/yarn.lock"]
+match:
+  all:
+    - status: 200
+    - not_regex: '(?i)<(?:!doctype|html|head|body)[\s>]'
+    - not_baseline: true
+  any:
+    - regex: '"(?:dependencies|devDependencies)"\s*:\s*\{'
+    - regex: '"lockfileVersion"\s*:'
+    - regex: '(?m)^# yarn lockfile v1'
+impact: The front-end build's packages and versions are public, which points at known flaws, and the files show the deploy copies the whole project.
+fix: |
+  Deploy only the built assets, or deny the files.
+fix_server:
+  nginx: |
+    location ~ ^/(package(-lock)?\.json|yarn\.lock)$ { deny all; }
+  apache: |
+    RedirectMatch 404 ^/(package(-lock)?\.json|yarn\.lock)$
+references:
+  - https://cwe.mitre.org/data/definitions/538.html

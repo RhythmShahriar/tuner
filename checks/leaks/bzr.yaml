@@ -1,0 +1,24 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: leak-bzr
+name: .bzr (Bazaar) directory exposed
+severity: medium
+tags: [leak, source]
+request:
+  path: ["/.bzr/branch-format", "/.bzr/README"]
+match:
+  all:
+    - status: 200
+    - regex: 'Bazaar-NG meta directory|Bazaar control directory'
+    - not_baseline: true
+impact: The repository and its history can be downloaded.
+fix: |
+  Deny access to .bzr, or deploy without it.
+fix_server:
+  nginx: |
+    location ~ /\.(hg|bzr)(/|$) { deny all; }
+  apache: |
+    RedirectMatch 404 /\.(hg|bzr)(/|$)
+references:
+  - https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/02-Configuration_and_Deployment_Management_Testing/04-Review_Old_Backup_and_Unreferenced_Files_for_Sensitive_Information

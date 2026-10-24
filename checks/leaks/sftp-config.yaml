@@ -1,0 +1,29 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: leak-sftp-config
+name: Editor SFTP settings exposed
+severity: high
+tags: [leak, secrets]
+request:
+  path: ["/.vscode/sftp.json", "/sftp-config.json", "/.ftpconfig"]
+match:
+  all:
+    - status: 200
+    # Names only: the match stops at ":".
+    - regex: '"(?:host|remotePath|remote_path)"\s*:'
+    - not_regex: '(?i)<(?:!doctype|html|head|body)[\s>]'
+    - not_baseline: true
+extract:
+  secrets: true
+impact: Editor deploy settings name the server, user and remote path and often hold the FTP or SSH password.
+fix: |
+  Delete sftp.json, sftp-config.json and .ftpconfig from the server, change
+  the password they hold and add them to your editor's upload ignore list.
+fix_server:
+  nginx: |
+    location ~ /(\.vscode/sftp\.json|sftp-config\.json|\.ftpconfig)$ { deny all; }
+  apache: |
+    RedirectMatch 404 /(\.vscode/sftp\.json|sftp-config\.json|\.ftpconfig)$
+references:
+  - https://cwe.mitre.org/data/definitions/538.html

@@ -1,0 +1,17 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+positive:
+  - name: npm log readable
+    routes:
+      /npm-debug.log: {body: "0 info it worked if it ends with ok\n1 verbose cli [ '/usr/bin/node', '/usr/bin/npm', 'run', 'build' ]\n"}
+  - name: yarn log readable
+    routes:
+      /yarn-error.log: {body: "Arguments: \n  /usr/local/bin/node /usr/local/bin/yarn build\n\nPATH: \n  /usr/bin\n"}
+negative:
+  - name: not found
+    routes: {}
+  - name: soft-404 catch-all
+    default: {status: 200, body: "<html>Not found</html>"}
+  - name: catch-all that serves the same log for every path
+    default: {status: 200, body: "0 info it worked if it ends with ok\n"}
