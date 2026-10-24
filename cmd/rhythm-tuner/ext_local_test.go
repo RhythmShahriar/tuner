@@ -154,3 +154,21 @@ func TestLocalExtensionPlan(t *testing.T) {
 		t.Errorf("options for %s: skip %q, integrity %v, checksums %+v", a, o.SkipDirs, o.Integrity, o.Checksums)
 	}
 }
+
+// --integrity reads files: on URL targets alone it is a usage error like
+// --discover. A mixed list says which targets go without it.
+func TestIntegrityNeedsFolder(t *testing.T) {
+	t.Setenv(invokedAsEnv, "rhythm tuner")
+	var ue usageError
+	_, err := planScan([]string{"https://example.com", "--integrity", "--no-config"}, strings.NewReader(""))
+	if !errors.As(err, &ue) || ue.Msg != "--integrity needs a folder target, such as rhythm tuner scan --integrity /var/www/site" {
+		t.Errorf("URL only: %v", err)
+	}
+	p, err := planScan([]string{t.TempDir(), "https://example.com", "--integrity", "--offline", "--no-config"}, strings.NewReader(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(p.notes, "--integrity checks folder targets only; 1 URL target is scanned without it") {
+		t.Errorf("notes %q", p.notes)
+	}
+}

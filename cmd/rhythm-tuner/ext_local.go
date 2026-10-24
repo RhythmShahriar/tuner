@@ -69,6 +69,24 @@ func (e *localExtension) Plan(p *scanPlan) error {
 			p.notes = append(p.notes, strings.TrimSuffix(line, "\n"))
 		}
 	}
+	if e.integrity {
+		// --integrity reads files, so a URL target can't use it. Say so
+		// rather than drop it, as --discover does.
+		urls := 0
+		for _, t := range targets {
+			if !isLocalPath(t) {
+				urls++
+			}
+		}
+		switch {
+		case urls == len(targets):
+			return usagef("%s", named("--integrity needs a folder target, such as rhythm tuner scan --integrity /var/www/site"))
+		case urls == 1:
+			p.notes = append(p.notes, "--integrity checks folder targets only; 1 URL target is scanned without it")
+		case urls > 1:
+			p.notes = append(p.notes, fmt.Sprintf("--integrity checks folder targets only; %d URL targets are scanned without it", urls))
+		}
+	}
 	ua, proxy, offline := p.engine.UserAgent, p.engine.Proxy, p.o.offline
 	p.localFor = append(p.localFor, func(target string, o *local.Options) {
 		e.configure(o, target, ua, proxy, offline)
