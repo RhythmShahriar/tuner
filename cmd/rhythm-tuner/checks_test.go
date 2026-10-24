@@ -135,6 +135,34 @@ func TestChecksExportNuclei(t *testing.T) {
 	}
 }
 
+// A check ID with path separators never names a file outside --nuclei.
+func TestChecksExportUnsafeID(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "checks")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	check := "id: ../escaped\nname: X\nseverity: low\nrequest: {path: [/x]}\nmatch: {all: [{regex: x}]}\n"
+	if err := os.WriteFile(filepath.Join(src, "x.yaml"), []byte(check), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(root, "out", "nuclei")
+	code, stdout, errOut := checksCmd("export", "--nuclei", out, "--checks", src)
+	if code != exitOK || !strings.Contains(stdout, "Wrote 0 Nuclei templates") ||
+		!strings.Contains(stdout, `"../escaped"  the ID is not lowercase words joined by hyphens`) {
+		t.Fatalf("exit %d %s:\n%s", code, errOut, stdout)
+	}
+	for _, p := range []string{filepath.Join(root, "out", "escaped.yaml"), filepath.Join(root, "out", "tuner-..", "escaped.yaml")} {
+		if _, err := os.Stat(p); err == nil {
+			t.Errorf("wrote %s", p)
+		}
+	}
+	entries, _ := os.ReadDir(out)
+	if len(entries) != 1 || entries[0].Name() != "README.md" {
+		t.Errorf("out holds %v, want README.md only", entries)
+	}
+}
+
 func TestChecksExportUsage(t *testing.T) {
 	for _, tc := range []struct {
 		args []string

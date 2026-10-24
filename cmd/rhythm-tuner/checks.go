@@ -428,6 +428,12 @@ func checksExport(args []string, stdout, stderr io.Writer) int {
 		written++
 	}
 	for name, data := range files {
+		// export skips IDs that can't be file names; this guard keeps any
+		// later change from writing outside out.
+		if !filepath.IsLocal(name) || filepath.Base(name) != name {
+			fmt.Fprintf(stderr, "rhythm tuner: checks export: refusing to write %q outside %s\n", name, out)
+			return exitError
+		}
 		if err := os.WriteFile(filepath.Join(out, name), data, 0o644); err != nil { //nolint:gosec // as for MkdirAll
 			fmt.Fprintln(stderr, "rhythm tuner:", err)
 			return exitError
@@ -443,7 +449,7 @@ func checksExport(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "Skipped %d checks a template can't express:\n", len(skipped))
 		tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
 		for _, t := range skipped {
-			fmt.Fprintf(tw, "  %s\t%s\n", t.CheckID, t.Skipped)
+			fmt.Fprintf(tw, "  %s\t%s\n", t.DisplayID(), t.Skipped)
 		}
 		if err := tw.Flush(); err != nil {
 			return exitError

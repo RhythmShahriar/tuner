@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -46,6 +47,25 @@ type Template struct {
 	Soft404 bool
 }
 
+// DisplayID is the check ID for messages, quoted when it isn't a valid
+// ID so a crafted one can't send control bytes to a terminal.
+func (t Template) DisplayID() string {
+	if !ValidID(t.CheckID) {
+		return strconv.Quote(t.CheckID)
+	}
+	return t.CheckID
+}
+
+// validID is the check ID rule lint enforces: lowercase words joined by
+// hyphens. It keeps the ID safe as a file name.
+var validID = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)+$`)
+
+// ValidID reports whether id is lowercase words joined by hyphens, the
+// only IDs export turns into file names. The engine accepts any ID, so a
+// check from a third-party directory could otherwise name a file such as
+// ../../escaped.yaml outside the export directory.
+func ValidID(id string) bool { return validID.MatchString(id) }
+
 // Options describe the export.
 type Options struct {
 	Version string // rhythm-tuner version, for the generated-by comment
@@ -62,6 +82,9 @@ func Nuclei(checks []*engine.Check, opts Options) []Template {
 
 // NucleiTemplate converts one check.
 func NucleiTemplate(c *engine.Check, opts Options) Template {
+	if !ValidID(c.ID) {
+		return Template{CheckID: c.ID, Skipped: "the ID is not lowercase words joined by hyphens, so it can't name a file"}
+	}
 	t := Template{CheckID: c.ID, File: NucleiPrefix + c.ID + ".yaml"}
 	ms, soft404, reason := nucleiMatchers(c.Match)
 	if reason != "" {

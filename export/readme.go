@@ -17,7 +17,7 @@ func NucleiREADME(ts []Template, opts Options, license string) []byte {
 	var skipped []string
 	for _, t := range ts {
 		if t.Skipped != "" {
-			skipped = append(skipped, fmt.Sprintf("- `%s`: %s", t.CheckID, t.Skipped))
+			skipped = append(skipped, fmt.Sprintf("- `%s`: %s", t.DisplayID(), t.Skipped))
 			continue
 		}
 		written++
@@ -64,7 +64,7 @@ func NucleiREADME(ts []Template, opts Options, license string) []byte {
 
 	b.WriteString("\n## License\n\n")
 	b.WriteString("The checks and so these templates are MIT licensed (the rest of Tuner is\n")
-	b.WriteString("AGPL-3.0). Source: https://github.com/RhythmShahriar/tuner/tree/main/checks\n\n")
+	b.WriteString("AGPL-3.0). Source: https://github.com/RhythmShahriar/tuner/tree/master/checks\n\n")
 	b.WriteString("```\n" + strings.TrimSpace(license) + "\n```\n")
 	return b.Bytes()
 }
