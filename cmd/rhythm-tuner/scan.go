@@ -21,6 +21,7 @@ import (
 	"regexp"
 	"runtime/debug"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -50,6 +51,7 @@ var usagef = cli.Usagef
 
 type scanOptions struct {
 	json, jsonl, sarif, md         bool
+	jsonArray                      bool // JSON, always an array
 	output                         string
 	quiet, plain, noColor, verbose bool
 
@@ -85,10 +87,11 @@ type scanOptions struct {
 func scanFlagSet(o *scanOptions, stderr io.Writer) *flag.FlagSet {
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.Usage = func() { fmt.Fprintf(stderr, "run '%s --help' for all flags\n", cmdName()) }
+	fs.Usage = func() { fmt.Fprintf(stderr, "run '%s scan --help' for all flags\n", cmdName()) }
 	both := func(short, long string, f func(name string)) { f(short); f(long) }
 
 	fs.BoolVar(&o.json, "json", false, "")
+	fs.BoolVar(&o.jsonArray, "json-array", false, "")
 	fs.BoolVar(&o.jsonl, "jsonl", false, "")
 	fs.BoolVar(&o.sarif, "sarif", false, "")
 	fs.BoolVar(&o.md, "md", false, "")
@@ -160,10 +163,10 @@ func scan(args []string, stdout, stderr io.Writer) int {
 	plan, err := planScan(args, os.Stdin)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			usage(stdout)
+			scanUsage(stdout)
 			return exitOK
 		}
-		fmt.Fprintln(stderr, "rhythm tuner:", err)
+		printErr(stderr, "scan", err)
 		var ue usageError
 		if errors.As(err, &ue) {
 			return exitUsage
@@ -185,7 +188,10 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil, err
 		}
-		return nil, usageError{Msg: err.Error()}
+		return nil, flagError(flags, err)
+	}
+	if err := p.checkValues(); err != nil {
+		return nil, err
 	}
 
 	// Targets.
@@ -211,7 +217,7 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 	}
 	p.targets = dedupe(p.targets)
 	if len(p.targets) == 0 {
-		return nil, usagef("scan needs a target\n  try: %s scan example.com", cmdName())
+		return nil, usagef("no target given\n  try: %s scan example.com", cmdName())
 	}
 	allLocal := true
 	for _, t := range p.targets {
@@ -233,7 +239,7 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 
 	// Output format.
 	var chosen []string
-	for name, on := range map[string]bool{"json": o.json, "jsonl": o.jsonl, "sarif": o.sarif, "md": o.md} {
+	for name, on := range map[string]bool{"json": o.json || o.jsonArray, "jsonl": o.jsonl, "sarif": o.sarif, "md": o.md} {
 		if on {
 			chosen = append(chosen, name)
 		}
@@ -280,24 +286,15 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 		MinSeverity: engine.Severity(o.severity),
 	}
 	vulnsOn := !o.noVulns && wantsVulns(sel)
+	if err := checkIDs(all, o.ids, o.excludeIDs); err != nil {
+		return nil, err
+	}
 	p.checks, err = engine.Select(all, sel)
 	if err != nil && (!errors.Is(err, engine.ErrNoChecks) || !vulnsOn && !allLocal) {
 		return nil, usageError{Msg: err.Error()}
 	}
 
 	// CI.
-	if o.failOn != "" {
-		if p.failOn = engine.Severity(o.failOn); p.failOn.Rank() < 0 {
-			return nil, usagef("--fail-on %q: want one of %v", o.failOn, engine.Severities)
-		}
-	}
-	switch o.minConfidence {
-	case confidenceLikely:
-	case confidenceConfirmed:
-		p.confirmedOnly = true
-	default:
-		return nil, usagef("--min-confidence %q: want confirmed or likely", o.minConfidence)
-	}
 	if o.baseline != "" {
 		if p.baseline, err = report.LoadBaseline(o.baseline); err != nil {
 			return nil, err
@@ -305,9 +302,6 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 	}
 
 	// Requests.
-	if o.rate < 0 || o.concurrency < 1 || o.retries < 0 || o.parallel < 1 || o.timeout <= 0 {
-		return nil, usagef("--rate, --retries must be >= 0; --concurrency, --parallel and --timeout must be positive")
-	}
 	// Go's HTTP client would refuse a line break in a header on every
 	// request, which reads as an unreachable site; catch it here instead.
 	h := http.Header{}
@@ -351,7 +345,7 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 	if vulnsOn {
 		p.osv = osvClient(ua, p.engine.Proxy, o.offline)
 	}
-	p.write = writeOptions{Many: len(p.targets) > 1, Version: version}
+	p.write = writeOptions{Many: len(p.targets) > 1, Array: o.jsonArray, Version: version}
 
 	for _, e := range scanExtensions {
 		if err := e.Plan(p); err != nil {
@@ -359,6 +353,97 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 		}
 	}
 	return p, nil
+}
+
+// checkValues validates and normalises the flags that take one of a few
+// values or a number, before anything slow runs. Names of levels and
+// profiles are accepted in any case.
+func (p *scanPlan) checkValues() error {
+	o := &p.o
+	profile, err := oneOf("profile", o.profile, engine.Profiles)
+	if err != nil {
+		return err
+	}
+	o.profile = string(profile)
+	if o.severity != "" {
+		sev, err := oneOf("severity", o.severity, engine.Severities)
+		if err != nil {
+			return err
+		}
+		o.severity = string(sev)
+	}
+	if o.failOn != "" {
+		if p.failOn, err = oneOf("fail-on", o.failOn, engine.Severities); err != nil {
+			return err
+		}
+	}
+	confidence, err := oneOf("min-confidence", o.minConfidence, []string{confidenceConfirmed, confidenceLikely})
+	if err != nil {
+		return err
+	}
+	o.minConfidence = confidence
+	p.confirmedOnly = confidence == confidenceConfirmed
+
+	for _, c := range []struct {
+		flag string
+		bad  bool
+		want string
+	}{
+		{"rate", o.rate < 0, "0 or more (0 means no limit)"},
+		{"concurrency", o.concurrency < 1, "1 or more"},
+		{"retries", o.retries < 0, "0 or more"},
+		{"parallel", o.parallel < 1, "1 or more"},
+	} {
+		if c.bad {
+			return usagef("--%s %s: want %s", c.flag, flagValue(c.flag, o), c.want)
+		}
+	}
+	if o.timeout <= 0 {
+		return usagef("--timeout %s: want a positive duration, for example 10s", o.timeout)
+	}
+	if o.maxTime < 0 {
+		return usagef("--max-time %s: want a positive duration, for example 10m", o.maxTime)
+	}
+	return nil
+}
+
+// flagValue prints a numeric option the way it was typed.
+func flagValue(name string, o *scanOptions) string {
+	switch name {
+	case "rate":
+		return strconv.FormatFloat(o.rate, 'g', -1, 64)
+	case "concurrency":
+		return strconv.Itoa(o.concurrency)
+	case "retries":
+		return strconv.Itoa(o.retries)
+	}
+	return strconv.Itoa(o.parallel)
+}
+
+// checkIDs catches a check ID that matches nothing, such as a typo in
+// --id leak-dotnev, and suggests the closest one. Patterns with globs and
+// IDs the advisors and local scans produce are left to engine.Select.
+func checkIDs(all []*engine.Check, ids, excluded []string) error {
+	known := make([]string, len(all))
+	for i, c := range all {
+		known[i] = c.ID
+	}
+	for _, list := range []struct {
+		flag string
+		ids  []string
+	}{{"id", ids}, {"exclude-id", excluded}} {
+		for _, id := range list.ids {
+			if strings.ContainsAny(id, "*?[") || engine.IsAdvisorID(id) || slices.Contains(known, id) {
+				continue
+			}
+			msg := fmt.Sprintf("--%s %s: no check has this ID", list.flag, id)
+			if s := suggest(id, known); s != "" {
+				msg += fmt.Sprintf("; did you mean %s?", s)
+			}
+			return usagef("%s\n  list them with: %s checks", msg, cmdName())
+		}
+	}
+	return nil
 }
 
 func execute(p *scanPlan, stdout, stderr io.Writer) int {
@@ -379,7 +464,7 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 		if o.output != "" {
 			var err error
 			if file, err = createReport(o.output); err != nil {
-				fmt.Fprintln(stderr, "rhythm tuner:", err)
+				printErr(stderr, "scan", err)
 				return exitError
 			}
 			defer file.discard() // on early return; does nothing after commit
@@ -390,7 +475,7 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 
 	if !o.quiet {
 		for _, w := range p.checkSet.warnings {
-			fmt.Fprintln(stderr, "rhythm tuner:", w)
+			printErr(stderr, "scan", w)
 		}
 	}
 
@@ -421,7 +506,7 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 		default:
 		}
 		outMu.Lock()
-		fmt.Fprintln(stderr, "rhythm tuner: stopping... press Ctrl+C again to quit now")
+		printErr(stderr, "scan", "stopping... press Ctrl+C again to quit now")
 		outMu.Unlock()
 	})
 	ctx := sigCtx
@@ -505,7 +590,7 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 			}
 			if err != nil && !errors.Is(err, context.Canceled) {
 				failed[i] = describe(ctx, err, o)
-				fmt.Fprintf(stderr, "rhythm tuner: %s: %v\n", target, failed[i])
+				printErr(stderr, "scan", target+":", failed[i])
 				if ie := (internalError{}); errors.As(err, &ie) && o.verbose {
 					_, _ = stderr.Write(ie.stack)
 				}
@@ -552,12 +637,12 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 	switch {
 	case keep != "":
 		file.discard()
-		fmt.Fprintln(stderr, "rhythm tuner: no report written:", keep)
+		printErr(stderr, "scan", "no report written:", keep)
 	case werr == nil && file != nil:
 		werr = file.commit()
 	}
 	if werr != nil {
-		fmt.Fprintln(stderr, "rhythm tuner: writing report:", werr)
+		printErr(stderr, "scan", "writing report:", werr)
 		return exitError
 	}
 	if keep == "" && o.output != "" && !o.quiet && len(reports) > 0 {
@@ -572,7 +657,7 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 	for _, e := range scanExtensions {
 		code, err := e.Finished(p, reports, stderr)
 		if err != nil {
-			fmt.Fprintln(stderr, "rhythm tuner:", err)
+			printErr(stderr, "scan", err)
 			code = max(code, exitError)
 		}
 		exit = max(exit, code)
@@ -608,7 +693,7 @@ func (e internalError) Error() string {
 // scanExit picks the built-in exit code once every target is done.
 func scanExit(ctx context.Context, p *scanPlan, reports []report.Report, failed []string, stderr io.Writer) int {
 	if errors.Is(ctx.Err(), context.Canceled) {
-		fmt.Fprintln(stderr, "rhythm tuner: scan canceled; results are partial")
+		printErr(stderr, "scan", "scan canceled; results are partial")
 		return exitCanceled
 	}
 	if p.failOn != "" {
@@ -620,7 +705,7 @@ func scanExit(ctx context.Context, p *scanPlan, reports []report.Report, failed 
 		// No findings only means a clean site when the scan saw it all.
 		if why := untrusted(p, reports); len(why) > 0 {
 			for _, w := range why {
-				fmt.Fprintln(stderr, "rhythm tuner:", w)
+				printErr(stderr, "scan", w)
 			}
 			return exitError
 		}
@@ -722,10 +807,14 @@ func (r *reportFile) discard() {
 // report.WriteOptions from the report writer registry. Until that registry
 // is released, writeReport dispatches to the existing writers; then all
 // three become report.TargetError, report.WriteOptions and report.Write.
-type targetError struct{ Target, Error string }
+type targetError struct {
+	Target string `json:"target"`
+	Error  string `json:"error"`
+}
 
 type writeOptions struct {
 	Many    bool          // several targets: JSON is an array
+	Array   bool          // JSON is an array even for one target (--json-array)
 	Failed  []targetError // targets that could not be scanned
 	Version string        // the rhythm-tuner version
 
@@ -740,7 +829,7 @@ func writeReport(format string, w io.Writer, reports []report.Report, o writeOpt
 		if len(o.Status) == len(reports) {
 			return statusJSON(w, reports, o)
 		}
-		return report.JSON(w, reports, o.Many)
+		return report.JSON(w, reports, o.Many || o.Array)
 	case "sarif":
 		return report.SARIF(w, reports, o.Version)
 	case "md":
@@ -821,21 +910,26 @@ func (s runStatus) reason() string {
 	return "the scan did not finish"
 }
 
-// statusJSON is report.JSON with each report's runStatus added.
+// statusJSON is report.JSON with each report's runStatus added. An array
+// ends with one {"target", "error"} entry per target that could not be
+// scanned, so a script sees every target it asked for.
 func statusJSON(w io.Writer, reports []report.Report, o writeOptions) error {
 	type withStatus struct {
 		report.Report
 		runStatus
 	}
-	all := make([]withStatus, len(reports))
-	for i, r := range reports {
-		all[i] = withStatus{r, o.Status[i]}
-	}
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
 	enc.SetIndent("", "  ")
-	if len(all) == 1 && !o.Many {
-		return enc.Encode(all[0])
+	if len(reports) == 1 && !o.Many && !o.Array {
+		return enc.Encode(withStatus{reports[0], o.Status[0]})
+	}
+	all := make([]any, 0, len(reports)+len(o.Failed))
+	for i, r := range reports {
+		all = append(all, withStatus{r, o.Status[i]})
+	}
+	for _, f := range o.Failed {
+		all = append(all, f)
 	}
 	return enc.Encode(all)
 }

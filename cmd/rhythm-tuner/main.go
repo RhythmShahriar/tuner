@@ -53,8 +53,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if c := lookupCommand(args[0]); c != nil {
 		return c.Run(args[1:], stdout, stderr)
 	}
-	fmt.Fprintf(stderr, "rhythm tuner: unknown command %q\n\n", args[0])
-	usage(stderr)
+	printErr(stderr, "", unknownCommand(args[0]))
 	return exitUsage
 }
 
@@ -125,15 +124,30 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w, kit.Banner("rhythm tuner", version))
 	fmt.Fprint(w, "Find what's out of tune in your WordPress & PHP sites.\n\nUsage:\n"+
 		formatUsage(append(lines, commandUsage(name)...)))
-	fmt.Fprint(w, strings.ReplaceAll(helpBody(), "rhythm tuner", name))
+	fmt.Fprint(w, strings.ReplaceAll(scanHelp()+helpFooter(), "rhythm tuner", name))
 }
 
-// helpBody is the help after the Usage list. Every "rhythm tuner" in it
-// becomes the name Tuner was started as.
-func helpBody() string {
+// scanUsage is rhythm tuner scan --help: the scan commands and flags only.
+func scanUsage(w io.Writer) {
+	name := cmdName()
+	fmt.Fprintln(w, kit.Banner("rhythm tuner", version))
+	fmt.Fprint(w, "Usage:\n"+formatUsage([]usageLine{
+		{cmd: name + " scan <url>... [flags]", summary: "scan one or more sites"},
+		{cmd: name + " scan <dir> [flags]", summary: "scan a site's files on the server"},
+	}))
+	fmt.Fprint(w, strings.ReplaceAll(scanHelp()+helpFooter(), "rhythm tuner", name))
+}
+
+// scanHelp lists the scan flags, extension sections included. Every
+// "rhythm tuner" in it and in helpFooter becomes the name Tuner was
+// started as.
+func scanHelp() string {
 	return `
 Output:
       --json               JSON report (an array when scanning several targets)
+      --json-array         JSON report that is always an array, also for one
+                           target; targets that failed appear as
+                           {"target": ..., "error": ...}
       --jsonl              one JSON finding per line, streamed as found
       --sarif              SARIF 2.1.0 for GitHub code scanning
       --md                 Markdown for issues and pull requests
@@ -195,7 +209,12 @@ Batch and CI:
       --allow-partial      let --fail-on pass a scan that was blocked or cut
                            short (otherwise exit 3)
 
-` + extensionHelp() + `Vulnerability data comes from WPVulnerability (CC0), api.wordpress.org and
+` + extensionHelp()
+}
+
+// helpFooter explains where data comes from, the exit codes and examples.
+func helpFooter() string {
+	return `Vulnerability data comes from WPVulnerability (CC0), api.wordpress.org and
 php.net; Composer packages are matched with OSV.dev. New checks arrive as a
 check pack from Tuner's GitHub releases (checksummed, not signed; built-in
 checks only with --no-check-updates). Both are cached under your user cache

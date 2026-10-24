@@ -69,6 +69,16 @@ func cleanSite(t *testing.T) *httptest.Server {
 
 func tuner(t *testing.T, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
+	if len(args) > 0 && args[0] == "scan" {
+		args = append(args, "--rate", "0")
+	}
+	return tunerExact(t, args...)
+}
+
+// tunerExact is tuner without the added --rate 0, for tests of the
+// command line itself.
+func tunerExact(t *testing.T, args ...string) (code int, stdout, stderr string) {
+	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // keep the first-run marker out of the real config
 	if os.Getenv("XDG_CACHE_HOME") == "" {
 		t.Setenv("XDG_CACHE_HOME", t.TempDir()) // and the vulnerability cache
@@ -82,9 +92,6 @@ func tuner(t *testing.T, args ...string) (code int, stdout, stderr string) {
 		t.Setenv("TUNER_CHECKS_URL", "http://127.0.0.1:1") // nor the check pack release
 	}
 	var out, errb bytes.Buffer
-	if len(args) > 0 && args[0] == "scan" {
-		args = append(args, "--rate", "0")
-	}
 	code = run(args, &out, &errb)
 	return code, out.String(), errb.String()
 }
@@ -347,9 +354,12 @@ func TestBatchJSONStaysArray(t *testing.T) {
 	dead := httptest.NewServer(http.NotFoundHandler())
 	dead.Close()
 	_, out, _ := tuner(t, "scan", cleanSite(t).URL, dead.URL, "--json")
-	var reps []struct{ Target string }
-	if err := json.Unmarshal([]byte(out), &reps); err != nil || len(reps) != 1 {
-		t.Errorf("want an array with the one reachable site, got %v:\n%.200s", err, out)
+	var reps []struct{ Target, Error, Schema string }
+	if err := json.Unmarshal([]byte(out), &reps); err != nil || len(reps) != 2 {
+		t.Fatalf("want an array with both sites, got %v:\n%.200s", err, out)
+	}
+	if reps[0].Schema == "" || reps[0].Error != "" || reps[1].Target != dead.URL || !strings.Contains(reps[1].Error, "can't reach") {
+		t.Errorf("want the report then an error entry for the dead site, got %+v", reps)
 	}
 }
 
@@ -498,7 +508,7 @@ func TestReportKeptWhenEveryTargetFails(t *testing.T) {
 		path := filepath.Join(t.TempDir(), name)
 		os.WriteFile(path, []byte(oldReport), 0o600)
 		code, _, errs := tuner(t, "scan", dead.URL, "-o", path, "--retries", "0")
-		if code != exitError || !strings.Contains(errs, "rhythm tuner: no report written: every target failed") {
+		if code != exitError || !strings.Contains(errs, "rhythm tuner scan: no report written: every target failed") {
 			t.Errorf("%s: exit %d, stderr %q", name, code, errs)
 		}
 		if data, _ := os.ReadFile(path); string(data) != oldReport {
@@ -596,7 +606,7 @@ func TestSecondInterruptQuits(t *testing.T) {
 
 	waitFor("scan blocked")
 	cmd.Process.Signal(os.Interrupt)
-	waitFor("rhythm tuner: stopping... press Ctrl+C again to quit now")
+	waitFor("rhythm tuner scan: stopping... press Ctrl+C again to quit now")
 	cmd.Process.Signal(os.Interrupt)
 	done := make(chan error, 1)
 	go func() {
@@ -625,11 +635,11 @@ func TestPanicInOneTarget(t *testing.T) {
 		return orig(p, ctx, s, target, h)
 	}
 	code, out, errs := tuner(t, "scan", good.URL, bad.URL, "--json", "--no-vulns")
-	var reps []struct{ Target string }
-	if err := json.Unmarshal([]byte(out), &reps); err != nil || len(reps) != 1 {
-		t.Fatalf("want the good target's report: %v\n%s", err, out)
+	var reps []struct{ Target, Error string }
+	if err := json.Unmarshal([]byte(out), &reps); err != nil || len(reps) != 2 || reps[0].Target != good.URL || reps[1].Error == "" {
+		t.Fatalf("want the good target's report and an error entry: %v\n%s", err, out)
 	}
-	if code != exitError || !strings.Contains(errs, "rhythm tuner: "+bad.URL+": internal error (please report): boom") ||
+	if code != exitError || !strings.Contains(errs, "rhythm tuner scan: "+bad.URL+": internal error (please report): boom") ||
 		strings.Contains(errs, "goroutine ") {
 		t.Errorf("exit %d, stderr %q", code, errs)
 	}
@@ -1144,5 +1154,118 @@ func TestCommandName(t *testing.T) {
 		"  rhythm a-very-long-tool-name scan <dir> [flags]    scan a site's files on the server\n") ||
 		!strings.Contains(out, "\n"+strings.Repeat(" ", 53)+"PHP vulnerability data now\n") {
 		t.Errorf("long name:\n%s", out)
+	}
+}
+
+// The users' N7 table: each mistake gets one line that says what to type,
+// not the whole help, and exits 2.
+func TestFriendlyUsageErrors(t *testing.T) {
+	t.Chdir(t.TempDir())
+	os.Mkdir("wp", 0o755)
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"scna", "./wp"}, "rhythm tuner: unknown command scna; did you mean scan?\n  run 'rhythm tuner --help' for the commands\n"},
+		{[]string{"chekcs"}, "rhythm tuner: unknown command chekcs; did you mean checks?\n"},
+		{[]string{"test-ecko"}, "rhythm tuner: unknown command test-ecko; did you mean test-echo?\n"},
+		{[]string{"example.com"}, "rhythm tuner: unknown command example.com; to scan it, run: rhythm tuner scan example.com\n"},
+		{[]string{"bogus"}, "rhythm tuner: unknown command bogus\n  run 'rhythm tuner --help' for the commands\n"},
+		{[]string{"scan", "./wp", "--jsn"}, "rhythm tuner scan: unknown flag --jsn; did you mean --json?\n"},
+		{[]string{"scan", "./wp", "-Q"}, "rhythm tuner scan: unknown flag -Q; did you mean -q?\n"},
+		{[]string{"scan", "./wp", "--zzzzzz"}, "rhythm tuner scan: unknown flag --zzzzzz\n"},
+		{[]string{"scan", "./wp", "--no-check-updates", "--id", "leak-dotnev"}, "rhythm tuner scan: --id leak-dotnev: no check has this ID; did you mean leak-dotenv?\n  list them with: rhythm tuner checks\n"},
+		{[]string{"scan", "./wp", "--fail-on", "urgent"}, "rhythm tuner scan: --fail-on urgent: want critical, high, medium, low or info\n"},
+		{[]string{"scan", "./wp", "--fail-on", "hihg"}, "rhythm tuner scan: --fail-on hihg: want critical, high, medium, low or info; did you mean high?\n"},
+		{[]string{"scan", "./wp", "--profile", "turbo"}, "rhythm tuner scan: --profile turbo: want quick, default or deep\n"},
+		{[]string{"scan", "./wp", "--timeout", "5"}, "rhythm tuner scan: --timeout 5: use a unit, for example 5s\n"},
+		{[]string{"scan", "./wp", "--max-time", "soon"}, "rhythm tuner scan: --max-time soon: want a duration, for example 10s or 2m\n"},
+		{[]string{"scan", "./wp", "--parallel", "0"}, "rhythm tuner scan: --parallel 0: want 1 or more\n"},
+		{[]string{"scan", "./wp", "--rate", "-1"}, "rhythm tuner scan: --rate -1: want 0 or more (0 means no limit)\n"},
+		{[]string{"scan", "./wp", "-c", "0"}, "rhythm tuner scan: --concurrency 0: want 1 or more\n"},
+		{[]string{"scan", "./wp", "--retries", "x"}, "rhythm tuner scan: --retries x: want a whole number\n"},
+		{[]string{"scan", "./wp", "--rate", "fast"}, "rhythm tuner scan: --rate fast: want a number\n"},
+		{[]string{"scan", "./wp", "-o"}, "rhythm tuner scan: -o needs a value\n"},
+		{[]string{"scan", "./wp", "--json=maybe"}, "rhythm tuner scan: --json=maybe: want true or false\n"},
+		{[]string{"scan"}, "rhythm tuner scan: no target given\n  try: rhythm tuner scan example.com\n"},
+	} {
+		code, out, errs := tunerExact(t, c.args...)
+		if code != exitUsage || !strings.HasPrefix(errs, c.want) || out != "" {
+			t.Errorf("%v: exit %d\nstderr %q\nwant   %q\nstdout %.80q", c.args, code, errs, c.want, out)
+		}
+		if strings.Contains(errs, "Output:") {
+			t.Errorf("%v: printed the help", c.args)
+		}
+	}
+}
+
+// Severities, profiles and confidence levels work in any case.
+func TestValuesAnyCase(t *testing.T) {
+	srv := leakySite(t)
+	if code, _, errs := tuner(t, "scan", srv.URL, "--json", "--fail-on", "HIGH", "--profile", "Quick", "--severity", "Low", "--min-confidence", "Likely"); code != exitFindings {
+		t.Errorf("exit %d: %s", code, errs)
+	}
+}
+
+func TestScanHelp(t *testing.T) {
+	code, out, _ := tuner(t, "scan", "--help")
+	if code != exitOK || !strings.Contains(out, "  rhythm tuner scan <url>... [flags] scan one or more sites\n") ||
+		!strings.Contains(out, "--fail-on <level>") || !strings.Contains(out, "Test extension:\n      --test-add <url>") ||
+		!strings.Contains(out, "Exit codes:") {
+		t.Errorf("scan --help: exit %d\n%s", code, out)
+	}
+	for _, other := range []string{"interactive picker", "rhythm tuner update [--clear]", "rhythm tuner checks [flags]", "test-echo"} {
+		if strings.Contains(out, other) {
+			t.Errorf("scan --help shows %q", other)
+		}
+	}
+}
+
+func TestJSONArray(t *testing.T) {
+	srv := leakySite(t)
+	code, out, errs := tuner(t, "scan", srv.URL, "--json-array")
+	var reps []struct {
+		Target   string
+		Complete bool
+	}
+	if err := json.Unmarshal([]byte(out), &reps); code != exitOK || err != nil || len(reps) != 1 || reps[0].Target != srv.URL || !reps[0].Complete {
+		t.Fatalf("exit %d, %v, stderr %s:\n%.300s", code, err, errs, out)
+	}
+
+	// With -o the extension decides nothing: --json-array is JSON.
+	path := filepath.Join(t.TempDir(), "r.json")
+	if code, _, errs := tuner(t, "scan", srv.URL, "--json-array", "-o", path, "-q"); code != exitOK {
+		t.Fatalf("-o: exit %d: %s", code, errs)
+	}
+	if data, _ := os.ReadFile(path); !bytes.HasPrefix(data, []byte("[")) {
+		t.Errorf("-o file is not an array:\n%.100s", data)
+	}
+
+	// A target that could not be scanned is an error entry.
+	dead := httptest.NewServer(http.NotFoundHandler())
+	dead.Close()
+	code, out, _ = tuner(t, "scan", dead.URL, "--json-array")
+	var failed []struct{ Target, Error string }
+	if err := json.Unmarshal([]byte(out), &failed); code != exitError || err != nil || len(failed) != 1 ||
+		failed[0].Target != dead.URL || !strings.Contains(failed[0].Error, "can't reach") {
+		t.Errorf("dead target: exit %d, %v:\n%s", code, err, out)
+	}
+	if code, _, errs := tuner(t, "scan", srv.URL, "--json-array", "--md"); code != exitUsage || !strings.Contains(errs, "pick one output format") {
+		t.Errorf("--json-array --md: exit %d: %s", code, errs)
+	}
+}
+
+func TestSuggest(t *testing.T) {
+	opts := []string{"scan", "checks", "update", "json", "jsonl", "q"}
+	for word, want := range map[string]string{
+		"scna": "scan", "sacn": "scan", "chceks": "checks", "updat": "update", "jsn": "json", "Json": "json",
+		"x": "", "zzzz": "", "": "", "Q": "q",
+	} {
+		if got := suggest(word, opts); got != want {
+			t.Errorf("suggest(%q) = %q, want %q", word, got, want)
+		}
+	}
+	if d := editDistance("kitten", "sitting"); d != 3 {
+		t.Errorf("editDistance = %d", d)
 	}
 }

@@ -5,7 +5,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"strings"
 
@@ -62,7 +61,7 @@ func pick(stdout, stderr io.Writer) int {
 		if errors.Is(err, huh.ErrUserAborted) {
 			return exitCanceled
 		}
-		fmt.Fprintln(stderr, "rhythm tuner:", err)
+		printErr(stderr, "", err)
 		return exitError
 	}
 	args := []string{strings.TrimSpace(target), "--profile", profile}
