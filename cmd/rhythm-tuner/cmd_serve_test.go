@@ -66,6 +66,7 @@ func TestServeEndToEnd(t *testing.T) {
 		t.Helper()
 		req, _ := http.NewRequest(method, hs.URL+path, strings.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)

@@ -151,6 +151,9 @@ func (h *harness) doToken(method, path string, body any, token string) (int, map
 		r = bytes.NewReader(b)
 	}
 	req, _ := http.NewRequest(method, h.http.URL+path, r)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -298,6 +301,8 @@ func TestFileVerification(t *testing.T) {
 			// localhost reaches this same server; it's another host
 			// name: an attacker's redirect looks just like this.
 			http.Redirect(w, r, fmt.Sprintf("https://localhost:%d/proof.txt", port), http.StatusFound)
+		case r.URL.Path == "/.well-known/tuner-verify.txt" && mode.Load() == "downgrade":
+			http.Redirect(w, r, fmt.Sprintf("http://127.0.0.1:%d/proof.txt", port), http.StatusFound)
 		case r.URL.Path == "/.well-known/tuner-verify.txt" && mode.Load() == "wrong":
 			fmt.Fprintln(w, "tuner-verify=someone-else")
 		case r.URL.Path == "/proof.txt":
@@ -318,6 +323,7 @@ func TestFileVerification(t *testing.T) {
 
 	for _, c := range []struct{ mode, want string }{
 		{"off-host", fmt.Sprintf("redirected off the host, to localhost:%d", port)},
+		{"downgrade", "redirected to plain HTTP"},
 		{"wrong", "the file doesn't hold this target's token"},
 		{"missing", "HTTP 404"},
 	} {
@@ -728,5 +734,145 @@ func TestLineWriter(t *testing.T) {
 	lw.flush()
 	if !slices.Equal(got, []string{"one", "two", "three"}) {
 		t.Errorf("%q", got)
+	}
+}
+
+// TestTokenlessRefusesBrowserAttacks covers the two ways a web page in
+// the operator's browser could drive a tokenless server: DNS rebinding
+// (a foreign Host) and a simple cross-site POST (a text/plain body).
+func TestTokenlessRefusesBrowserAttacks(t *testing.T) {
+	h := newHarness(t, func(c *Config) { c.Token = "" })
+	send := func(host, contentType string) (int, map[string]any) {
+		t.Helper()
+		req, _ := http.NewRequest("POST", h.http.URL+"/v0/targets", strings.NewReader(`{"url":"example.com"}`))
+		if host != "" {
+			req.Host = host
+		}
+		if contentType != "" {
+			req.Header.Set("Content-Type", contentType)
+		}
+		req.Header.Set("Origin", "http://rebind.attacker.example:8080")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var out map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out
+	}
+	for _, c := range []struct {
+		host, contentType string
+		want              int
+		msg               string
+	}{
+		{"rebind.attacker.example:8080", "application/json", http.StatusForbidden, `Host "rebind.attacker.example:8080" is not a loopback name`},
+		{"rebind.attacker.example", "text/plain", http.StatusForbidden, "not a loopback name"},
+		{"10.0.0.5:8080", "application/json", http.StatusForbidden, "not a loopback name"},
+		{"", "text/plain", http.StatusUnsupportedMediaType, "Content-Type: application/json"},
+		{"", "application/x-www-form-urlencoded", http.StatusUnsupportedMediaType, "Content-Type: application/json"},
+		{"", "", http.StatusUnsupportedMediaType, "Content-Type: application/json"},
+		{"", "application/json; charset=utf-8", http.StatusCreated, ""},
+		{"localhost:8080", "application/json", http.StatusCreated, ""},
+		{"[::1]:8080", "application/json", http.StatusCreated, ""},
+		{"127.1.2.3", "application/json", http.StatusCreated, ""},
+	} {
+		code, body := send(c.host, c.contentType)
+		if code == http.StatusOK && c.want == http.StatusCreated {
+			code = http.StatusCreated // the same site again returns the first target
+		}
+		if code != c.want {
+			t.Errorf("Host %q, %q: %d %v, want %d", c.host, c.contentType, code, body, c.want)
+			continue
+		}
+		if c.msg != "" && !strings.Contains(fmt.Sprint(body["error"]), c.msg) {
+			t.Errorf("Host %q, %q: error %v, want %q", c.host, c.contentType, body["error"], c.msg)
+		}
+		if c.want != http.StatusCreated && body["token"] != nil {
+			t.Errorf("Host %q, %q: refused reply leaked a token", c.host, c.contentType)
+		}
+	}
+	// A GET from a rebinding page is refused as well, so it can't read
+	// targets or findings.
+	req, _ := http.NewRequest("GET", h.http.URL+"/v0/targets", nil)
+	req.Host = "rebind.attacker.example"
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("rebinding GET: %d", resp.StatusCode)
+	}
+}
+
+// TestTokenAllowsAnyHost checks that the Host guard applies only
+// without a token: behind a token the API may sit behind a proxy or a
+// public name.
+func TestTokenAllowsAnyHost(t *testing.T) {
+	h := newHarness(t, nil)
+	req, _ := http.NewRequest("GET", h.http.URL+"/v0/health", nil)
+	req.Host = "tuner.example.com"
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("token with a public Host: %d", resp.StatusCode)
+	}
+	if code, _ := h.doRaw("POST", "/v0/targets", `{"url":"example.com"}`, "text/plain"); code != http.StatusUnsupportedMediaType {
+		t.Errorf("text/plain POST with a token: %d", code)
+	}
+	if code, _ := h.doRaw("POST", "/v0/targets/t_missing/verify", "", ""); code != http.StatusNotFound {
+		t.Errorf("empty POST without Content-Type: %d, want it to reach the handler", code)
+	}
+}
+
+// doRaw sends body as is with the given Content-Type and the test token.
+func (h *harness) doRaw(method, path, body, contentType string) (int, map[string]any) {
+	h.t.Helper()
+	req, _ := http.NewRequest(method, h.http.URL+path, strings.NewReader(body))
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	return resp.StatusCode, out
+}
+
+// TestFileVerificationPlainHTTP checks that a site served only over
+// http on its own port proves itself at that same address.
+func TestFileVerificationPlainHTTP(t *testing.T) {
+	var token atomic.Value
+	token.Store("")
+	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/tuner-verify.txt" {
+			fmt.Fprintln(w, token.Load())
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer site.Close()
+	h := newHarness(t, nil)
+	code, tg := h.do("POST", "/v0/targets", map[string]string{"url": site.URL})
+	if code != http.StatusCreated {
+		t.Fatal(code, tg)
+	}
+	want := site.URL + "/.well-known/tuner-verify.txt"
+	if got := tg["verify"].(map[string]any)["file"].(map[string]any)["url"]; got != want {
+		t.Errorf("proof URL %v, want %s", got, want)
+	}
+	token.Store(tg["token"])
+	code, body := h.do("POST", "/v0/targets/"+tg["id"].(string)+"/verify", map[string]string{"method": "file"})
+	if code != http.StatusOK || body["verified_by"] != "file" {
+		t.Errorf("http file proof: %d %v", code, body)
 	}
 }

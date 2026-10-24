@@ -23,9 +23,12 @@ const serveUsage = `Usage:
 
 Runs Tuner as an HTTP API for agencies and hosts. A site is scanned only
 after it proves its owner asked for it: a DNS TXT record at
-_tuner-verify.<host> or the file https://<host>/.well-known/tuner-verify.txt
-holding the token Tuner hands out. Proof lasts 30 days. Each scan runs as
-its own rhythm tuner scan process, one at a time per site.
+_tuner-verify.<host> or the file /.well-known/tuner-verify.txt holding
+the token Tuner hands out. The file is fetched from the target's own
+scheme, host and port (https://example.com:8443 looks there, http://
+targets over http); redirects must stay on that host and an https check
+never drops to http. Proof lasts 30 days. Each scan runs as its own
+rhythm tuner scan process, one at a time per site.
 
   GET    /v0/health
   POST   /v0/targets               {"url": "https://example.com"} -> token
@@ -41,7 +44,10 @@ its own rhythm tuner scan process, one at a time per site.
                                    finding, log, done
 
 Every request needs "Authorization: Bearer $TUNER_SERVE_TOKEN". Without
-the variable the API has no authentication and listens on loopback only.
+the variable the API has no authentication, listens on loopback only and
+answers only requests addressed to localhost, 127.0.0.1 or [::1], so a
+web page can't reach it through DNS rebinding. A POST body must be sent
+with Content-Type: application/json.
 
 Flags:
       --listen <addr>        address to listen on (default 127.0.0.1:8080);
@@ -63,7 +69,8 @@ retried after 5s, 30s and 2m when the receiver fails or answers 5xx/429.
 
 Examples:
   TUNER_SERVE_TOKEN=$(openssl rand -hex 32) rhythm tuner serve --listen 0.0.0.0:8080 --data /var/lib/tuner
-  curl -H "Authorization: Bearer $TUNER_SERVE_TOKEN" -d '{"url":"https://example.com"}' localhost:8080/v0/targets
+  curl -H "Authorization: Bearer $TUNER_SERVE_TOKEN" -H "Content-Type: application/json" \
+    -d '{"url":"https://example.com"}' localhost:8080/v0/targets
 `
 
 // cmdServe runs the HTTP API until SIGINT or SIGTERM; see serveUsage.

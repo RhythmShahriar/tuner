@@ -82,8 +82,19 @@ func (s *Server) view(t Target) targetView {
 		v.Expires = &exp
 	}
 	v.Verify.DNS = dnsProof{Name: dnsLabel + hostname(t.Host), Type: "TXT", Value: t.Token}
-	v.Verify.File = fileProof{URL: "https://" + t.Host + filePath, Body: t.Token}
+	v.Verify.File = fileProof{URL: t.proofURL(), Body: t.Token}
 	return v
+}
+
+// proofURL is where the ownership file goes: the target's own scheme,
+// host and port. A site served only over http can prove itself over
+// http, since that is how it will be scanned too.
+func (t Target) proofURL() string {
+	scheme := "https"
+	if u, err := url.Parse(t.URL); err == nil && u.Scheme == "http" {
+		scheme = "http"
+	}
+	return scheme + "://" + t.Host + filePath
 }
 
 // hostname drops a port from host.
@@ -255,7 +266,7 @@ func (s *Server) check(ctx context.Context, t Target, method string) verifyCheck
 		c.Error = fmt.Sprintf("%d TXT records at %s, none is this target's token", len(records), name)
 		return c
 	}
-	u := "https://" + t.Host + filePath
+	u := t.proofURL()
 	c := verifyCheck{Method: method, Where: u}
 	if err := s.fetchProof(ctx, u, t); err != nil {
 		c.Error = err.Error()
@@ -266,11 +277,13 @@ func (s *Server) check(ctx context.Context, t Target, method string) verifyCheck
 }
 
 // fetchProof GETs the proof file. Redirects may stay on the host (to
-// another path, say) but never leave it or drop to plain HTTP: following
-// one elsewhere would let anyone who controls a site that the target
-// redirects to "prove" they own the target.
+// another path, say) but never leave it: following one elsewhere would
+// let anyone who controls a site that the target redirects to "prove"
+// they own the target. A check that starts on https never drops to
+// plain HTTP, where anyone on the path could answer for the site.
 func (s *Server) fetchProof(ctx context.Context, u string, t Target) error {
 	want := hostname(t.Host)
+	secure := strings.HasPrefix(u, "https://")
 	client := *s.cfg.HTTP
 	client.Timeout = 10 * time.Second
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
@@ -279,7 +292,7 @@ func (s *Server) fetchProof(ctx context.Context, u string, t Target) error {
 			return errors.New("too many redirects")
 		case !strings.EqualFold(req.URL.Hostname(), want):
 			return fmt.Errorf("redirected off the host, to %s; the file must be served by %s itself", req.URL.Host, t.Host)
-		case req.URL.Scheme != "https":
+		case secure && req.URL.Scheme != "https":
 			return errors.New("redirected to plain HTTP")
 		}
 		return nil

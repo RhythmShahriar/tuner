@@ -10,7 +10,8 @@
 // process, which keeps a scan's memory out of the long-running server
 // and lets one scan crash without taking the others down.
 //
-// Endpoints (all JSON, all behind the bearer token when one is set):
+// Endpoints (all JSON, all behind the bearer token when one is set; a
+// POST body needs Content-Type: application/json):
 //
 //	GET    /v0/health
 //	POST   /v0/targets                 {"url": "https://example.com"}
@@ -31,6 +32,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"strings"
@@ -248,6 +250,14 @@ func isLoopback(host string) bool {
 
 // auth checks the bearer token in constant time and caps the body and
 // write time of everything but event streams.
+//
+// Without a token it also guards against the operator's own browser. A
+// page served from a rebinding domain reaches 127.0.0.1 with its own
+// name in Host, so only loopback names are let in. A page on any origin
+// can still send a "simple" cross-site POST, which a browser sends
+// without asking first only for form and text/plain bodies, so a POST
+// body must be application/json: that forces a CORS preflight, which
+// this API never answers.
 func (s *Server) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.cfg.Token != "" {
@@ -257,6 +267,13 @@ func (s *Server) auth(next http.Handler) http.Handler {
 				writeError(w, http.StatusUnauthorized, "missing or wrong bearer token (Authorization: Bearer $TUNER_SERVE_TOKEN)")
 				return
 			}
+		} else if !loopbackHost(r.Host) {
+			writeError(w, http.StatusForbidden, fmt.Sprintf("Host %q is not a loopback name; without TUNER_SERVE_TOKEN the API answers only localhost, 127.0.0.1 and [::1]", r.Host))
+			return
+		}
+		if r.Method == http.MethodPost && r.ContentLength != 0 && !isJSON(r.Header.Get("Content-Type")) {
+			writeError(w, http.StatusUnsupportedMediaType, "a request body must be JSON with Content-Type: application/json")
+			return
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, maxBody)
 		if !strings.HasSuffix(r.URL.Path, "/events") {
@@ -264,6 +281,22 @@ func (s *Server) auth(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// loopbackHost reports whether a request's Host names this machine:
+// localhost, 127.0.0.0/8 or ::1, with or without a port.
+func loopbackHost(host string) bool {
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	return isLoopback(strings.TrimSuffix(strings.Trim(host, "[]"), "."))
+}
+
+// isJSON reports whether a Content-Type is application/json, parameters
+// such as charset allowed.
+func isJSON(contentType string) bool {
+	mt, _, err := mime.ParseMediaType(contentType)
+	return err == nil && mt == "application/json"
 }
 
 func (s *Server) routes() {
