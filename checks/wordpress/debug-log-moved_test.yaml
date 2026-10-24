@@ -6,7 +6,19 @@ positive:
     routes:
       /debug.log:
         body: "[23-Oct-2026 10:00:00 UTC] PHP Warning:  Undefined array key \"id\" in /var/www/wp-content/plugins/shop/shop.php on line 12\n"
+  - name: openai and mailgun keys in an uploads log
+    expect_secrets: true
+    routes:
+      /wp-content/uploads/debug.log:
+        body: |
+          [23-Oct-2026 10:00:00 UTC] PHP Warning:  OpenAI request failed (401) with key sk-proj-FAKEfakeFAKEfake0123456789 in /var/www/wp-content/plugins/ai-writer/client.php on line 88
+          [23-Oct-2026 10:00:02 UTC] PHP Notice:  Mailgun send failed for api key key-0123456789abcdef0123456789abcdef in /var/www/wp-content/plugins/mailer/send.php on line 41
 negative:
+  - name: blocked log with keys in the error page
+    routes:
+      /wp-content/uploads/debug.log:
+        status: 403
+        body: "Forbidden. PHP Warning:  key key-0123456789abcdef0123456789abcdef"
   - name: not found
     routes: {}
   - name: soft-404 catch-all

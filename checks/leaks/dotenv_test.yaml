@@ -40,7 +40,28 @@ positive:
       /.env.backup:
         body: |
           SLACK_WEBHOOK_URL=https://hooks.slack.com/services/T0ABCDEFG/B0HIJKLMN/abcdefghijklmnopqrstuvwx
+  - name: stripe live keys
+    expect_secrets: true
+    routes:
+      /.env:
+        body: |
+          STRIPE_KEY=pk_live_abcdefghijklmnop1234
+          STRIPE_SECRET=sk_live_abcdefghijklmnop1234
+          STRIPE_RESTRICTED=rk_live_abcdefghijklmnop5678
+          STRIPE_WEBHOOK_SECRET=whsec_abcdefghijklmnop9012
+  - name: openai and mailgun keys
+    expect_secrets: true
+    routes:
+      /.env:
+        body: |
+          OPENAI_API_KEY=sk-proj-FAKEfakeFAKEfake0123456789
+          MAILGUN_SECRET=key-0123456789abcdef0123456789abcdef
 negative:
+  - name: blocked env with stripe keys in the error page
+    routes:
+      /.env:
+        status: 403
+        body: "STRIPE_SECRET=sk_live_abcdefghijklmnop1234"
   - name: blocked
     routes:
       /.env: {status: 403, body: Forbidden}

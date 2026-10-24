@@ -18,7 +18,28 @@ positive:
           <?php
           define( 'DB_NAME', 'shop' );
           define( 'DB_PASSWORD', 'tr0ub4dor-and-3' );
+  # WP Mail SMTP reads its settings from these constants.
+  - name: backup with wp mail smtp constants
+    expect_secrets: true
+    routes:
+      /wp-config.php.backup:
+        body: |
+          <?php
+          define( 'DB_NAME', 'shop' );
+          define( 'WPMS_ON', true );
+          define( 'WPMS_MAILER', 'mailgun' );
+          define( 'WPMS_SMTP_PASS', 'smtp-relay-Pass-2026' );
+          define( 'WPMS_MAILGUN_API_KEY', 'key-0123456789abcdef0123456789abcdef' );
+          define( 'WPMS_SENDGRID_API_KEY', 'SG.fakeFAKEfakeFAKE01.fakeFAKEfakeFAKE0123' );
 negative:
+  - name: a .dist template with smtp placeholders
+    routes:
+      /wp-config.php.dist:
+        body: |
+          <?php
+          define( 'DB_NAME', 'database_name_here' );
+          define( 'DB_PASSWORD', 'password_here' );
+          define( 'WPMS_SMTP_PASS', 'password_here' );
   - name: a .dist template with the sample placeholders
     routes:
       /wp-config.php.dist:

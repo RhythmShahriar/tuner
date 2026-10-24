@@ -6,7 +6,27 @@ positive:
     routes:
       /wp-content/debug.log:
         body: "[23-Oct-2026 10:00:00 UTC] PHP Notice:  Function wpdb::prepare was called incorrectly in /var/www/wp-includes/functions.php\n"
+  # Plugins log failed API calls with the key they sent.
+  - name: openai and mailgun keys in plugin errors
+    expect_secrets: true
+    routes:
+      /wp-content/debug.log:
+        body: |
+          [23-Oct-2026 10:00:00 UTC] PHP Warning:  OpenAI request failed (401) with key sk-proj-FAKEfakeFAKEfake0123456789 in /var/www/wp-content/plugins/ai-writer/client.php on line 88
+          [23-Oct-2026 10:00:02 UTC] PHP Notice:  Mailgun send failed for api key key-0123456789abcdef0123456789abcdef in /var/www/wp-content/plugins/mailer/send.php on line 41
+  # A backup plugin that dumps its settings as JSON on an error.
+  - name: backup plugin s3 settings logged as json
+    expect_secrets: true
+    routes:
+      /wp-content/debug.log:
+        body: |
+          [23-Oct-2026 10:05:00 UTC] PHP Warning:  upload failed, settings {"service":"s3","accesskey":"AKIAIOSFODNN7EXAMPLE","secretkey":"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY","path":"site-backups"} in /var/www/wp-content/plugins/backup/s3.php on line 7
 negative:
+  - name: blocked log with keys in the error page
+    routes:
+      /wp-content/debug.log:
+        status: 403
+        body: "Forbidden. PHP Warning:  key sk-proj-FAKEfakeFAKEfake0123456789"
   - name: not found
     routes: {}
   - name: soft-404 catch-all

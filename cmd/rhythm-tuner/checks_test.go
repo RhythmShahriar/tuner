@@ -21,7 +21,7 @@ func checksCmd(args ...string) (code int, stdout, stderr string) {
 
 func TestChecksTestBuiltIn(t *testing.T) {
 	code, out, errOut := checksCmd("test")
-	if code != exitOK || !regexp.MustCompile(`(?m)^ok +leak-dotenv +6 positive, 4 negative$`).MatchString(out) ||
+	if code != exitOK || !regexp.MustCompile(`(?m)^ok +leak-dotenv +8 positive, 5 negative$`).MatchString(out) ||
 		!strings.Contains(out, "\nAll ") || !strings.Contains(out, "checks in built-in checks passed (") {
 		t.Errorf("exit %d %s:\n%s", code, errOut, out)
 	}
