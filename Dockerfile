@@ -19,7 +19,9 @@
 # archives. To build it by hand:
 #   make image-context
 #   docker buildx build --platform linux/amd64 --load -t rhythm-tuner dist/image
-FROM gcr.io/distroless/static-debian12:nonroot
+# Pinned by digest (the same base as Echo's image); Dependabot's docker
+# ecosystem moves the tag and digest together.
+FROM gcr.io/distroless/static:nonroot@sha256:18f4cc26c9ffa7f20a359298be7deadac5c607c8e03a02b8119f1a5fc2f82c99
 
 ARG TARGETPLATFORM
 COPY ${TARGETPLATFORM}/rhythm-tuner /usr/local/bin/rhythm-tuner

@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 
 # Weekly, grouped updates: one pull request for actions (workflows and the
-# root action.yml), one for Go modules, one for the testbed's images. Actions are pinned by commit SHA;
-# Dependabot updates the SHA and the version comment together.
+# root action.yml), one for Go modules, one for the container image's base
+# and one for the testbed's images. Actions are pinned by commit SHA and
+# images by digest; Dependabot updates the pin and its tag together.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -23,6 +24,18 @@ updates:
       interval: weekly
     groups:
       go:
+        patterns: ["*"]
+    commit-message:
+      prefix: build
+      include: scope
+
+  # The Dockerfile's distroless base, pinned by tag and digest.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      image:
         patterns: ["*"]
     commit-message:
       prefix: build

@@ -38,21 +38,13 @@ jobs:
           make image-context IMAGE_VERSION=snapshot
           docker buildx build --platform linux/arm64 dist/image
           docker buildx build --platform linux/amd64 --load -t tuner:smoke dist/image
-      # /v0/health answers. With no TUNER_SERVE_TOKEN the container
-      # refuses to serve on 0.0.0.0. Both need the serve command, which is
-      # built in another lane (vulns-service V10); until it lands the
-      # image runs `rhythm-tuner serve` and exits with "unknown command",
-      # so the checks are skipped with a notice instead of failing.
+      # /v0/health answers with the bearer token. With no TUNER_SERVE_TOKEN
+      # the container refuses to serve on 0.0.0.0.
       - name: Smoke-test the image
         run: |
           set -uo pipefail
           image=tuner:smoke
           docker run --rm "$image" --version
-
-          if ! docker run --rm --entrypoint /usr/local/bin/rhythm-tuner "$image" serve --help >/dev/null 2>&1; then
-            echo "::notice::this build has no serve command yet (vulns-service V10); skipping the health and token checks"
-            exit 0
-          fi
 
           # Without a token the service must refuse to start on 0.0.0.0:
           # it exits non-zero on its own, names the variable and leaves no
@@ -68,12 +60,16 @@ jobs:
           [ "$code" -ne 0 ] || { echo "::error::serving with no token exited 0"; exit 1; }
           grep -qi 'TUNER_SERVE_TOKEN' notoken.log || { echo "::error::the refusal does not name TUNER_SERVE_TOKEN"; exit 1; }
 
-          # With a token it answers /v0/health.
-          cid=$(docker run -d -p 127.0.0.1:8080:8080 -e TUNER_SERVE_TOKEN=smoke-token "$image")
+          # With a token (serve wants 16 characters or more) it answers
+          # /v0/health to a request that sends it. One without gets a 401.
+          token=$(head -c 24 /dev/urandom | base64 | tr -d '/+=')
+          cid=$(docker run -d -p 127.0.0.1:8080:8080 -e TUNER_SERVE_TOKEN="$token" "$image")
           trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
           for _ in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8080/v0/health >/dev/null 2>&1; then ok=1; break; fi
+            if curl -fsS -H "Authorization: Bearer $token" http://127.0.0.1:8080/v0/health >/dev/null 2>&1; then ok=1; break; fi
             sleep 0.5
           done
           [ "${ok:-}" = 1 ] || { echo "::error::/v0/health did not answer"; docker logs "$cid"; exit 1; }
           echo "/v0/health answered"
+          status=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/v0/health)
+          [ "$status" = 401 ] || { echo "::error::/v0/health without the token answered $status, want 401"; exit 1; }
