@@ -119,7 +119,7 @@ func loadCheckSet(dir string, updates, offline bool, ua string, proxy *url.URL) 
 		set.warnings = append(set.warnings, fmt.Sprintf("check pack: %v; using built-in checks", err))
 		return set, nil
 	}
-	if p.Supersedes(checkpack.CurrentBuild()) {
+	if p.Supersedes(currentBuild()) {
 		set.source, set.pack, set.checks = setPack, p, p.Loaded
 	}
 	switch {
@@ -142,6 +142,10 @@ func (s *checkSet) alert(msg string) {
 // insecureWarning is shown on every run with TUNER_CHECKS_INSECURE=1, so
 // the bypass can't be left on and forgotten.
 const insecureWarning = "TUNER_CHECKS_INSECURE=1: check pack signatures are not verified; use it only for a pack you build yourself"
+
+// currentBuild is this binary's build; a variable so tests can play an
+// upgraded binary.
+var currentBuild = checkpack.CurrentBuild
 
 // packKeys overrides the pack signing keys compiled into checkpack, for
 // tests; nil means the embedded keys.
@@ -167,6 +171,7 @@ func packClient(ua string, proxy *url.URL, offline, force bool) *checkpack.Clien
 		Keys:      packKeys,
 		Insecure:  os.Getenv("TUNER_CHECKS_INSECURE") == "1",
 		BuiltIn:   builtInIDs(),
+		Build:     currentBuild(),
 	}
 }
 
@@ -174,7 +179,7 @@ func packClient(ua string, proxy *url.URL, offline, force bool) *checkpack.Clien
 // keep or retire. A build with uncommitted changes never uses a pack, so
 // a check author's new check doesn't make every pack look short of one.
 func builtInIDs() []string {
-	if checkpack.CurrentBuild().Modified {
+	if currentBuild().Modified {
 		return nil
 	}
 	all, err := engine.LoadChecks(checks.FS)

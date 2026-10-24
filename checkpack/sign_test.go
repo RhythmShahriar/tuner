@@ -193,6 +193,15 @@ func TestPackMustKeepBuiltIns(t *testing.T) {
 		t.Errorf("cached pack missing pack-third: err = %v", err)
 	}
 
+	// Unless the binary is newer than the pack, so the pack would never be
+	// used anyway: an upgrade that adds checks must not turn the old
+	// cached pack into a rejection on every scan.
+	c.Build = BuildInfo{Time: t0.Add(2 * time.Hour)}
+	p, err = c.Get(context.Background())
+	if err != nil || p.Warning != nil || p.Supersedes(c.Build) {
+		t.Errorf("older cached pack after an upgrade: p=%+v err=%v", p, err)
+	}
+
 	// A pack that both defines and retires a check doesn't build.
 	both := source("0.2.0", map[string]string{"a/x.yaml": goodCheck, "a/y.yaml": other})
 	both[ConfigName].Data = []byte(`{"min_tuner": "0.2.0", "retired": ["pack-other"]}`)
@@ -225,3 +234,4 @@ func TestKeyParsing(t *testing.T) {
 		t.Errorf("embedded keys: %v", err)
 	}
 }
+

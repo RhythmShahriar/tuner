@@ -58,9 +58,14 @@ type Client struct {
 	// Insecure skips the signature check, for private forks that publish
 	// their own packs (TUNER_CHECKS_INSECURE=1). Checksums still apply.
 	Insecure bool
-	// BuiltIn lists the IDs of the binary's own checks. A pack must carry
-	// each one or retire it in its manifest.
+	// BuiltIn lists the IDs of the binary's own checks. A pack that
+	// supersedes Build must carry each one or retire it in its manifest.
 	BuiltIn []string
+	// Build is the running binary's build. A pack older than it is never
+	// used, so it isn't held to BuiltIn: after an upgrade that adds checks
+	// the old cached pack would otherwise be reported as rejected on every
+	// scan until the next refresh.
+	Build BuildInfo
 	// Now is the clock; nil means time.Now. Tests use it to expire the
 	// TTL and the back-off.
 	Now func() time.Time
@@ -291,8 +296,10 @@ func (c *Client) verified(st *state) (*opened, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := st.Manifest.Covers(loaded, c.BuiltIn); err != nil {
-		return nil, err
+	if st.Manifest.supersedes(c.Build) {
+		if err := st.Manifest.Covers(loaded, c.BuiltIn); err != nil {
+			return nil, err
+		}
 	}
 	return &opened{fsys, loaded}, nil
 }

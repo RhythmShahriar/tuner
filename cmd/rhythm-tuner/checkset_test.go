@@ -161,6 +161,29 @@ func TestScanFallsBackFromBadPack(t *testing.T) {
 	}
 }
 
+// playBuild makes the binary look built at when, as a release is.
+func playBuild(t *testing.T, when time.Time) {
+	t.Helper()
+	old := currentBuild
+	currentBuild = func() checkpack.BuildInfo { return checkpack.BuildInfo{Time: when} }
+	t.Cleanup(func() { currentBuild = old })
+}
+
+func TestOlderPackAfterUpgradeIsQuiet(t *testing.T) {
+	// The pack neither carries nor retires the built-in checks, like a
+	// pack cached before an upgrade that added checks. The binary is
+	// newer, so the pack is unused and no reason to warn.
+	servePack(t, `{"min_tuner": "0.2.0"}`, packCheck, testPackKey)
+	playBuild(t, time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC))
+	site := leakySite(t)
+	for _, args := range [][]string{{site.URL}, {site.URL}, {site.URL, "--offline"}} {
+		rep, errs := scanReport(t, args...)
+		if rep.CheckSet != "built-in" || !rep.has("leak-dotenv") || strings.Contains(errs, "check pack") {
+			t.Errorf("scan %v: %+v\n%s", args, rep, errs)
+		}
+	}
+}
+
 func TestScanOfflineWithoutPack(t *testing.T) {
 	t.Setenv("TUNER_CHECKS_URL", "http://127.0.0.1:1")
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
