@@ -78,9 +78,9 @@ func TestComponents(t *testing.T) {
 <link href='/wp-content/themes/astra/style.css?foo=1&#038;ver=4.6.0'>`)
 	got := Detect(&matchers.Response{Status: 200, Header: http.Header{}, Body: body}).Components
 	want := []Component{
-		{Type: "plugin", Slug: "contact-form-7", Version: "5.9.3", Source: "asset"},
-		{Type: "plugin", Slug: "woocommerce"}, // ver equals the WordPress version, so it's ignored
-		{Type: "theme", Slug: "astra", Version: "4.6.0", Source: "asset"},
+		{Type: "plugin", Slug: "contact-form-7", Version: "5.9.3", Source: "asset", FoundBy: "asset", Confidence: "high"},
+		{Type: "plugin", Slug: "woocommerce", FoundBy: "asset", Confidence: "high"}, // ver equals the WordPress version, so it's ignored
+		{Type: "theme", Slug: "astra", Version: "4.6.0", Source: "asset", FoundBy: "asset", Confidence: "high"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %+v", got)

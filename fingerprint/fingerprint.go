@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package fingerprint identifies the platform behind a site from its home page.
+// Package fingerprint identifies the platform behind a site from its home
+// page, and holds the data and rules that WordPress plugin discovery uses.
 package fingerprint
 
 import (
@@ -32,7 +33,7 @@ type Component struct {
 	Type    string `json:"type"` // plugin or theme
 	Slug    string `json:"slug"`
 	Version string `json:"version,omitempty"`
-	Source  string `json:"version_source,omitempty"` // readme, style.css or asset
+	Source  string `json:"version_source,omitempty"` // readme, style.css, asset or plugin header
 
 	FoundBy    Methods `json:"found_by,omitempty"`   // how it was discovered: asset, rest, readme
 	Confidence string  `json:"confidence,omitempty"` // high, or low when only a weak hint matched
@@ -237,7 +238,8 @@ func PHPVersion(h http.Header) (version, build, header string) {
 	return "", "", ""
 }
 
-// components lists plugins and themes referenced by asset URLs. An asset's
+// components lists plugins and themes referenced by asset URLs, found by
+// "asset" with high confidence: the site itself loads them. An asset's
 // ?ver= is only a hint: many plugins pass the WordPress version instead of
 // their own, so that value is ignored.
 func components(body []byte, wpVersion string) []Component {
@@ -250,7 +252,7 @@ func components(body []byte, wpVersion string) []Component {
 		if !ok {
 			i = len(out)
 			index[key] = i
-			out = append(out, Component{Type: typ, Slug: string(m[2])})
+			out = append(out, Component{Type: typ, Slug: string(m[2]), FoundBy: FoundByAsset, Confidence: ConfidenceHigh})
 		}
 		if v := assetVer.FindSubmatch(m[0]); v != nil && out[i].Version == "" && string(v[1]) != wpVersion {
 			out[i].Version, out[i].Source = string(v[1]), "asset"
