@@ -141,7 +141,7 @@ jobs:
         id: folder
         uses: ./
         with:
-          target: testbed/action/wordpress
+          target: ./testbed/action/wordpress
           fail-on: high
           args: ${{ env.HERMETIC }}
           verify-signature: false
@@ -195,7 +195,7 @@ jobs:
         id: scan
         uses: ./
         with:
-          target: testbed/action/wordpress
+          target: ./testbed/action/wordpress
           version: ${{ matrix.version }}
           fail-on: none
           args: ${{ env.HERMETIC }}
