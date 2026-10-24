@@ -13,6 +13,7 @@ match:
   all:
     - status: 200
     - regex: '"slug"\s*:\s*"[^"]+"'
+    - not_baseline: true
 impact: Login names are public, which halves the work of a password-guessing attack.
 fix: |
   Restrict the users endpoint to logged-in users, e.g. with a security plugin, or:

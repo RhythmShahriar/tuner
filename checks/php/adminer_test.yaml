@@ -10,3 +10,5 @@ negative:
     routes: {}
   - name: soft-404 catch-all
     default: {status: 200, body: "<html><title>Not found</title></html>"}
+  - name: catch-all that serves an Adminer page for every path
+    default: {status: 200, body: "<html><title>Login - Adminer</title></html>"}

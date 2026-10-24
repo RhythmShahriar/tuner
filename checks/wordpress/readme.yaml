@@ -12,6 +12,7 @@ match:
   all:
     - status: 200
     - regex: '(?i)<title>WordPress[^<]*ReadMe'
+    - not_baseline: true
 impact: Confirms WordPress and can hint at the installed version.
 fix: Delete readme.html after each core update, or deny it in the web server.
 fix_server:

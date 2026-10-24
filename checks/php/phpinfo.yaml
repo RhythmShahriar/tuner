@@ -11,6 +11,7 @@ match:
   all:
     - status: 200
     - regex: '<title>(?:PHP [0-9.]+ - )?phpinfo\(\)</title>'
+    - not_baseline: true
 impact: Shows the PHP version, loaded modules, server paths and environment variables, which may include secrets.
 fix: Delete the file. phpinfo() pages should never be left on a live server.
 references:

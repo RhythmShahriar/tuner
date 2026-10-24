@@ -17,3 +17,5 @@ negative:
       /wp-config.php: {status: 200, body: ""}
   - name: soft-404 catch-all
     default: {status: 200, body: "<html>Not found</html>"}
+  - name: catch-all that shows a sample config for every path
+    default: {status: 200, body: "<pre>define( 'DB_NAME', 'database_name_here' );</pre>"}
