@@ -32,10 +32,12 @@ testbed-fast: ## run the scenario suite: loopback fixtures for QA's failure mode
 
 testbed: ## build the plugin tree and start the WordPress testbed (needs Docker)
 	sh testbed/wp/make-plugins.sh
-	docker compose -f testbed/docker-compose.yml up -d --wait
+	mkdir -p testbed/wp/site
+	TESTBED_UID=$$(id -u) TESTBED_GID=$$(id -g) docker compose -f testbed/docker-compose.yml up -d --wait
 
-testbed-down: ## stop and remove the testbed, database and volumes
+testbed-down: ## stop and remove the testbed, database, volumes and the local copy
 	docker compose -f testbed/docker-compose.yml down -v
+	rm -rf testbed/wp/site
 
 benchmark: ## run Tuner, WPScan, wpprobe and Nuclei on the testbed and write docs/benchmark.md
 	go run -tags testbed ./testbed/bench
@@ -46,13 +48,9 @@ benchmark-test: ## test the benchmark scoring without Docker or the network
 # Validates the server-config bundles from `rhythm-tuner fix` (checks-pack
 # C6) against the testbed's nginx and Apache: nginx -t, then httpd -t with
 # the bundle included in the docroot's <Directory> and a live request with
-# it as .htaccess. Skips cleanly until C6 ships the fix subcommand.
+# it as .htaccess.
 testbed-config: ## validate C6 server-config bundles against nginx and Apache (needs Docker)
-	@if go run ./cmd/rhythm-tuner fix --help >/dev/null 2>&1; then \
-		sh testbed/validate-config.sh; \
-	else \
-		echo "testbed-config: rhythm-tuner fix is not in this build yet (checks-pack C6); skipped"; \
-	fi
+	sh testbed/validate-config.sh
 
 testbed-config-test: ## prove testbed-config passes good bundles and fails broken ones (needs Docker)
 	sh testbed/validate-config-test.sh

@@ -36,9 +36,10 @@ sites:
       - path: /.git/config
         finding: leak-git
         severity: high
-    # On disk, reachable only in a local scan (--integrity, the bind
-    # mount). These are L7/L8 ground truth and don't count against the
-    # remote tools.
+    # On disk, reachable only in a local scan of the copy the seed service
+    # leaves in testbed/wp/site (rhythm tuner scan testbed/wp/site
+    # --integrity). These are L7/L8 ground truth and don't count against
+    # the remote tools.
     local:
       - kind: modified-core
         path: /wp-includes/pluggable.php

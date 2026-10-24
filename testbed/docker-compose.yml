@@ -10,8 +10,9 @@
 #   make benchmark     run the scanners and write docs/benchmark.md
 #   make testbed-down  stop and remove it all
 #
-# Everything is thrown away on down: the database is in tmpfs and
-# WordPress in volumes removed with -v. Nothing here is a real secret and
+# Everything is thrown away on down: the database is in tmpfs, WordPress
+# in a volume removed with -v and the local copy in wp/site is deleted by
+# make testbed-down. Nothing here is a real secret and
 # no plugin holds a working exploit. Images are pinned by tag and digest,
 # so a re-pushed tag can't change the benchmark; Dependabot's
 # docker-compose updates move both together.
@@ -40,8 +41,10 @@ services:
       retries: 30
 
   # The WordPress application container. php-fpm so both nginx and Apache
-  # front it. The old core (WORDPRESS_VERSION) and the broken files come
-  # from the bind mounts and the init script.
+  # front it. On first start its entrypoint unpacks core (6.4.1, old on
+  # purpose) into the wp volume and writes wp-config.php; the seed service
+  # below does the rest. WP_HOME follows the address a request came in on,
+  # so the nginx, Apache and /blog fronts each stay on their own port.
   wp:
     image: wordpress:6.4.1-php8.1-fpm@sha256:0a8482375e4b9e604ab8b7b4a426b9455dac4c62e78f4f857278976cad7e95be
     depends_on:
@@ -54,14 +57,50 @@ services:
         define('WP_DEBUG_LOG', true);
         define('DISABLE_WP_CRON', true);
         define('AUTOMATIC_UPDATER_DISABLED', true);
+        if (isset($$_SERVER['HTTP_HOST'])) {
+          $$tb_base = strpos($$_SERVER['REQUEST_URI'] ?? '', '/blog/') === 0 ? '/blog' : '';
+          define('WP_HOME', 'http://' . $$_SERVER['HTTP_HOST'] . $$tb_base);
+          define('WP_SITEURL', WP_HOME);
+        }
     volumes:
       - wp:/var/www/html
-      - ./wp/content/plugins:/var/www/html/wp-content/mu-plugins-src:ro
-      - ./wp/init.sh:/docker-entrypoint-init.d/init.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /var/www/html/wp-config.php"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+  # One-shot: installs WordPress into the database, copies the stub
+  # plugins in (make-plugins.sh builds them into wp/content), activates
+  # the ones ground-truth.yaml marks active and seeds the broken files
+  # (wp/init.sh). It then copies the tree to wp/site, owned by you, so a
+  # local scan (rhythm tuner scan testbed/wp/site --integrity) sees the
+  # same ground truth. The fronts start only once it has succeeded.
+  seed:
+    image: wordpress:cli-2.12.0-php8.3@sha256:661db880e953da051abcac6c0a769767b995a82cd52101c003ca7438dd427d7d
+    user: "0:0"
+    depends_on:
+      wp:
+        condition: service_healthy
+    environment:
+      <<: *db-env
+      TESTBED_URL: http://127.0.0.1:${TESTBED_MAIN_PORT:-20280}
+      TESTBED_UID: ${TESTBED_UID:-1000}
+      TESTBED_GID: ${TESTBED_GID:-1000}
+    volumes:
+      - wp:/var/www/html
+      - ./wp/content/plugins:/plugins-src:ro
+      - ./ground-truth.yaml:/ground-truth.yaml:ro
+      - ./wp/init.sh:/init.sh:ro
+      - ./wp/site:/site
+    entrypoint: ["sh", "/init.sh"]
+    restart: "no"
 
   nginx:
     image: nginx:1.27.3-alpine@sha256:814a8e88df978ade80e584cc5b333144b9372a8e3c98872d07137dbf3b44d0e4
-    depends_on: [wp]
+    depends_on:
+      seed:
+        condition: service_completed_successfully
     ports:
       - "127.0.0.1:${TESTBED_MAIN_PORT:-20280}:80"
       - "127.0.0.1:${TESTBED_BLOG_PORT:-20282}:81"
@@ -71,7 +110,9 @@ services:
 
   apache:
     image: httpd:2.4.62@sha256:4c7788695c832bf415a662dfb5160f1895e65fc65c025e85f436ee2c9e7d7f3e
-    depends_on: [wp]
+    depends_on:
+      seed:
+        condition: service_completed_successfully
     ports:
       - "127.0.0.1:${TESTBED_APACHE_PORT:-20281}:80"
     volumes:

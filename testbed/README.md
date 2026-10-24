@@ -15,8 +15,10 @@ real secret and no plugin holds a working exploit.
   this in the same commit.
 - `wp/make-plugins.sh`  builds the 30 stub plugins from the manifest, so
   they don't live in the repo.
-- `wp/init.sh`          seeds the broken state on first boot: the exposed
-  files, a modified core file and an uploads webshell marker.
+- `wp/init.sh`          run by the one-shot `seed` service (WP-CLI): installs
+  WordPress, copies in the stub plugins and activates the active ones,
+  seeds the exposed files, a modified core file and an uploads webshell
+  marker, then copies the tree to `wp/site` for local scans.
 - `nginx/`, `apache/`   the two front ends, both deliberately open.
 - `validate-config.sh`  checks `rhythm-tuner fix` bundles with nginx and
   Apache (`make testbed-config`); `validate-config-test.sh` proves it
@@ -29,6 +31,7 @@ real secret and no plugin holds a working exploit.
 
 ```sh
 make testbed        # make-plugins.sh, then docker compose up (needs Docker)
+rhythm-tuner scan testbed/wp/site --integrity   # the local ground truth
 make benchmark      # go run -tags testbed ./testbed/bench -> docs/benchmark.md
 make testbed-down   # docker compose down -v
 ```

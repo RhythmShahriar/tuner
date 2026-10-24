@@ -4,8 +4,9 @@
 
 # Builds the testbed's plugin tree under wp/content/plugins from
 # ground-truth.yaml, so the 30 plugins don't have to live in the repo.
-# Each plugin is a stub: a main file and (for "readme" plugins) a
-# readme.txt with a Stable tag, at the version the manifest names. No
+# Each plugin is a stub: a main file that loads one script, the script
+# and (for "readme" plugins) a readme.txt with a Stable tag, at the
+# version the manifest names. No
 # plugin holds a working exploit; the "vulnerable" ones only carry a
 # version that public advisories flag.
 #
@@ -43,6 +44,10 @@ while IFS= read -r line; do
 
 	dir="$plugins/$slug"
 	mkdir -p "$dir"
+	# An active plugin loads its asset on every page, with ?ver=, which is
+	# what asset-based detection reads.
+	mkdir -p "$dir/assets"
+	printf '/* testbed stub asset for %s %s */\n' "$slug" "$version" > "$dir/assets/$slug.js"
 	cat > "$dir/$slug.php" <<PHP
 <?php
 /*
@@ -50,6 +55,9 @@ Plugin Name: ${slug}
 Version: ${version}
 */
 // Testbed stub. Not a real plugin and holds no exploit.
+add_action('wp_enqueue_scripts', function () {
+	wp_enqueue_script('testbed-${slug}', plugins_url('assets/${slug}.js', __FILE__), array(), '${version}');
+});
 PHP
 	# A readable readme only for "readme" plugins; REST and asset plugins
 	# deliberately have none, so only those detection methods find them.

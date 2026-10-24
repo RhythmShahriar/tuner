@@ -23,4 +23,5 @@ coverage.*
 
 # Testbed: generated plugin tree and local release packaging
 /testbed/wp/content/
+/testbed/wp/site/
 /release/
