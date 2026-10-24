@@ -147,11 +147,29 @@ Flags:
 
 // checksDir is the checks test and lint read: dir, or the built-in
 // checks when dir is empty.
-func checksDir(dir string) (fs.FS, string) {
+func checksDir(dir string) (fs.FS, string, error) {
 	if dir == "" {
-		return checks.FS, "built-in checks"
+		return checks.FS, "built-in checks", nil
 	}
-	return os.DirFS(dir), dir
+	// A missing directory is a bad argument, not a failing check, and
+	// os.DirFS would only say "stat .".
+	switch st, err := os.Stat(dir); {
+	case errors.Is(err, fs.ErrNotExist):
+		return nil, "", fmt.Errorf("%s: no such directory", dir)
+	case err != nil:
+		return nil, "", err
+	case !st.IsDir():
+		return nil, "", fmt.Errorf("%s: not a directory", dir)
+	}
+	return os.DirFS(dir), dir, nil
+}
+
+// plural is "1 check" or "n checks".
+func plural(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 // oneDir parses a subcommand's arguments: at most one directory, no flags
@@ -184,7 +202,11 @@ func checksTest(args []string, stdout, stderr io.Writer) int {
 	if !ok {
 		return exit
 	}
-	fsys, name := checksDir(dir)
+	fsys, name, err := checksDir(dir)
+	if err != nil {
+		fmt.Fprintf(stderr, "rhythm tuner: checks test: %v\n", err)
+		return exitUsage
+	}
 	results := checktest.Run(fsys)
 
 	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
@@ -239,10 +261,14 @@ func checksTest(args []string, stdout, stderr io.Writer) int {
 		return exitError
 	}
 	if failed > 0 {
-		fmt.Fprintf(stdout, "\n%d of %d checks in %s failed.\n", failed, max(checksSeen, failed), name)
+		fmt.Fprintf(stdout, "\n%d of %s in %s failed.\n", failed, plural(max(checksSeen, failed), "check"), name)
 		return exitFindings
 	}
-	fmt.Fprintf(stdout, "\nAll %d checks in %s passed (%d cases).\n", checksSeen, name, cases)
+	if checksSeen == 1 {
+		fmt.Fprintf(stdout, "\nThe check in %s passed (%s).\n", name, plural(cases, "case"))
+		return exitOK
+	}
+	fmt.Fprintf(stdout, "\nAll %s in %s passed (%s).\n", plural(checksSeen, "check"), name, plural(cases, "case"))
 	return exitOK
 }
 
@@ -261,7 +287,11 @@ func checksLint(args []string, stdout, stderr io.Writer) int {
 	if !ok {
 		return exit
 	}
-	fsys, name := checksDir(dir)
+	fsys, name, err := checksDir(dir)
+	if err != nil {
+		fmt.Fprintf(stderr, "rhythm tuner: checks lint: %v\n", err)
+		return exitUsage
+	}
 	issues := checktest.Lint(fsys)
 	for _, i := range issues {
 		fmt.Fprintln(stdout, i)

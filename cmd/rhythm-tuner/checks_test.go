@@ -41,7 +41,8 @@ func TestChecksNewTestLint(t *testing.T) {
 	if code != exitOK || !strings.Contains(out, "Wrote "+check+" and "+filepath.Join(dir, "leak-old-backup_test.yaml")+".\n") {
 		t.Fatalf("new: exit %d %s:\n%s", code, errOut, out)
 	}
-	if code, out, _ := checksCmd("test", dir); code != exitOK || !strings.Contains(out, "ok  leak-old-backup  1 positive, 3 negative") {
+	if code, out, _ := checksCmd("test", dir); code != exitOK || !strings.Contains(out, "ok  leak-old-backup  1 positive, 3 negative") ||
+		!strings.HasSuffix(out, "\nThe check in "+dir+" passed (4 cases).\n") {
 		t.Errorf("test: exit %d:\n%s", code, out)
 	}
 	if code, out, _ := checksCmd("lint", dir); code != exitOK || out != "No issues in "+dir+".\n" {
@@ -62,7 +63,7 @@ func TestChecksNewTestLint(t *testing.T) {
 	code, out, _ = checksCmd("test", dir)
 	if code != exitFindings || !strings.Contains(out, "FAIL  leak-old-backup") ||
 		!strings.Contains(out, `negative "catch-all that serves the same text for every path": unexpected finding on /old-backup.txt`) ||
-		!strings.Contains(out, "1 of 1 checks in "+dir+" failed.") {
+		!strings.Contains(out, "1 of 1 check in "+dir+" failed.") {
 		t.Errorf("test after edit: exit %d:\n%s", code, out)
 	}
 	data = bytes.Replace(data, []byte(`    - words: ["TODO-text-only-the-real-file-has"]`+"\n"), nil, 1)
@@ -76,6 +77,11 @@ func TestChecksNewTestLint(t *testing.T) {
 }
 
 func TestChecksSubcommandErrors(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "nope")
+	file := filepath.Join(t.TempDir(), "x.yaml")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		args []string
 		code int
@@ -87,6 +93,9 @@ func TestChecksSubcommandErrors(t *testing.T) {
 		{[]string{"new", "--force", "leak-x"}, exitUsage, "checks new: unknown flag --force"},
 		{[]string{"test", "a", "b"}, exitUsage, "checks test takes at most one directory"},
 		{[]string{"lint", "--json"}, exitUsage, "checks lint: unknown flag --json"},
+		{[]string{"test", missing}, exitUsage, "rhythm tuner: checks test: " + missing + ": no such directory"},
+		{[]string{"lint", missing}, exitUsage, "rhythm tuner: checks lint: " + missing + ": no such directory"},
+		{[]string{"test", file}, exitUsage, "rhythm tuner: checks test: " + file + ": not a directory"},
 	} {
 		code, _, errOut := checksCmd(tc.args...)
 		if code != tc.code || !strings.Contains(errOut, tc.want) {
