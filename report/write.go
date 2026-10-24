@@ -71,6 +71,10 @@ func Write(format string, w io.Writer, reports []Report, o WriteOptions) error {
 	if !ok {
 		return fmt.Errorf("unknown report format %q (known: %s)", format, strings.Join(Formats(), ", "))
 	}
+	// Reports from New are clean already; the options carry error text
+	// and names that come straight from the command line or the network.
+	o.Failed = sanitized(o.Failed)
+	o.Version, o.Brand = SafeText(o.Version), sanitized(o.Brand)
 	return e.fn(w, reports, o)
 }
 

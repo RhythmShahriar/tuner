@@ -27,18 +27,21 @@ type Report struct {
 	*engine.Result
 }
 
-// New wraps a scan result for output.
+// New wraps a scan result for output. The report holds a copy of res with
+// every string passed through SafeText, so no writer can print a control
+// byte a site or a scanned file put there; res itself is left as it is.
 func New(res *engine.Result, version string) Report {
 	if res.Findings == nil {
 		res.Findings = []engine.Finding{}
 	}
+	clean := sanitized(*res)
 	return Report{
 		Schema:     Schema,
 		Tool:       "rhythm-tuner",
-		Version:    version,
+		Version:    SafeText(version),
 		DurationMS: res.Duration.Milliseconds(),
-		Summary:    res.Counts(),
-		Result:     res,
+		Summary:    clean.Counts(),
+		Result:     &clean,
 	}
 }
 

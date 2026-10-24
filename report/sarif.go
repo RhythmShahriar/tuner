@@ -87,7 +87,7 @@ func SARIF(w io.Writer, reports []Report, version string) error {
 }
 
 func writeSARIF(w io.Writer, reports []Report, o WriteOptions) error {
-	version := o.Version
+	version := SafeText(o.Version)
 	log := sarifLog{
 		Schema:  "https://json.schemastore.org/sarif-2.1.0.json",
 		Version: "2.1.0",
@@ -108,20 +108,20 @@ func writeSARIF(w io.Writer, reports []Report, o WriteOptions) error {
 				rule := sarifRule{
 					ID:               f.ID,
 					Name:             f.ID,
-					ShortDescription: sarifText{f.Title},
+					ShortDescription: sarifText{SafeText(f.Title)},
 					Properties: map[string]any{
 						"tags":              append([]string{"security"}, f.Tags...),
 						"security-severity": securitySeverity[f.Severity],
 					},
 				}
 				if f.Impact != "" {
-					rule.FullDescription = &sarifText{f.Impact}
+					rule.FullDescription = &sarifText{safeBlock(f.Impact)}
 				}
 				if f.Fix != "" {
-					rule.Help = &sarifText{f.Fix}
+					rule.Help = &sarifText{safeBlock(f.Fix)}
 				}
 				if len(f.References) > 0 {
-					rule.HelpURI = f.References[0]
+					rule.HelpURI = SafeText(f.References[0])
 				}
 				run.Tool.Driver.Rules = append(run.Tool.Driver.Rules, rule)
 			}
@@ -129,9 +129,9 @@ func writeSARIF(w io.Writer, reports []Report, o WriteOptions) error {
 			if len(f.Evidence.Matched) > 0 {
 				msg += " (" + strings.Join(f.Evidence.Matched, "; ") + ")"
 			}
-			res := sarifResult{RuleID: f.ID, Level: sarifLevel(f.Severity), Message: sarifText{msg}}
+			res := sarifResult{RuleID: f.ID, Level: sarifLevel(f.Severity), Message: sarifText{SafeText(msg)}}
 			var loc sarifLocation
-			loc.PhysicalLocation.ArtifactLocation.URI = f.URL
+			loc.PhysicalLocation.ArtifactLocation.URI = SafeText(f.URL)
 			res.Locations = []sarifLocation{loc}
 			if len(f.Advisories) > 0 {
 				var cves []string
@@ -143,7 +143,7 @@ func writeSARIF(w io.Writer, reports []Report, o WriteOptions) error {
 			if len(f.Evidence.Secrets) > 0 {
 				var secrets []string
 				for _, s := range f.Evidence.Secrets {
-					secrets = append(secrets, s.String())
+					secrets = append(secrets, SafeText(s.String()))
 				}
 				res.Properties = map[string]any{"secrets": secrets}
 			}

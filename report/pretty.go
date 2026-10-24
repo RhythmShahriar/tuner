@@ -65,6 +65,7 @@ func (p *Pretty) clear() {
 }
 
 func (p *Pretty) Header(version, target string) {
+	version, target = SafeText(version), SafeText(target)
 	if p.o.Quiet {
 		return
 	}
@@ -91,6 +92,7 @@ func (p *Pretty) step(label, value string) {
 }
 
 func (p *Pretty) Fingerprint(fp fingerprint.Result) {
+	fp = sanitized(fp)
 	p.step("Fingerprint", fp.String())
 	if n := len(fp.Components); n > 0 {
 		var names []string
@@ -156,13 +158,13 @@ func (p *Pretty) Request(l engine.RequestLog) {
 	p.clear()
 	status := fmt.Sprint(l.Status)
 	if l.Err != nil {
-		status = "ERR " + l.Err.Error()
+		status = "ERR " + SafeText(l.Err.Error()) // errors quote URLs and server replies
 	}
 	retry := ""
 	if l.Attempt > 1 {
 		retry = fmt.Sprintf(" (attempt %d)", l.Attempt)
 	}
-	line := fmt.Sprintf("%s %s %s %s%s", l.Method, status, l.URL, l.Duration.Round(time.Millisecond), retry)
+	line := fmt.Sprintf("%s %s %s %s%s", SafeText(l.Method), status, SafeText(l.URL), l.Duration.Round(time.Millisecond), retry)
 	if !p.o.Plain {
 		line = muted.Render("  → " + line)
 	}
@@ -172,6 +174,7 @@ func (p *Pretty) Request(l engine.RequestLog) {
 // Finding streams a line in plain mode; otherwise it only updates the
 // running tally, and Summary renders the grouped report.
 func (p *Pretty) Finding(f engine.Finding) {
+	f = sanitized(f)
 	p.tally[f.Severity]++
 	if !p.o.Plain {
 		return
@@ -291,6 +294,8 @@ func section(sev engine.Severity, n int) string {
 // Summary prints the grouped report (unless plain), the score panel and
 // totals. suppressed counts findings hidden by a baseline file.
 func (p *Pretty) Summary(res *engine.Result, target string, suppressed int) {
+	clean := sanitized(*res)
+	res, target = &clean, SafeText(target)
 	p.clear()
 	if !p.o.Plain {
 		p.report(res.Findings)

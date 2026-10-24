@@ -22,14 +22,14 @@ func writeMarkdown(w io.Writer, reports []Report, o WriteOptions) error {
 		if i > 0 {
 			b.WriteString("\n---\n\n")
 		}
-		fmt.Fprintf(&b, "# Tuner report: %s\n\n", r.Target)
+		fmt.Fprintf(&b, "# Tuner report: %s\n\n", MDText(r.Target))
 		fmt.Fprintf(&b, "**Tune score %d/100** · %s · %d checks · %d requests · rhythm-tuner %s\n\n",
-			r.Score, r.Fingerprint, r.Checks, r.Requests, r.Version)
+			r.Score, MDText(r.Fingerprint.String()), r.Checks, r.Requests, MDText(r.Version))
 
 		if len(r.Fingerprint.Components) > 0 {
 			b.WriteString("<details><summary>Plugins and themes</summary>\n\n| Type | Slug | Version | Source |\n|---|---|---|---|\n")
 			for _, c := range r.Fingerprint.Components {
-				fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", c.Type, c.Slug, or(c.Version, "unknown"), c.Source)
+				fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", MDText(c.Type), MDText(c.Slug), MDText(or(c.Version, "unknown")), MDText(c.Source))
 			}
 			b.WriteString("\n</details>\n\n")
 		}
@@ -40,49 +40,49 @@ func writeMarkdown(w io.Writer, reports []Report, o WriteOptions) error {
 		}
 		b.WriteString("| Severity | Finding | Path |\n|---|---|---|\n")
 		for _, f := range r.Findings {
-			fmt.Fprintf(&b, "| %s | %s | `%s` |\n", strings.ToUpper(string(f.Severity)), mdEscape(f.Title), f.Path)
+			fmt.Fprintf(&b, "| %s | %s | %s |\n", MDText(strings.ToUpper(string(f.Severity))), MDText(f.Title), MDCode(f.Path))
 		}
 		b.WriteString("\n## Details\n")
 		for _, f := range r.Findings {
-			fmt.Fprintf(&b, "\n### %s %s\n\n", sevEmoji(f.Severity), mdEscape(f.Title))
-			fmt.Fprintf(&b, "- **Check:** `%s` · **Severity:** %s · **Confidence:** %s\n", f.ID, f.Severity, f.Confidence)
+			fmt.Fprintf(&b, "\n### %s %s\n\n", sevEmoji(f.Severity), MDText(f.Title))
+			fmt.Fprintf(&b, "- **Check:** %s · **Severity:** %s · **Confidence:** %s\n", MDCode(f.ID), MDText(string(f.Severity)), MDText(f.Confidence))
 			if f.Confidence == "low" && f.Caveat != "" {
-				fmt.Fprintf(&b, "- **Why only likely:** %s\n", strings.TrimPrefix(f.Caveat, "likely: "))
+				fmt.Fprintf(&b, "- **Why only likely:** %s\n", MDText(strings.TrimPrefix(f.Caveat, "likely: ")))
 			}
 			if f.Evidence.Status != 0 {
-				fmt.Fprintf(&b, "- **Request:** `%s` → %d\n", f.Evidence.Request, f.Evidence.Status)
+				fmt.Fprintf(&b, "- **Request:** %s → %d\n", MDCode(f.Evidence.Request), f.Evidence.Status)
 			}
 			for _, m := range f.Evidence.Matched[:matchedLimit(f)] {
-				fmt.Fprintf(&b, "- **Evidence:** `%s`\n", strings.ReplaceAll(m, "`", "'"))
+				fmt.Fprintf(&b, "- **Evidence:** %s\n", MDCode(m))
 			}
 			for _, s := range f.Evidence.Secrets {
-				fmt.Fprintf(&b, "- **Secret (masked):** `%s`\n", s)
+				fmt.Fprintf(&b, "- **Secret (masked):** %s\n", MDCode(s.String()))
 			}
 			if f.Impact != "" {
-				fmt.Fprintf(&b, "\n%s\n", f.Impact)
+				fmt.Fprintf(&b, "\n%s\n", MDText(f.Impact))
 			}
 			if len(f.Advisories) > 0 {
 				b.WriteString("\n| Severity | CVE | Advisory | Fixed in |\n|---|---|---|---|\n")
 				for _, a := range f.Advisories {
 					cve := strings.Join(a.CVEs, ", ")
-					title := mdEscape(a.Title)
+					title := MDText(a.Title)
+					if len(a.References) > 0 {
+						title = SafeLink(a.Title, a.References[len(a.References)-1])
+					}
 					if a.KEV {
 						title += " ⚠️ actively exploited"
 					}
-					if len(a.References) > 0 {
-						title = "[" + title + "](" + a.References[len(a.References)-1] + ")"
-					}
-					fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", or(string(a.Severity), "unrated"), or(cve, "—"), title, or(a.FixedIn, "—"))
+					fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", MDText(or(string(a.Severity), "unrated")), MDText(or(cve, "—")), title, MDText(or(a.FixedIn, "—")))
 				}
 			}
 			if f.Source != "" {
-				fmt.Fprintf(&b, "\n_Data: %s_\n", f.Source)
+				fmt.Fprintf(&b, "\n_Data: %s_\n", MDText(f.Source))
 			}
 			if f.Fix != "" {
-				fmt.Fprintf(&b, "\n**Fix**\n\n```\n%s\n```\n", f.Fix)
+				fmt.Fprintf(&b, "\n**Fix**\n\n%s\n", mdFence(f.Fix))
 			}
 			for _, ref := range f.References {
-				fmt.Fprintf(&b, "\n- %s", ref)
+				fmt.Fprintf(&b, "\n- %s", SafeLink(ref, ref))
 			}
 			if len(f.References) > 0 {
 				b.WriteString("\n")
@@ -95,7 +95,7 @@ func writeMarkdown(w io.Writer, reports []Report, o WriteOptions) error {
 		}
 		b.WriteString("# Not scanned\n\n| Target | Error |\n|---|---|\n")
 		for _, f := range o.Failed {
-			fmt.Fprintf(&b, "| %s | %s |\n", mdEscape(f.Target), mdEscape(f.Error))
+			fmt.Fprintf(&b, "| %s | %s |\n", MDText(f.Target), MDText(f.Error))
 		}
 	}
 	_, err := io.WriteString(w, b.String())
@@ -115,8 +115,6 @@ func sevEmoji(s engine.Severity) string {
 	}
 	return "⚪"
 }
-
-func mdEscape(s string) string { return strings.NewReplacer("|", "\\|", "<", "&lt;").Replace(s) }
 
 func or(s, fallback string) string {
 	if s == "" {
