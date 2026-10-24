@@ -362,7 +362,7 @@ func TestDiscordEscapesURLLookalikes(t *testing.T) {
 }
 
 // review: an incomplete scan says so in every message, even with nothing
-// new to list, and the field is in the published schema.
+// new to list and the field is in the published schema.
 func TestIncompleteScan(t *testing.T) {
 	res := diff.Result{Incomplete: []string{"Incomplete: blocked by Cloudflare challenge"}}
 	m := Build(res, "last-week.json", engine.High, "1.2.3")

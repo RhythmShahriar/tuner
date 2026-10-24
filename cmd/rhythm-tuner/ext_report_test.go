@@ -206,7 +206,7 @@ func TestReportExtensionNotifyFirstRun(t *testing.T) {
 			t.Errorf("%v: %v %+v", args, err, msg)
 		}
 	}
-	// -q drops the first-run line, and --fail-on-new doesn't fail a first
+	// -q drops the first-run line and --fail-on-new doesn't fail a first
 	// run: with nothing to compare, every finding would count as new.
 	e, err := notifyPlanned(t, srv, "--since", missing, "--notify-all-first", "--fail-on-new", "low", "--notify", hookURL(srv))
 	if err != nil {
@@ -279,7 +279,7 @@ func TestReportExtensionNotifyPlanErrors(t *testing.T) {
 }
 
 // review: a scan that stopped early says so next to the diff, even with
-// -q, and lists what it didn't reach as not seen rather than fixed.
+// -q and lists what it didn't reach as not seen rather than fixed.
 func TestReportExtensionIncompleteScan(t *testing.T) {
 	old, _ := diffFixtures(t)
 	e, err := planned(t, "--since", old)
