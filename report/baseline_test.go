@@ -343,11 +343,23 @@ func TestBaselineErrorsAndZero(t *testing.T) {
 	}
 	path := filepath.Join(t.TempDir(), "bad.json")
 	_ = os.WriteFile(path, []byte("not json"), 0o600)
-	if _, err := LoadBaseline(path); err == nil || !strings.Contains(err.Error(), "is not a Tuner JSON report") {
+	if _, err := LoadBaseline(path); err == nil || !strings.Contains(err.Error(), "not a Tuner JSON report") {
 		t.Errorf("err = %v", err)
 	}
 	if _, err := LoadBaseline(filepath.Join(t.TempDir(), "missing.json")); err == nil {
 		t.Error("missing file loaded")
+	}
+	// JSON that isn't a Tuner report would hide nothing without a word.
+	for name, doc := range map[string]string{
+		"sarif":  `{"$schema":"https://json.schemastore.org/sarif-2.1.0.json","version":"2.1.0","runs":[]}`,
+		"object": `{}`,
+		"array":  `[]`,
+		"other":  `[{"schema":"other/v1","findings":[]}]`,
+	} {
+		_ = os.WriteFile(path, []byte(doc), 0o600)
+		if _, err := LoadBaseline(path); err == nil || !strings.HasPrefix(err.Error(), "not a Tuner JSON report") {
+			t.Errorf("%s: err = %v", name, err)
+		}
 	}
 }
 

@@ -8,6 +8,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -105,6 +107,26 @@ func TestMissingBaselineIsUsage(t *testing.T) {
 	code, _, errs := tuner(t, "scan", "example.com", "--baseline", "nope.json", "--no-config")
 	if code != exitUsage || errs != "rhythm tuner scan: --baseline nope.json: no such file\n" {
 		t.Errorf("exit %d, stderr %q", code, errs)
+	}
+}
+
+// A --baseline that isn't a Tuner JSON report, such as a SARIF file Tuner
+// wrote, is a usage error rather than a baseline that hides nothing.
+func TestNotReportBaselineIsUsage(t *testing.T) {
+	dir := t.TempDir()
+	for name, doc := range map[string]string{
+		"out.sarif": `{"$schema":"https://json.schemastore.org/sarif-2.1.0.json","version":"2.1.0","runs":[]}`,
+		"obj.json":  `{}`,
+		"arr.json":  `[]`,
+	} {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		code, _, errs := tuner(t, "scan", "example.com", "--baseline", path, "--no-config")
+		if code != exitUsage || !strings.HasPrefix(errs, "rhythm tuner scan: --baseline "+path+": not a Tuner JSON report") {
+			t.Errorf("%s: exit %d, stderr %q", name, code, errs)
+		}
 	}
 }
 

@@ -4,8 +4,10 @@
 package report
 
 import (
+	"bytes"
 	"cmp"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -57,6 +59,15 @@ func LoadBaseline(path string) (Baseline, error) {
 	if err != nil {
 		return Baseline{}, err
 	}
+	// The same check as --since: a SARIF file, {} or [] would otherwise
+	// load as a baseline that hides nothing.
+	reports, failed, err := ReadJSON(bytes.NewReader(data))
+	if err == nil && len(reports)+len(failed) == 0 {
+		err = errors.New("not a Tuner JSON report: no reports in it")
+	}
+	if err != nil {
+		return Baseline{}, err
+	}
 	type saved struct {
 		Target   string
 		Error    *string
@@ -66,7 +77,7 @@ func LoadBaseline(path string) (Baseline, error) {
 	if err := json.Unmarshal(data, &many); err != nil {
 		var one saved
 		if err := json.Unmarshal(data, &one); err != nil {
-			return Baseline{}, fmt.Errorf("%s is not a Tuner JSON report: %w", path, err)
+			return Baseline{}, fmt.Errorf("not a Tuner JSON report: %w", err)
 		}
 		many = append(many, one)
 	}
