@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -39,6 +40,7 @@ Flags:
                             (default: php on PATH)
       --clear               delete the cached check pack and vulnerability data
 
+` + wordfenceHelp + `
 Examples:
   rhythm tuner update --prefetch ./site
   rhythm tuner update --prefetch example.com staging.example.com
@@ -80,6 +82,7 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 
 	ua := fmt.Sprintf("rhythm-tuner/%s (+https://rythm.sh/tuner)", version)
 	c := vulnClient(ua, nil, false)
+	c.Wordfence = wordfenceClient(ua, nil, false)
 	pc := packClient(ua, nil, false, true)
 	if *clear {
 		for _, dir := range []string{pc.CacheDir, c.CacheDir} {
@@ -115,6 +118,9 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, "To cache it ahead of an --offline scan, run: rhythm tuner update --prefetch <dir|url>")
 	} else {
 		sources := []string{vulns.Source}
+		if c.Wordfence != nil {
+			sources = append(sources, c.Wordfence.Source())
+		}
 		if ok+failed > 0 {
 			fmt.Fprintf(stdout, "Refreshed %d vulnerability records%s\n", ok, keptNote(failed))
 		}
@@ -213,6 +219,9 @@ func checkPrefetchTarget(t string) error {
 func prefetchTargets(ctx context.Context, targets []string, php string, c *vulns.Client, packOK bool, ua string, stdout, stderr io.Writer) int {
 	oc := osvClient(ua, nil, false)
 	sources := []string{vulns.Source}
+	if c.Wordfence != nil {
+		sources = append(sources, c.Wordfence.Source())
+	}
 	ok := packOK
 	for _, t := range targets {
 		var res *engine.Result
@@ -253,7 +262,7 @@ func prefetchTargets(ctx context.Context, targets []string, php string, c *vulns
 			if r.Status() != vulns.StatusOK {
 				status = r.Status()
 			}
-			if len(sources) == 1 {
+			if !slices.Contains(sources, osv.Source) {
 				sources = append(sources, osv.Source)
 			}
 		}

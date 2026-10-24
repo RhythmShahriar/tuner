@@ -160,7 +160,7 @@ func (a *Advisor) vulnFinding(base *url.URL, l *lookup) (engine.Finding, bool) {
 		f.ID = "vuln-" + l.kind
 	}
 	f.Advisories = advisories
-	f.Source = Source
+	f.Source = a.source(affected)
 	if len(advisories) > 0 {
 		f.References = advisories[0].References
 	}

@@ -6,7 +6,9 @@
 //
 // Vulnerability data comes from WPVulnerability (wpvulnerability.com),
 // public domain under CC0 1.0, which aggregates CVE, Wordfence, WPScan and
-// Patchstack. Latest-release data comes from the wordpress.org API, and
+// Patchstack. With an API key, the Wordfence Intelligence feed is a second
+// source, merged by CVE (see Wordfence). Latest-release data comes from
+// the wordpress.org API, and
 // PHP's supported branches from php.net. Every
 // lookup is cached on disk and refreshed automatically once it is older
 // than the TTL; when the network is unavailable, stale data is used.
@@ -25,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -70,6 +73,9 @@ type Client struct {
 	VulnBase   string
 	WPOrgBase  string
 	PHPNetBase string
+	// Wordfence, when set, adds the Wordfence Intelligence feed as a
+	// second source for plugins, themes and core, merged by CVE.
+	Wordfence *Wordfence
 
 	lim     *ratelimit.Limiter
 	breaker ratelimit.Breaker
@@ -145,6 +151,7 @@ type Vuln struct {
 	Unfixed     bool     `json:"unfixed,omitempty"`
 	References  []string `json:"references,omitempty"`
 	Published   string   `json:"published,omitempty"`
+	Sources     []string `json:"sources,omitempty"` // SourceWPVulnerability, SourceWordfence; set when merged
 }
 
 // Valid reports whether r holds a usable record; a cache entry without
@@ -184,6 +191,41 @@ func (c *Client) Advisories(ctx context.Context, kind, key string) (rec *Record,
 }
 
 func (c *Client) advisories(ctx context.Context, kind, key string) (*Record, cache.Info, error) {
+	rec, info, err := c.wpvulnerability(ctx, kind, key)
+	if c.Wordfence == nil || kind != "plugin" && kind != "theme" && kind != "core" {
+		return rec, info, err
+	}
+	slug := key
+	if kind == "core" {
+		slug = "wordpress" // core is looked up by version, the feed lists it by slug
+	}
+	wf, winfo, werr := c.Wordfence.Advisories(ctx, kind, slug)
+	if werr != nil {
+		return rec, info, err // the advisor warns once about the feed
+	}
+	if kind == "core" {
+		// WPVulnerability answers for one version; match the feed's ranges to it.
+		wf = slices.DeleteFunc(slices.Clone(wf), func(v Vuln) bool { return !v.Affects(key) })
+	}
+	if err != nil || rec == nil {
+		// WPVulnerability failed: the feed alone still checks known
+		// vulnerabilities, which is why it's there.
+		return merge(&Record{Vulns: []Vuln{}}, wf), winfo, nil
+	}
+	return merge(rec, wf), joinInfo(info, winfo), nil
+}
+
+// joinInfo describes data built from two lookups: stale if either was,
+// fetched when the older stale one was.
+func joinInfo(a, b cache.Info) cache.Info {
+	switch {
+	case a.Stale && b.Stale && b.Fetched.Before(a.Fetched), !a.Stale && b.Stale:
+		return b
+	}
+	return a
+}
+
+func (c *Client) wpvulnerability(ctx context.Context, kind, key string) (*Record, cache.Info, error) {
 	c.init()
 	return cache.Load(c.store, ctx, "wpvulnerability/"+kind, key, func(ctx context.Context) (*Record, error) {
 		var raw rawResponse
@@ -248,15 +290,25 @@ func (c *Client) latest(ctx context.Context, kind, slug string) (*Release, cache
 	})
 }
 
-// Refresh re-fetches every cached record, ignoring the TTL. It returns how
-// many were refreshed and how many failed.
+// Refresh re-fetches every cached record, and the Wordfence feed when one
+// is set, ignoring the TTL. It returns how many were refreshed and how
+// many failed.
 func (c *Client) Refresh(ctx context.Context) (ok, failed int, err error) {
 	c.init()
 	if c.CacheDir == "" {
 		return 0, 0, errors.New("no cache directory")
 	}
+	// The feed is fetched whole, so it needs no earlier scan to refresh.
+	if w := c.Wordfence; w != nil {
+		fw := &Wordfence{HTTP: w.HTTP, UserAgent: w.UserAgent, Key: w.Key, Base: w.Base, CacheDir: w.CacheDir, TTL: w.TTL, Timeout: w.Timeout, Force: true}
+		if _, _, werr := fw.index(ctx); werr != nil {
+			failed++
+		} else {
+			ok++
+		}
+	}
 	if _, err := os.Stat(c.CacheDir); err != nil {
-		return 0, 0, err
+		return ok, failed, err
 	}
 	force := &Client{
 		HTTP: c.HTTP, UserAgent: c.UserAgent, CacheDir: c.CacheDir, TTL: c.TTL,
@@ -273,7 +325,7 @@ func (c *Client) Refresh(ctx context.Context) (ok, failed int, err error) {
 		case kind == "php.net/releases":
 			_, _, ferr = force.PHPBranches(ctx)
 		default:
-			return nil // osv/ and anything else belongs to other clients
+			return nil // osv/, wordfence/ and anything else belong to other clients
 		}
 		if ferr != nil {
 			failed++

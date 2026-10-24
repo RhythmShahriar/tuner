@@ -196,12 +196,13 @@ func (a *Advisor) AdviseStatus(ctx context.Context, base *url.URL, fp fingerprin
 
 	var findings []engine.Finding
 	var looked, failed, stale, old int
-	var offline bool
+	var offline, wfAsked bool
 	var firstErr string
 	var oldest time.Time
 	for i, p := range kinds {
 		for _, l := range perPart[i] {
 			looked += l.looked
+			wfAsked = wfAsked || l.kind == "core" || l.kind == "plugin" || l.kind == "theme"
 			for _, f := range l.failures {
 				failed++
 				if errors.Is(f.err, ErrOldCache) {
@@ -237,6 +238,11 @@ func (a *Advisor) AdviseStatus(ctx context.Context, base *url.URL, fp fingerprin
 	}
 	if stale > 0 && !unreachable {
 		warnings = append(warnings, fmt.Sprintf("used cached vulnerability data older than %s for %d components", a.Client.TTL, stale))
+	}
+	if w := a.Client.Wordfence; w != nil && wfAsked {
+		if err := w.Err(); err != nil {
+			warnings = append(warnings, wordfenceWarning(err))
+		}
 	}
 	return findings, warnings, DataStatus(looked, failed, stale)
 }
