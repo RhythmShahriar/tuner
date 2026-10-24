@@ -15,8 +15,10 @@ import (
 const wordfenceHelp = `With TUNER_WORDFENCE_KEY set to a free Wordfence Intelligence API key,
 plugins, themes and core are also matched against the Wordfence
 Intelligence feed (Copyright Defiant Inc.), merged with WPVulnerability by
-CVE. The feed is cached with the other data and refreshed daily;
-TUNER_WORDFENCE_API points Tuner at a mirror.
+CVE. The feed is cached with the other data. rhythm tuner update
+refreshes it; a scan downloads it (which can take a few minutes) only
+when no copy under a week old is cached. TUNER_WORDFENCE_API points
+Tuner at a mirror.
 `
 
 // wordfenceClient builds the Wordfence Intelligence client when

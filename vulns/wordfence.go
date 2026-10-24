@@ -24,6 +24,11 @@ const (
 	DefaultWordfenceBase = "https://www.wordfence.com/api/intelligence/v3"
 	// WordfenceTimeout bounds one download of the feed, which is large.
 	WordfenceTimeout = 3 * time.Minute
+	// WordfenceTTL is how old a cached feed a scan uses before it
+	// downloads a new one. The download can take minutes, so it is left
+	// to rhythm tuner update (which always refreshes) rather than the
+	// first scan of each day.
+	WordfenceTTL = 7 * 24 * time.Hour
 
 	// Wordfence's terms let anyone reuse a record if they link to it and
 	// reproduce Defiant's copyright notice and license. Findings link to
@@ -43,7 +48,8 @@ const wordfenceFormat = 1
 // Wordfence is the optional second vulnerability source: the Wordfence
 // Intelligence production feed, which needs a free API key. It downloads
 // the whole feed, keeps an index by type and slug on disk and refreshes it
-// once a day. The key is only ever sent in the Authorization header and is
+// when it is over WordfenceTTL old or on rhythm tuner update. Each process
+// loads the whole index from disk once, on its first lookup. The key is only ever sent in the Authorization header and is
 // never part of an error or warning.
 type Wordfence struct {
 	HTTP      *http.Client
@@ -51,7 +57,7 @@ type Wordfence struct {
 	Key       string        // API key; required
 	Base      string        // "" means DefaultWordfenceBase
 	CacheDir  string        // "" disables the disk cache
-	TTL       time.Duration // 0 means DefaultTTL
+	TTL       time.Duration // 0 means WordfenceTTL
 	Offline   bool          // never fetch; use the cached index however old
 	Force     bool          // always fetch, ignoring the TTL (rhythm tuner update)
 	Timeout   time.Duration // one feed download; 0 means WordfenceTimeout
@@ -86,7 +92,7 @@ func (w *Wordfence) init() {
 			w.Base = DefaultWordfenceBase
 		}
 		if w.TTL <= 0 {
-			w.TTL = DefaultTTL
+			w.TTL = WordfenceTTL
 		}
 		if w.Timeout <= 0 {
 			w.Timeout = WordfenceTimeout

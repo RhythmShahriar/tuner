@@ -15,6 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/RhythmShahriar/tuner/fingerprint"
 	"github.com/RhythmShahriar/tuner/vulns/cache"
@@ -253,5 +254,35 @@ func TestIndexWordfenceRanges(t *testing.T) {
 	}
 	if _, err := indexWordfence(strings.NewReader(`{"a":{"id":"a"`)); err == nil {
 		t.Error("a truncated feed parsed")
+	}
+}
+
+// TestWordfenceWeeklyInScans checks that a scan reuses a feed up to a
+// week old rather than wait on a download, and fetches an older one.
+func TestWordfenceWeeklyInScans(t *testing.T) {
+	wf := newFakeWordfence(t)
+	dir := t.TempDir()
+	ctx := context.Background()
+	if _, _, err := wf.client(dir, testKey).Advisories(ctx, "plugin", "akismet"); err != nil || wf.hits.Load() != 1 {
+		t.Fatalf("cold: %v, %d requests", err, wf.hits.Load())
+	}
+	age := func(d time.Duration) {
+		path := filepath.Join(dir, "wordfence", "production.json")
+		var e cache.Entry[*wordfenceIndex]
+		if err := cache.ReadJSON(path, &e); err != nil {
+			t.Fatal(err)
+		}
+		e.Fetched = time.Now().Add(-d)
+		if err := cache.WriteJSON(path, e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	age(6 * 24 * time.Hour)
+	if _, info, err := wf.client(dir, testKey).Advisories(ctx, "plugin", "akismet"); err != nil || info.Stale || wf.hits.Load() != 1 {
+		t.Errorf("6 days old: %v stale %v, %d requests", err, info.Stale, wf.hits.Load())
+	}
+	age(8 * 24 * time.Hour)
+	if _, info, err := wf.client(dir, testKey).Advisories(ctx, "plugin", "akismet"); err != nil || info.Stale || wf.hits.Load() != 2 {
+		t.Errorf("8 days old: %v stale %v, %d requests", err, info.Stale, wf.hits.Load())
 	}
 }
