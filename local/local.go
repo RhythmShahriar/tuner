@@ -73,6 +73,11 @@ type Options struct {
 	// client without a disk cache.
 	Checksums *Checksums
 
+	// SkipDirs are folders under the root the walk leaves out: nested
+	// installs that --discover scans on their own, so their findings
+	// aren't reported twice. Absolute, or relative to the root.
+	SkipDirs []string
+
 	// Rules holds local rule files (*.yaml at its root, see Rule) to use
 	// instead of the built-in ones, such as a check pack's newer copies.
 	// nil uses the rules built into Tuner.

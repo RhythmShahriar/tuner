@@ -29,7 +29,7 @@ func TestLocalExtensionIntegrity(t *testing.T) {
 	}
 	var o local.Options
 	proxy, _ := url.Parse("http://127.0.0.1:20182")
-	e.configure(&o, "tuner-test", proxy, true)
+	e.configure(&o, "/srv/site", "tuner-test", proxy, true)
 	c := o.Checksums
 	if !o.Integrity || c == nil {
 		t.Fatalf("options %+v", o)
@@ -46,8 +46,8 @@ func TestLocalExtensionIntegrity(t *testing.T) {
 
 	// Off by default: the options stay as they were.
 	var off local.Options
-	(&localExtension{}).configure(&off, "ua", nil, false)
-	if off.Integrity || off.Checksums != nil {
+	(&localExtension{}).configure(&off, "/srv/site", "ua", nil, false)
+	if off.Integrity || off.Checksums != nil || off.SkipDirs != nil {
 		t.Errorf("options %+v", off)
 	}
 }
@@ -83,6 +83,18 @@ func TestLocalExtensionDiscover(t *testing.T) {
 	}
 	if w.String() != "found 3 installs under "+root+"\n" {
 		t.Errorf("message %q", w.String())
+	}
+	// The blog is its own target, so a's walk skips it.
+	for target, skip := range map[string][]string{
+		filepath.Join(root, "a"):         {filepath.Join(root, "a", "blog")},
+		filepath.Join(root, "a", "blog"): nil,
+		filepath.Join(root, "b"):         nil,
+	} {
+		var o local.Options
+		e.configure(&o, target, "ua", nil, false)
+		if !slices.Equal(o.SkipDirs, skip) {
+			t.Errorf("%s skips %q, want %q", target, o.SkipDirs, skip)
+		}
 	}
 
 	w.Reset()

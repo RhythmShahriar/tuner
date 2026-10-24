@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/RhythmShahriar/tuner/local"
@@ -24,6 +26,9 @@ import (
 type localExtension struct {
 	integrity bool
 	discover  bool
+	// nested holds, per discovered install, the installs found inside
+	// it. Each is scanned on its own, so the parent's walk skips them.
+	nested map[string][]string
 }
 
 // Help is the section printed under scan help.
@@ -56,6 +61,7 @@ func (e *localExtension) expand(targets []string, w io.Writer) ([]string, error)
 	}
 	var out []string
 	folders := 0
+	e.nested = nil
 	for _, t := range targets {
 		if !isLocalPath(t) {
 			out = append(out, t)
@@ -79,6 +85,14 @@ func (e *localExtension) expand(targets []string, w io.Writer) ([]string, error)
 		}
 		for _, in := range d.Installs {
 			out = append(out, in.Path)
+			for _, inner := range d.Installs {
+				if strings.HasPrefix(inner.Path, in.Path+string(filepath.Separator)) && !slices.Contains(e.nested[in.Path], inner.Path) {
+					if e.nested == nil {
+						e.nested = map[string][]string{}
+					}
+					e.nested[in.Path] = append(e.nested[in.Path], inner.Path)
+				}
+			}
 		}
 	}
 	if folders == 0 {
@@ -87,8 +101,9 @@ func (e *localExtension) expand(targets []string, w io.Writer) ([]string, error)
 	return dedupe(out), nil
 }
 
-// configure applies the flags to a local scan's options.
-func (e *localExtension) configure(o *local.Options, ua string, proxy *url.URL, offline bool) {
+// configure applies the flags to the options of a local scan of target.
+func (e *localExtension) configure(o *local.Options, target, ua string, proxy *url.URL, offline bool) {
+	o.SkipDirs = append(o.SkipDirs, e.nested[target]...)
 	if !e.integrity {
 		return
 	}

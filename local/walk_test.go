@@ -161,3 +161,34 @@ func BenchmarkScan(b *testing.B) {
 		}
 	}
 }
+
+func TestWalkSkipDirs(t *testing.T) {
+	// A WordPress in /blog that --discover scans on its own: the parent's
+	// walk leaves it out, so its findings aren't reported twice.
+	root := tree(t, map[string]string{
+		"shell.php":      "<?php eval(base64_decode($x));",
+		"blog/shell.php": "<?php eval(base64_decode($x));",
+		"blog/dump.sql":  "INSERT",
+	})
+	paths := func(res *engine.Result) []string {
+		var out []string
+		for _, f := range res.Findings {
+			out = append(out, f.ID+" "+f.Path)
+		}
+		return out
+	}
+	all := paths(scanTree(t, root, Options{Exec: noPHP}))
+	if len(all) != 3 {
+		t.Fatalf("without SkipDirs: %v", all)
+	}
+	for _, skip := range []string{filepath.Join(root, "blog"), "blog"} {
+		got := paths(scanTree(t, root, Options{Exec: noPHP, SkipDirs: []string{skip}}))
+		if strings.Join(got, ",") != "local-malware-eval-base64 /shell.php" {
+			t.Errorf("SkipDirs %q: %v", skip, got)
+		}
+	}
+	// The root itself is never skipped.
+	if got := paths(scanTree(t, root, Options{Exec: noPHP, SkipDirs: []string{root}})); len(got) != 3 {
+		t.Errorf("root skipped: %v", got)
+	}
+}

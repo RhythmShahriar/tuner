@@ -85,8 +85,8 @@ type visitor interface {
 }
 
 // walkTree walks the project root once for every visitor. It stops at
-// MaxEntries entries, warns once about unreadable entries and skips
-// FIFOs, sockets and devices with a warning.
+// MaxEntries entries, warns once about unreadable entries, skips
+// FIFOs, sockets and devices with a warning and leaves out SkipDirs.
 func (s *scan) walkTree(ctx context.Context, vs ...visitor) {
 	for _, v := range vs {
 		if fi, err := os.Stat(v.root()); err == nil && fi.IsDir() {
@@ -123,6 +123,13 @@ func (s *scan) walkTree(ctx context.Context, vs ...visitor) {
 			return strings.HasPrefix(v.root(), dir+string(filepath.Separator))
 		})
 	}
+	skip := map[string]bool{}
+	for _, d := range s.opts.SkipDirs {
+		if !filepath.IsAbs(d) {
+			d = filepath.Join(s.root, d)
+		}
+		skip[filepath.Clean(d)] = true
+	}
 	entries := 0
 	var unreadable []string
 	err := filepath.WalkDir(s.root, func(p string, d fs.DirEntry, err error) error {
@@ -143,6 +150,9 @@ func (s *scan) walkTree(ctx context.Context, vs ...visitor) {
 		e := entry{path: p, name: d.Name(), typ: d.Type()}
 		parent := active[filepath.Dir(p)]
 		if d.IsDir() {
+			if skip[p] && p != s.root {
+				return fs.SkipDir
+			}
 			var mask uint64
 			for i, v := range vs {
 				if p == v.root() || (parent&(1<<i) != 0 && v.enter(&e)) {
