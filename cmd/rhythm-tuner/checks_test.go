@@ -144,6 +144,37 @@ func TestChecksExportNuclei(t *testing.T) {
 	}
 }
 
+// Export replaces a symlink in the target folder instead of writing
+// through it, and counts a single skipped check as one.
+func TestChecksExportSymlink(t *testing.T) {
+	dir := t.TempDir()
+	victim := filepath.Join(t.TempDir(), "victim")
+	if err := os.WriteFile(victim, []byte("keep\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"tuner-leak-dotenv.yaml", "README.md"} {
+		if err := os.Symlink(victim, filepath.Join(dir, name)); err != nil {
+			t.Skip("no symlinks:", err)
+		}
+	}
+	code, out, errOut := checksCmd("export", "--nuclei", dir, "--no-check-updates", "--id", "leak-dotenv,tls-cert-expired")
+	if code != exitOK || !strings.HasPrefix(out, "Wrote 1 Nuclei template and README.md") || !strings.Contains(out, "Skipped 1 check a template can't express:") {
+		t.Fatalf("exit %d %s:\n%s", code, errOut, out)
+	}
+	if data, _ := os.ReadFile(victim); string(data) != "keep\n" {
+		t.Errorf("export wrote through a symlink: %q", data)
+	}
+	for _, name := range []string{"tuner-leak-dotenv.yaml", "README.md"} {
+		fi, err := os.Lstat(filepath.Join(dir, name))
+		if err != nil || !fi.Mode().IsRegular() || fi.Mode().Perm() != 0o644 {
+			t.Errorf("%s: %v %v", name, fi, err)
+		}
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, ".tuner-export-*")); len(left) > 0 {
+		t.Errorf("temporary files left: %v", left)
+	}
+}
+
 // A check ID with path separators never names a file outside --nuclei.
 func TestChecksExportUnsafeID(t *testing.T) {
 	root := t.TempDir()

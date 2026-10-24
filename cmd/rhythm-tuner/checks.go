@@ -464,7 +464,7 @@ func checksExport(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "rhythm tuner: checks export: refusing to write %q outside %s\n", name, out)
 			return exitError
 		}
-		if err := os.WriteFile(filepath.Join(out, name), data, 0o644); err != nil { //nolint:gosec // as for MkdirAll
+		if err := replaceFile(filepath.Join(out, name), data); err != nil {
 			fmt.Fprintln(stderr, "rhythm tuner:", err)
 			return exitError
 		}
@@ -476,7 +476,7 @@ func checksExport(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "Wrote %d Nuclei %s and README.md to %s.\n", written, noun, out)
 	if len(skipped) > 0 {
-		fmt.Fprintf(stdout, "Skipped %d checks a template can't express:\n", len(skipped))
+		fmt.Fprintf(stdout, "Skipped %s a template can't express:\n", plural(len(skipped), "check"))
 		tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
 		for _, t := range skipped {
 			fmt.Fprintf(tw, "  %s\t%s\n", t.DisplayID(), t.Skipped)
@@ -489,6 +489,31 @@ func checksExport(args []string, stdout, stderr io.Writer) int {
 	return exitOK
 }
 
+// replaceFile writes data to path through a temporary file and a rename,
+// so a symlink already at path is replaced rather than followed: export
+// must not overwrite whatever file a link in the target folder points to.
+func replaceFile(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".tuner-export-*")
+	if err != nil {
+		return err
+	}
+	_, err = tmp.Write(data)
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		// CreateTemp makes the file 0600; templates are meant to be shared.
+		err = os.Chmod(tmp.Name(), 0o644) //nolint:gosec // as for MkdirAll
+	}
+	if err == nil {
+		err = os.Rename(tmp.Name(), path)
+	}
+	if err != nil {
+		_ = os.Remove(tmp.Name())
+	}
+	return err
+}
+
 const checksExportUsage = `Usage:
   rhythm tuner checks export --nuclei <dir> [flags]
 
@@ -496,7 +521,9 @@ Writes the checks a scan would use as Nuclei templates, tuner-<id>.yaml in
 dir (created if needed), plus README.md with how they differ from Tuner
 and the MIT license they ship under. Existing files with those names are
 replaced. Checks that need TLS, scheme or cookie conditions, or only the
-soft-404 comparison, are listed and left out.
+soft-404 comparison, are listed and left out. Like a scan, it first
+refreshes the check pack when the cached one is a day old (waiting at most
+10 seconds, through HTTPS_PROXY if set); --offline skips that.
 
 Flags:
       --nuclei <dir>       write Nuclei templates to dir
