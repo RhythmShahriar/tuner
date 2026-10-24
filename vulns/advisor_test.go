@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -84,6 +85,10 @@ func newFakeAPI(t *testing.T, routes ...map[string]string) *fakeAPI {
 			return
 		}
 		if body, ok := f.routes[r.URL.Path]; ok {
+			if code, err := strconv.Atoi(strings.TrimPrefix(body, "!")); err == nil && body[0] == '!' {
+				http.Error(w, "fail", code) // "!500" answers with that status
+				return
+			}
 			w.Write([]byte(body))
 			return
 		}

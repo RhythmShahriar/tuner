@@ -5,11 +5,13 @@ package local
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,6 +21,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/RhythmShahriar/tuner/vulns"
 )
 
 const (
@@ -76,10 +80,7 @@ type OSVVuln struct {
 
 var errOffline = errors.New("offline and not cached")
 
-// Query returns the known vulnerabilities for each package that has any,
-// and how many packages couldn't be checked (the first error explains
-// why).
-func (o *OSV) Query(ctx context.Context, pkgs []Package) (map[Package][]OSVVuln, int, error) {
+func (o *OSV) init() {
 	o.once.Do(func() {
 		if o.HTTP == nil {
 			o.HTTP = &http.Client{Timeout: 20 * time.Second}
@@ -91,16 +92,46 @@ func (o *OSV) Query(ctx context.Context, pkgs []Package) (map[Package][]OSVVuln,
 			o.TTL = 24 * time.Hour
 		}
 	})
+}
+
+// OSVResult is what one Check found.
+type OSVResult struct {
+	Vulns  map[Package][]OSVVuln // known vulnerabilities, for packages that have any
+	Total  int                   // packages looked up
+	Failed int                   // packages that couldn't be checked
+	Stale  int                   // packages answered from a cache past its TTL
+	Err    error                 // the first error, explaining Failed
+}
+
+// Status is the vulnerability data status, one of vulns.StatusOK,
+// StatusPartial or StatusMissing.
+func (r OSVResult) Status() string { return vulns.DataStatus(r.Total, r.Failed, r.Stale) }
+
+// Query returns the known vulnerabilities for each package that has any,
+// and how many packages couldn't be checked (the first error explains
+// why).
+func (o *OSV) Query(ctx context.Context, pkgs []Package) (map[Package][]OSVVuln, int, error) {
+	r := o.Check(ctx, pkgs)
+	return r.Vulns, r.Failed, r.Err
+}
+
+// Check looks pkgs up like Query and also says how complete the answer is.
+func (o *OSV) Check(ctx context.Context, pkgs []Package) OSVResult {
+	o.init()
 
 	// Vulnerability IDs per package: cache first, then one batch query.
 	ids := make(map[Package][]string, len(pkgs))
 	stale := map[Package][]string{}
+	staleUsed := map[Package]bool{}
 	var missing []Package
 	for _, p := range pkgs {
 		var e cached[[]string]
-		ok := readCache(o.path("packagist", p.Name+"@"+p.Version), &e)
+		ok := readCache(o.path("packagist", packageKey(p)), &e)
 		switch {
-		case ok && (o.Offline || time.Since(e.Fetched) < o.TTL):
+		case ok && o.Offline:
+			ids[p] = e.Data
+			staleUsed[p] = time.Since(e.Fetched) > o.TTL
+		case ok && time.Since(e.Fetched) < o.TTL:
 			ids[p] = e.Data
 		case ok:
 			stale[p] = e.Data
@@ -109,29 +140,31 @@ func (o *OSV) Query(ctx context.Context, pkgs []Package) (map[Package][]OSVVuln,
 			missing = append(missing, p)
 		}
 	}
-	failed := 0
-	var firstErr error
+	res := OSVResult{Vulns: map[Package][]OSVVuln{}, Total: len(pkgs)}
+	failedPkg := map[Package]bool{}
 	if len(missing) > 0 {
 		got, err := o.batch(ctx, missing)
 		for _, p := range missing {
 			switch v, ok := got[p]; {
 			case ok:
 				ids[p] = v
-				writeCache(o.path("packagist", p.Name+"@"+p.Version), newCached(v))
+				writeCache(o.path("packagist", packageKey(p)), newCached(packageKey(p), v))
 			case stale[p] != nil:
 				ids[p] = stale[p]
+				staleUsed[p] = true
 			default:
-				failed++
+				failedPkg[p] = true
 			}
 		}
 		if err != nil {
-			firstErr = err
+			res.Err = err
 		}
 	}
 
 	// Details per vulnerability, a few at a time.
 	var mu sync.Mutex
 	details := map[string]*OSVVuln{}
+	staleIDs := map[string]bool{}
 	sem := make(chan struct{}, 4)
 	var wg sync.WaitGroup
 	for _, list := range ids {
@@ -146,33 +179,135 @@ func (o *OSV) Query(ctx context.Context, pkgs []Package) (map[Package][]OSVVuln,
 			wg.Go(func() {
 				sem <- struct{}{}
 				defer func() { <-sem }()
-				v, err := o.vuln(ctx, id)
+				v, wasStale, err := o.vuln(ctx, id, false)
 				mu.Lock()
 				defer mu.Unlock()
 				details[id] = v
-				if err != nil && firstErr == nil {
-					firstErr = err
+				staleIDs[id] = wasStale
+				if err != nil && res.Err == nil {
+					res.Err = err
 				}
 			})
 		}
 	}
 	wg.Wait()
 
-	out := map[Package][]OSVVuln{}
 	for p, list := range ids {
-		incomplete := false
 		for _, id := range list {
 			if v := details[id]; v != nil {
-				out[p] = append(out[p], *v)
+				res.Vulns[p] = append(res.Vulns[p], *v)
+				staleUsed[p] = staleUsed[p] || staleIDs[id]
 			} else {
-				incomplete = true
+				failedPkg[p] = true // incomplete
 			}
 		}
-		if incomplete {
-			failed++
+	}
+	res.Failed = len(failedPkg)
+	for p, s := range staleUsed {
+		if s && !failedPkg[p] {
+			res.Stale++
 		}
 	}
-	return out, failed, firstErr
+	return res
+}
+
+// Refresh re-fetches every cached package and the details of every
+// vulnerability they list, ignoring the TTL (rhythm-tuner update). It
+// returns how many records were refreshed and how many failed; failed
+// ones keep their cached copy.
+func (o *OSV) Refresh(ctx context.Context) (ok, failed int, err error) {
+	o.init()
+	if o.CacheDir == "" {
+		return 0, 0, errors.New("no cache directory")
+	}
+	if o.Offline {
+		return 0, 0, errOffline
+	}
+	var pkgs []Package
+	seen := map[Package]bool{}
+	ids := map[string]bool{}
+	walk := func(kind string, each func(key string, raw []byte)) error {
+		dir := filepath.Join(o.CacheDir, kind)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		for _, d := range entries {
+			if d.IsDir() || filepath.Ext(d.Name()) != ".json" {
+				continue
+			}
+			raw, _ := os.ReadFile(filepath.Join(dir, d.Name())) //nolint:gosec // inside the cache dir
+			var e struct {
+				Key string `json:"key"`
+			}
+			_ = json.Unmarshal(raw, &e)
+			each(cmp.Or(e.Key, strings.TrimSuffix(d.Name(), ".json")), raw)
+		}
+		return nil
+	}
+	err = walk("packagist", func(key string, _ []byte) {
+		if p, ok := parsePackageKey(key); ok && !seen[p] {
+			seen[p] = true
+			pkgs = append(pkgs, p)
+		}
+	})
+	if err != nil {
+		return 0, 0, err
+	}
+	if err := walk("vulns", func(key string, _ []byte) { ids[key] = true }); err != nil {
+		return 0, 0, err
+	}
+
+	if len(pkgs) > 0 {
+		got, berr := o.batch(ctx, pkgs)
+		for _, p := range pkgs {
+			v, answered := got[p]
+			if !answered {
+				failed++
+				continue
+			}
+			ok++
+			writeCache(o.path("packagist", packageKey(p)), newCached(packageKey(p), v))
+			for _, id := range v {
+				ids[id] = true
+			}
+		}
+		if berr != nil && ctx.Err() != nil {
+			return ok, failed, ctx.Err()
+		}
+	}
+	for id := range ids {
+		if _, _, verr := o.vuln(ctx, id, true); verr != nil {
+			failed++
+		} else {
+			ok++
+		}
+		if ctx.Err() != nil {
+			return ok, failed, ctx.Err()
+		}
+	}
+	return ok, failed, nil
+}
+
+// packageKey is how a package is named in the cache.
+func packageKey(p Package) string { return p.Name + "@" + p.Version }
+
+// parsePackageKey reverses packageKey. It also takes the file name of an
+// entry from before keys were stored, where "/" became "_": Composer
+// names are vendor/package, so the first "_" is the best guess.
+func parsePackageKey(key string) (Package, bool) {
+	i := strings.LastIndex(key, "@")
+	if i <= 0 || i == len(key)-1 {
+		return Package{}, false
+	}
+	name := key[:i]
+	if !strings.Contains(name, "/") {
+		name = strings.Replace(name, "_", "/", 1)
+	}
+	return Package{Name: name, Version: key[i+1:]}, true
 }
 
 // batch asks OSV which vulnerability IDs affect each package.
@@ -222,26 +357,29 @@ func (o *OSV) batch(ctx context.Context, pkgs []Package) (map[Package][]string, 
 	return out, nil
 }
 
-// vuln returns one vulnerability's details.
-func (o *OSV) vuln(ctx context.Context, id string) (*OSVVuln, error) {
+// vuln returns one vulnerability's details, and whether they came from
+// a cache past its TTL. force ignores the TTL and reports a failed fetch
+// instead of falling back to the cached copy.
+func (o *OSV) vuln(ctx context.Context, id string, force bool) (*OSVVuln, bool, error) {
 	path := o.path("vulns", id)
 	var e cached[*OSVVuln]
 	ok := readCache(path, &e)
-	if ok && (o.Offline || time.Since(e.Fetched) < o.TTL) {
-		return e.Data, nil
+	stale := ok && time.Since(e.Fetched) > o.TTL
+	if ok && !force && (o.Offline || !stale) {
+		return e.Data, stale, nil
 	}
 	if o.Offline {
-		return nil, errOffline
+		return nil, false, errOffline
 	}
 	var v OSVVuln
 	if err := o.do(ctx, http.MethodGet, o.Base+"/v1/vulns/"+url.PathEscape(id), nil, &v); err != nil {
-		if ok {
-			return e.Data, nil // stale beats nothing
+		if ok && !force {
+			return e.Data, true, nil // stale beats nothing
 		}
-		return nil, err
+		return nil, false, err
 	}
-	writeCache(path, newCached(&v))
-	return &v, nil
+	writeCache(path, newCached(id, &v))
+	return &v, false, nil
 }
 
 func (o *OSV) do(ctx context.Context, method, u string, body, v any) error {
@@ -288,13 +426,14 @@ const osvCacheFormat = 1
 
 type cached[T any] struct {
 	Format  int       `json:"format"`
+	Key     string    `json:"key,omitempty"` // what was looked up, for Refresh
 	Fetched time.Time `json:"fetched"`
 	Data    T         `json:"data"`
 }
 
-// newCached wraps data fetched now.
-func newCached[T any](data T) cached[T] {
-	return cached[T]{Format: osvCacheFormat, Fetched: time.Now().UTC(), Data: data}
+// newCached wraps data fetched now for key.
+func newCached[T any](key string, data T) cached[T] {
+	return cached[T]{Format: osvCacheFormat, Key: key, Fetched: time.Now().UTC(), Data: data}
 }
 
 // usable reports whether e can be served: the current format, a fetch

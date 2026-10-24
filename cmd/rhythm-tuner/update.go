@@ -10,8 +10,10 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 
 	"github.com/RhythmShahriar/tuner/checkpack"
+	"github.com/RhythmShahriar/tuner/local"
 	"github.com/RhythmShahriar/tuner/vulns"
 )
 
@@ -46,19 +48,39 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "rhythm tuner:", err)
 		return exitError
 	}
-	if ok+failed == 0 {
+	// Composer advisories from OSV.dev, cached under the same folder.
+	osv := osvClient(ua, nil, false)
+	osvOK, osvFailed, err := osv.Refresh(ctx)
+	if err != nil {
+		fmt.Fprintln(stderr, "rhythm tuner:", err)
+		return exitError
+	}
+	if ok+failed+osvOK+osvFailed == 0 {
 		fmt.Fprintln(stdout, "Nothing cached yet. Vulnerability data is fetched during scans and refreshed daily.")
 	} else {
-		fmt.Fprintf(stdout, "Refreshed %d vulnerability records", ok)
-		if failed > 0 {
-			fmt.Fprintf(stdout, " (%d failed; cached copies kept)", failed)
+		sources := []string{vulns.Source}
+		if ok+failed > 0 {
+			fmt.Fprintf(stdout, "Refreshed %d vulnerability records%s\n", ok, keptNote(failed))
 		}
-		fmt.Fprintf(stdout, "\nData: %s\nCache: %s\n", vulns.Source, c.CacheDir)
+		if osvOK+osvFailed > 0 {
+			fmt.Fprintf(stdout, "Refreshed %d Composer advisory records%s\n", osvOK, keptNote(osvFailed))
+			sources = append(sources, local.OSVSource)
+		}
+		fmt.Fprintf(stdout, "Data: %s\nCache: %s\n", strings.Join(sources, "; "), c.CacheDir)
 	}
+	failed += osvFailed
 	if failed > 0 || !packOK {
 		return exitError
 	}
 	return exitOK
+}
+
+// keptNote says how many records failed to refresh, if any.
+func keptNote(failed int) string {
+	if failed == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (%d failed; cached copies kept)", failed)
 }
 
 // updatePack refreshes the check pack and says which checks scans will use.

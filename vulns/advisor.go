@@ -61,7 +61,37 @@ type lookup struct {
 	newerErr  error
 }
 
+// Vulnerability data status for a scan, as engine.Result.VulnData reports
+// it: whether the scan could actually check for known vulnerabilities.
+const (
+	StatusOK      = "ok"      // every lookup succeeded or came from a fresh cache
+	StatusPartial = "partial" // some lookups failed, or used a cache past its TTL
+	StatusMissing = "missing" // no lookup succeeded
+	StatusOff     = "off"     // matching was turned off (--no-vulns)
+)
+
+// DataStatus turns lookup counts into a Status value: total lookups,
+// how many failed and how many were served from a stale cache.
+func DataStatus(total, failed, stale int) string {
+	switch {
+	case total > 0 && failed >= total:
+		return StatusMissing
+	case failed > 0 || stale > 0:
+		return StatusPartial
+	}
+	return StatusOK
+}
+
+// Advise implements engine.Advisor.
 func (a *Advisor) Advise(ctx context.Context, base *url.URL, fp fingerprint.Result) ([]engine.Finding, []string) {
+	findings, warnings, _ := a.AdviseStatus(ctx, base, fp)
+	return findings, warnings
+}
+
+// AdviseStatus is Advise plus the vulnerability data status (StatusOK,
+// StatusPartial or StatusMissing), so a scan whose data service was down
+// can't pass as clean. It implements engine.StatusAdvisor.
+func (a *Advisor) AdviseStatus(ctx context.Context, base *url.URL, fp fingerprint.Result) ([]engine.Finding, []string, string) {
 	now := time.Now
 	if a.Now != nil {
 		now = a.Now
@@ -122,7 +152,7 @@ func (a *Advisor) Advise(ctx context.Context, base *url.URL, fp fingerprint.Resu
 
 	var findings []engine.Finding
 	var outdated, abandoned, unverified []string
-	var failed, stale, old int
+	var looked, failed, stale, old int
 	var offline bool
 	var firstErr string
 	fail := func(what string, err error) {
@@ -135,6 +165,9 @@ func (a *Advisor) Advise(ctx context.Context, base *url.URL, fp fingerprint.Resu
 			firstErr = fmt.Sprintf("%s: %v", what, err)
 		}
 	}
+	if fp.Has("php") && fp.PHP == "" {
+		looked++
+	}
 	if hidden.err != nil {
 		fail("recent PHP advisories", hidden.err)
 	} else if f, ok := hiddenPHPFinding(base, hidden.flaws, hidden.branches); ok {
@@ -144,12 +177,16 @@ func (a *Advisor) Advise(ctx context.Context, base *url.URL, fp fingerprint.Resu
 		stale++
 	}
 	for _, l := range lookups {
+		looked++
 		if l.err == nil && l.rec == nil {
 			l.err = errNoRecord // never expected, but a nil record must not crash a scan
 		}
 		if l.err != nil {
 			fail(l.kind+" "+l.slug, l.err)
 			continue
+		}
+		if l.newer != nil || l.newerFrom != "" || l.newerErr != nil {
+			looked++
 		}
 		if l.newerErr != nil {
 			fail("newer PHP advisories", l.newerErr)
@@ -262,7 +299,7 @@ func (a *Advisor) Advise(ctx context.Context, base *url.URL, fp fingerprint.Resu
 	if stale > 0 {
 		warnings = append(warnings, fmt.Sprintf("used cached vulnerability data older than %s for %d components", a.Client.TTL, stale))
 	}
-	return findings, warnings
+	return findings, warnings, DataStatus(looked, failed, stale)
 }
 
 // vulnFinding builds the one finding that lists every advisory affecting a

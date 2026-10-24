@@ -111,13 +111,25 @@ func (s *scan) loadLock() {
 
 // composer matches composer.lock against OSV.dev.
 func (s *scan) composer(ctx context.Context) []engine.Finding {
+	findings, _ := s.composerStatus(ctx)
+	return findings
+}
+
+// composerStatus is composer plus the OSV data status for
+// engine.Result.VulnData: vulns.StatusOff without an OSV client, "" when
+// there is no composer.lock to check, else what OSVResult.Status says.
+func (s *scan) composerStatus(ctx context.Context) ([]engine.Finding, string) {
 	path := filepath.Join(s.root, "composer.lock")
 	pkgs := s.pkgs
-	if s.opts.OSV == nil || len(pkgs) == 0 {
-		return nil
+	if s.opts.OSV == nil {
+		return nil, vulns.StatusOff
+	}
+	if len(pkgs) == 0 {
+		return nil, ""
 	}
 	s.checks++
-	found, failed, err := s.opts.OSV.Query(ctx, pkgs)
+	res := s.opts.OSV.Check(ctx, pkgs)
+	found, failed, err := res.Vulns, res.Failed, res.Err
 	if failed > 0 {
 		if s.opts.OSV.Offline {
 			s.warn("vulnerability data not cached for %d Composer packages; run once online to cache it", failed)
@@ -132,7 +144,7 @@ func (s *scan) composer(ctx context.Context) []engine.Finding {
 			out = append(out, s.packageFinding(path, p, vs))
 		}
 	}
-	return out
+	return out, res.Status()
 }
 
 // packageFinding lists every advisory affecting one package, like the

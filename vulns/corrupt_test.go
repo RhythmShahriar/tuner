@@ -59,7 +59,10 @@ func TestCorruptCacheEntries(t *testing.T) {
 	a := newAdvisor(f, cache)
 	a.Client.Offline = true
 	hits := f.hits.Load()
-	fs, warnings := a.Advise(ctx, base, fp)
+	fs, warnings, status := a.AdviseStatus(ctx, base, fp)
+	if status != StatusPartial {
+		t.Errorf("offline with bad entries: status %q, want partial", status)
+	}
 	if f.hits.Load() != hits {
 		t.Error("offline made requests")
 	}

@@ -9,14 +9,17 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/RhythmShahriar/tuner/engine"
+	"github.com/RhythmShahriar/tuner/vulns"
 )
 
 // osvRecords are shaped like api.osv.dev's /v1/vulns answers.
@@ -180,9 +183,9 @@ func TestOSVCorruptCache(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("packagist/laravel~framework@8.0.0.json", `null`)
-	write("packagist/acme~abandoned@1.0.0.json", `{"fetched":"2026-10-22T00:00:00Z","data":["GHSA-cccc"]}`) // format 0
-	write("packagist/monolog~monolog@2.9.1.json", `{}`)
+	write("packagist/laravel_framework@8.0.0.json", `null`)
+	write("packagist/acme_abandoned@1.0.0.json", `{"fetched":"2026-10-22T00:00:00Z","data":["GHSA-cccc"]}`) // format 0
+	write("packagist/monolog_monolog@2.9.1.json", `{}`)
 	write("vulns/GHSA-aaaa.json", `{"format":1,"fetched":"2026-10-22T00:00:00Z","data":null}`)
 	write("vulns/GHSA-bbbb.json", `["not","an","entry"]`)
 
@@ -203,5 +206,92 @@ func TestOSVCorruptCache(t *testing.T) {
 	o = &OSV{CacheDir: cache, Offline: true}
 	if found, failed, _ = o.Query(context.Background(), pkgs); failed != 0 || len(found[pkgs[0]]) != 2 {
 		t.Errorf("offline after refetch: found %v, %d failed", found, failed)
+	}
+}
+
+func TestOSVStatus(t *testing.T) {
+	api := newFakeOSV(t)
+	cache := t.TempDir()
+	ctx := context.Background()
+	pkgs := []Package{{"laravel/framework", "8.0.0"}, {"monolog/monolog", "2.9.1"}}
+	o := func() *OSV { return &OSV{HTTP: api.Client(), Base: api.URL, CacheDir: cache} }
+
+	if r := o().Check(ctx, pkgs); r.Status() != vulns.StatusOK || r.Total != 2 {
+		t.Errorf("all ok: %+v", r)
+	}
+
+	// Past the TTL with the API down: stale copies, so partial.
+	for _, dir := range []string{"packagist", "vulns"} {
+		ents, _ := os.ReadDir(filepath.Join(cache, dir))
+		for _, e := range ents {
+			p := filepath.Join(cache, dir, e.Name())
+			var c cached[json.RawMessage]
+			b, _ := os.ReadFile(p)
+			if err := json.Unmarshal(b, &c); err != nil {
+				t.Fatal(err)
+			}
+			c.Fetched = c.Fetched.Add(-48 * time.Hour)
+			writeCache(p, c)
+		}
+	}
+	api.down.Store(true)
+	if r := o().Check(ctx, pkgs); r.Status() != vulns.StatusPartial || r.Stale != 2 || r.Failed != 0 {
+		t.Errorf("stale: %+v", r)
+	}
+
+	// Nothing cached and the API down: missing.
+	if r := (&OSV{HTTP: api.Client(), Base: api.URL, CacheDir: t.TempDir()}).Check(ctx, pkgs); r.Status() != vulns.StatusMissing {
+		t.Errorf("down: %+v", r)
+	}
+
+	// The scan reports it too.
+	root := tree(t, map[string]string{"composer.lock": lockFile})
+	s := &scan{opts: Options{OSV: o()}, root: root, base: &url.URL{Scheme: "file"}}
+	s.loadLock()
+	if _, status := s.composerStatus(ctx); status != vulns.StatusPartial {
+		t.Errorf("composerStatus = %q", status)
+	}
+	if _, status := (&scan{root: root}).composerStatus(ctx); status != vulns.StatusOff {
+		t.Errorf("no OSV client: %q", status)
+	}
+	if _, status := (&scan{opts: Options{OSV: o()}, root: t.TempDir()}).composerStatus(ctx); status != "" {
+		t.Errorf("no composer.lock: %q", status)
+	}
+}
+
+func TestOSVRefresh(t *testing.T) {
+	api := newFakeOSV(t)
+	cache := t.TempDir()
+	ctx := context.Background()
+	o := &OSV{HTTP: api.Client(), Base: api.URL, CacheDir: cache}
+	if ok, failed, err := o.Refresh(ctx); ok+failed != 0 || err != nil {
+		t.Errorf("empty cache: %d %d %v", ok, failed, err)
+	}
+
+	// An entry from before keys were stored: the file name is enough.
+	p := filepath.Join(cache, "packagist", "laravel_framework@8.0.0.json")
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(`{"fetched":"2026-10-23T00:00:00Z","data":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	hits := api.hits.Load()
+	ok, failed, err := o.Refresh(ctx)
+	if ok != 3 || failed != 0 || err != nil || api.hits.Load()-hits != 3 {
+		t.Errorf("refresh: ok %d failed %d err %v, %d requests", ok, failed, err, api.hits.Load()-hits)
+	}
+	var e cached[[]string]
+	if !readCache(p, &e) || len(e.Data) != 2 || e.Key != "laravel/framework@8.0.0" {
+		t.Errorf("refreshed entry: %+v", e)
+	}
+
+	// The API down: failures are counted, the cached copies kept.
+	api.down.Store(true)
+	if ok, failed, _ := o.Refresh(ctx); ok != 0 || failed != 3 || !readCache(p, &e) {
+		t.Errorf("down: ok %d failed %d", ok, failed)
+	}
+	if _, _, err := (&OSV{CacheDir: cache, Offline: true}).Refresh(ctx); err == nil {
+		t.Error("offline refresh should fail")
 	}
 }
