@@ -26,8 +26,10 @@ func TestSafeName(t *testing.T) {
 		"lpt9":           "lpt9_",
 		"console":        "console",
 		"com10":          "com10",
-		"a/b@1.0":        "a_b@1.0",
-		"../etc":         ".._etc",
+		"a/b@1.0":        "a~b@1.0",
+		"a_b/c@1.0":      "a_b~c@1.0",
+		"a b:c":          "a_b_c",
+		"../etc":         "..~etc",
 		"":               "",
 		"..":             "",
 	} {
@@ -151,5 +153,39 @@ func TestMemoExpires(t *testing.T) {
 	Load(s, ctx, "k", "x", fail)
 	if calls.Load() != 2 {
 		t.Errorf("old failure not retried: %d calls", calls.Load())
+	}
+}
+
+// TestKeyCollision checks that two keys sharing a file name never get
+// each other's data: "/" has its own escape, and Read checks the stored
+// key for the characters that still collide.
+func TestKeyCollision(t *testing.T) {
+	dir := t.TempDir()
+	s := &Store{Dir: dir, TTL: time.Hour, Format: 1}
+	if a, b := s.Path("packagist", "foo_bar/baz@1.0"), s.Path("packagist", "foo/bar_baz@1.0"); a == b {
+		t.Errorf("foo_bar/baz and foo/bar_baz share %s", a)
+	}
+	// "a:b" and "a b" both clean up to a_b.
+	if err := Write(s, "k", "a:b", &rec{Vulns: []string{"GHSA-1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if e, ok, old := Read[*rec](s, "k", "a b"); ok || old || e.Data != nil {
+		t.Errorf("a b served a:b's entry: %+v ok %v old %v", e, ok, old)
+	}
+	if e, ok, _ := Read[*rec](s, "k", "a:b"); !ok || e.Data.Vulns[0] != "GHSA-1" {
+		t.Errorf("a:b: %+v ok %v", e, ok)
+	}
+	// The other key loads its own data, which then replaces the file.
+	v, _, err := Load(s, context.Background(), "k", "a b", func(context.Context) (*rec, error) { return &rec{Vulns: []string{}}, nil })
+	if err != nil || len(v.Vulns) != 0 {
+		t.Errorf("a b: %v %v", v, err)
+	}
+	// An entry written before keys were stored can't be checked; it is
+	// served as before.
+	if err := os.WriteFile(filepath.Join(dir, "k", "legacy.json"), []byte(`{"format":1,"fetched":"2026-10-01T00:00:00Z","data":{"Vulns":["x"]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := Read[*rec](s, "k", "legacy"); !ok {
+		t.Error("keyless entry refused")
 	}
 }

@@ -315,15 +315,20 @@ func (o *Client) Refresh(ctx context.Context) (ok, failed int, err error) {
 func packageKey(p Package) string { return p.Name + "@" + p.Version }
 
 // parsePackageKey reverses packageKey. It also takes the file name of an
-// entry from before keys were stored, where "/" became "_": Composer
-// names are vendor/package, so the first "_" is the best guess.
+// entry from before keys were stored, where "/" became "~" (or "_" in
+// some development builds): Composer names are vendor/package, so the
+// first "~", else the first "_", is the separator.
 func parsePackageKey(key string) (Package, bool) {
 	i := strings.LastIndex(key, "@")
 	if i <= 0 || i == len(key)-1 {
 		return Package{}, false
 	}
 	name := key[:i]
-	if !strings.Contains(name, "/") {
+	switch {
+	case strings.Contains(name, "/"):
+	case strings.Contains(name, "~"):
+		name = strings.Replace(name, "~", "/", 1)
+	default:
 		name = strings.Replace(name, "_", "/", 1)
 	}
 	return Package{Name: name, Version: key[i+1:]}, true

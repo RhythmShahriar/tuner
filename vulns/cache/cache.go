@@ -95,6 +95,13 @@ func Read[T any](s *Store, kind, key string) (e Entry[T], ok, old bool) {
 	if path == "" || ReadJSON(path, &e) != nil {
 		return e, false, false
 	}
+	// Different keys can share a file name (a_b/c and a/b_c both clean
+	// up to the same characters), so an entry that names another key is
+	// someone else's data. Entries from before keys were stored can't
+	// be told apart and are trusted.
+	if e.Key != "" && e.Key != key {
+		return Entry[T]{}, false, false
+	}
 	if e.usable(s.Format) {
 		return e, true, false
 	}
@@ -195,21 +202,25 @@ func (s *Store) Path(kind, key string) string {
 	return filepath.Join(s.Dir, filepath.FromSlash(kind), name+".json")
 }
 
-var unsafeKey = regexp.MustCompile(`[^A-Za-z0-9._@-]`)
+var unsafeKey = regexp.MustCompile(`[^A-Za-z0-9._@~-]`)
 
 // Windows reserves these device names, with or without an extension and in
 // any case: a cache file called con.json can't be created there.
 var reserved = regexp.MustCompile(`(?i)^(con|prn|aux|nul|com[0-9]|lpt[0-9])$`)
 
 // SafeName turns a key into a file name (without the extension) that is
-// valid on every OS: unsafe characters become "_" and a Windows device
-// name gets a trailing "_" (con → con_). It returns "" for keys that
-// can't name a file, like "" and "..".
+// valid on every OS: "/" becomes "~", other unsafe characters become "_"
+// and a Windows device name gets a trailing "_" (con → con_). It returns
+// "" for keys that can't name a file, like "" and "..".
+//
+// "/" gets its own character because Composer names (vendor/package)
+// may hold "_" but never "~": with "_" for both, foo_bar/baz and
+// foo/bar_baz would share a file.
 func SafeName(key string) string {
 	if key == "" || key == "." || key == ".." {
 		return ""
 	}
-	name := unsafeKey.ReplaceAllString(key, "_")
+	name := unsafeKey.ReplaceAllString(strings.ReplaceAll(key, "/", "~"), "_")
 	if stem, rest, dotted := strings.Cut(name, "."); reserved.MatchString(stem) {
 		name = stem + "_"
 		if dotted {

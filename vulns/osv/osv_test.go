@@ -69,9 +69,9 @@ func TestOSVCorruptCache(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("packagist/laravel_framework@8.0.0.json", `null`)
-	write("packagist/acme_abandoned@1.0.0.json", `{"fetched":"2026-10-22T00:00:00Z","data":["GHSA-cccc"]}`) // format 0
-	write("packagist/monolog_monolog@2.9.1.json", `{}`)
+	write("packagist/laravel~framework@8.0.0.json", `null`)
+	write("packagist/acme~abandoned@1.0.0.json", `{"fetched":"2026-10-22T00:00:00Z","data":["GHSA-cccc"]}`) // format 0
+	write("packagist/monolog~monolog@2.9.1.json", `{}`)
 	write("vulns/GHSA-aaaa.json", `{"format":1,"fetched":"2026-10-22T00:00:00Z","data":null}`)
 	write("vulns/GHSA-bbbb.json", `["not","an","entry"]`)
 
@@ -142,7 +142,7 @@ func TestOSVRefresh(t *testing.T) {
 	}
 
 	// An entry from before keys were stored: the file name is enough.
-	p := filepath.Join(cacheDir, "packagist", "laravel_framework@8.0.0.json")
+	p := filepath.Join(cacheDir, "packagist", "laravel~framework@8.0.0.json")
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -169,5 +169,22 @@ func TestOSVRefresh(t *testing.T) {
 	}
 	if _, _, err := (&Client{CacheDir: cacheDir, Offline: true}).Refresh(ctx); err == nil {
 		t.Error("offline refresh should fail")
+	}
+}
+
+func TestParsePackageKey(t *testing.T) {
+	for key, want := range map[string]Package{
+		"foo_bar/baz@1.0":         {"foo_bar/baz", "1.0"},
+		"foo~bar_baz@1.0":         {"foo/bar_baz", "1.0"}, // file name, "/" escaped
+		"laravel_framework@8.0.0": {"laravel/framework", "8.0.0"},
+	} {
+		if got, ok := parsePackageKey(key); !ok || got != want {
+			t.Errorf("parsePackageKey(%q) = %v %v, want %v", key, got, ok, want)
+		}
+	}
+	for _, key := range []string{"", "@1.0", "foo/bar@", "foo"} {
+		if _, ok := parsePackageKey(key); ok {
+			t.Errorf("parsePackageKey(%q) accepted", key)
+		}
 	}
 }

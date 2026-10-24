@@ -40,7 +40,7 @@ func TestUpdateRefreshesOSV(t *testing.T) {
 	}
 
 	// A package a scan cached earlier is asked about again.
-	entry := filepath.Join(cacheHome, "rhythm", "tuner", "vulns", "osv", "packagist", "laravel_framework@8.0.0.json")
+	entry := filepath.Join(cacheHome, "rhythm", "tuner", "vulns", "osv", "packagist", "laravel~framework@8.0.0.json")
 	if err := os.MkdirAll(filepath.Dir(entry), 0o700); err != nil {
 		t.Fatal(err)
 	}
