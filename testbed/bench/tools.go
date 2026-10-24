@@ -18,9 +18,11 @@ import (
 // Pinned versions of the tools the benchmark compares Tuner with. WPScan
 // runs from its official image (no API token: detection only). wpprobe
 // and Nuclei run from a binary on PATH, installed at these versions by
-// the nightly workflow.
+// the nightly workflow. The image is pinned by digest too, so a re-pushed
+// tag can't change the results without a change here.
 const (
-	wpscanImage    = "wpscanteam/wpscan:v3.8.28"
+	wpscanTag      = "wpscanteam/wpscan:v3.8.28"
+	wpscanImage    = wpscanTag + "@sha256:d94639934df7d398babfc1714eb8bb6d144a825553a3008779b8d27e447e5ebb"
 	wpprobeVersion = "v0.12.12"
 	nucleiVersion  = "v3.11.1"
 )
@@ -44,7 +46,7 @@ var allTools = []*Tool{
 	},
 	{
 		Key: "wpscan", Name: "WPScan",
-		About: "`" + wpscanImage + "` with no API token, so detection only (plugins it can see, no advisory lookups)",
+		About: "`" + wpscanTag + "` with no API token, so detection only (plugins it can see, no advisory lookups)",
 		Scan:  scanWPScan,
 	},
 	{

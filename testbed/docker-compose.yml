@@ -12,8 +12,9 @@
 #
 # Everything is thrown away on down: the database is in tmpfs and
 # WordPress in volumes removed with -v. Nothing here is a real secret and
-# no plugin holds a working exploit. Images are pinned by tag; move them
-# with Dependabot's docker-compose updates.
+# no plugin holds a working exploit. Images are pinned by tag and digest,
+# so a re-pushed tag can't change the benchmark; Dependabot's
+# docker-compose updates move both together.
 name: tuner-testbed
 
 x-db-env: &db-env
@@ -24,7 +25,7 @@ x-db-env: &db-env
 
 services:
   db:
-    image: mariadb:11.4.8
+    image: mariadb:11.4.8@sha256:bc474f00629f0123c10f9e1bca193a45d18af15a274cf0656acda64f1086c3b6
     environment:
       MARIADB_DATABASE: wordpress
       MARIADB_USER: wordpress
@@ -42,7 +43,7 @@ services:
   # front it. The old core (WORDPRESS_VERSION) and the broken files come
   # from the bind mounts and the init script.
   wp:
-    image: wordpress:6.4.1-php8.1-fpm
+    image: wordpress:6.4.1-php8.1-fpm@sha256:0a8482375e4b9e604ab8b7b4a426b9455dac4c62e78f4f857278976cad7e95be
     depends_on:
       db:
         condition: service_healthy
@@ -59,7 +60,7 @@ services:
       - ./wp/init.sh:/docker-entrypoint-init.d/init.sh:ro
 
   nginx:
-    image: nginx:1.27.3-alpine
+    image: nginx:1.27.3-alpine@sha256:814a8e88df978ade80e584cc5b333144b9372a8e3c98872d07137dbf3b44d0e4
     depends_on: [wp]
     ports:
       - "127.0.0.1:${TESTBED_MAIN_PORT:-20280}:80"
@@ -69,7 +70,7 @@ services:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
 
   apache:
-    image: httpd:2.4.62
+    image: httpd:2.4.62@sha256:4c7788695c832bf415a662dfb5160f1895e65fc65c025e85f436ee2c9e7d7f3e
     depends_on: [wp]
     ports:
       - "127.0.0.1:${TESTBED_APACHE_PORT:-20281}:80"
@@ -81,7 +82,7 @@ services:
   # answers 403 with a challenge page. The expected benchmark result is
   # "blocked", not a score.
   waf:
-    image: nginx:1.27.3-alpine
+    image: nginx:1.27.3-alpine@sha256:814a8e88df978ade80e584cc5b333144b9372a8e3c98872d07137dbf3b44d0e4
     ports:
       - "127.0.0.1:${TESTBED_WAF_PORT:-20283}:80"
     volumes:
