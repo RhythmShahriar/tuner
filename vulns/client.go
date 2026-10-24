@@ -30,6 +30,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/RhythmShahriar/tuner/fingerprint"
 	"github.com/RhythmShahriar/tuner/vulns/cache"
 	"github.com/RhythmShahriar/tuner/vulns/ratelimit"
 )
@@ -282,6 +283,15 @@ func (c *Client) Refresh(ctx context.Context) (ok, failed int, err error) {
 		return ctx.Err()
 	})
 	return ok, failed, err
+}
+
+// Prefetch looks up everything a scan of a site with fingerprint fp would
+// ask the data services, so the answers are cached for a later --offline
+// scan (rhythm tuner update --prefetch). Fresh cached copies are kept. It
+// returns the warnings such a scan would print and the data status.
+func (c *Client) Prefetch(ctx context.Context, fp fingerprint.Result) (warnings []string, status string) {
+	_, warnings, status = (&Advisor{Client: c}).AdviseStatus(ctx, &url.URL{}, fp)
+	return warnings, status
 }
 
 // Unreachable lists the data hosts this client gave up on after a timeout

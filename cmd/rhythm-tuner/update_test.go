@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -55,5 +56,161 @@ func TestUpdateRefreshesOSV(t *testing.T) {
 	b, _ := os.ReadFile(entry)
 	if !strings.Contains(string(b), "GHSA-aaaa") {
 		t.Errorf("entry not rewritten: %s", b)
+	}
+}
+
+// fakeVulnAPI serves WPVulnerability, wordpress.org and php.net answers:
+// contact-form-7 below 5.3.2 is vulnerable, everything else is clean. It
+// counts the requests it gets and fails them all while down is set.
+func fakeVulnAPI(t *testing.T) (hits *atomic.Int32, down *atomic.Bool) {
+	t.Helper()
+	hits, down = &atomic.Int32{}, &atomic.Bool{}
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		if down.Load() {
+			http.Error(w, "down", http.StatusBadGateway)
+			return
+		}
+		switch r.URL.Path {
+		case "/plugin/contact-form-7/":
+			w.Write([]byte(`{"error":0,"data":{"name":"Contact Form 7","closed":0,"vulnerability":[{"uuid":"u1",
+				"operator":{"max_version":"5.3.2","max_operator":"lt","unfixed":"0"},
+				"source":[{"id":"CVE-2020-35489","name":"CVE-2020-35489","link":"https://www.cve.org/x"}],
+				"impact":{"cvss3":{"score":"10.0","severity":"critical"},"kev":false}}]}}`))
+		case "/plugins/info/1.2/":
+			w.Write([]byte(`{"version":"6.2.3","last_updated":"2026-10-21 8:43am GMT"}`))
+		case "/releases/states.php":
+			w.Write([]byte(`{"8":{"8.3":{"state":"security","security_support_end":"2027-12-31T00:00:00+00:00"},
+				"8.4":{"state":"stable","security_support_end":"2028-12-31T00:00:00+00:00"}}}`))
+		case "/core/version-check/1.7/":
+			w.Write([]byte(`{"offers":[{"current":"6.4.1"}]}`))
+		default:
+			w.Write([]byte(`{"error":0,"data":{"vulnerability":[]}}`))
+		}
+	}))
+	t.Cleanup(api.Close)
+	t.Setenv("TUNER_VULN_API", api.URL)
+	t.Setenv("TUNER_WPORG_API", api.URL)
+	t.Setenv("TUNER_PHPNET_API", api.URL)
+	return hits, down
+}
+
+func TestUpdatePrefetchLocal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a shell script as php")
+	}
+	packRelease(t, packCheck, "0.2.0") // sets XDG_CACHE_HOME
+	hits, down := fakeVulnAPI(t)
+	t.Setenv("TUNER_OSV_API", "http://127.0.0.1:1")
+	root, php := localSite(t)
+	plugin := filepath.Join(root, "wp-content", "plugins", "contact-form-7", "wp-contact-form-7.php")
+	os.MkdirAll(filepath.Dir(plugin), 0o755)
+	os.WriteFile(plugin, []byte("<?php\n/*\nPlugin Name: Contact Form 7\nVersion: 5.3.1\n*/"), 0o600)
+
+	// Cold cache: an offline scan has nothing to match against.
+	if _, out, errs := tuner(t, "scan", root, "--json", "--offline", "--php", php); !strings.Contains(errs+out, "not cached") {
+		t.Fatalf("cold offline scan: %s%s", errs, out)
+	}
+
+	code, out, errs := tuner(t, "update", "--prefetch", root, "--php", php)
+	if code != exitOK || !strings.Contains(out, "Prefetched "+root+": WordPress 6.4.1, 1 plugin, PHP 8.3.6") ||
+		!strings.Contains(out, "Data: WPVulnerability") || strings.Contains(out, "Nothing cached") {
+		t.Fatalf("prefetch: exit %d, stderr %s\n%s", code, errs, out)
+	}
+	if hits.Load() == 0 {
+		t.Fatal("prefetch made no requests")
+	}
+
+	// Now offline works with the API down, and makes no requests.
+	down.Store(true)
+	n := hits.Load()
+	code, out, errs = tuner(t, "scan", root, "--json", "--offline", "--php", php, "--id", "vuln-*")
+	if code != exitOK || !strings.Contains(out, "vuln-plugin-contact-form-7") || strings.Contains(errs, "not cached") ||
+		strings.Contains(out, "not cached") || hits.Load() != n {
+		t.Errorf("offline scan after prefetch: exit %d, %d requests, stderr %s\n%s", code, hits.Load()-n, errs, out)
+	}
+
+	// A fresh cache isn't fetched again.
+	down.Store(false)
+	n = hits.Load()
+	if code, _, _ := tuner(t, "update", "--prefetch", root, "--php", php); code != exitOK || hits.Load() != n {
+		t.Errorf("second prefetch: exit %d, %d requests", code, hits.Load()-n)
+	}
+}
+
+func TestUpdatePrefetchRemote(t *testing.T) {
+	packRelease(t, packCheck, "0.2.0")
+	_, down := fakeVulnAPI(t)
+	var siteHits atomic.Int32
+	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siteHits.Add(1)
+		switch r.URL.Path {
+		case "/":
+			w.Write([]byte(`<link href="/wp-content/plugins/contact-form-7/s.css?ver=5.3.1">`))
+		case "/wp-content/plugins/contact-form-7/readme.txt":
+			w.Write([]byte("Stable tag: 5.3.1\n"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer site.Close()
+
+	code, out, errs := tuner(t, "update", "--prefetch", site.URL)
+	if code != exitOK || !strings.Contains(out, "Prefetched "+site.URL+": 1 plugin") {
+		t.Fatalf("prefetch: exit %d, stderr %s\n%s", code, errs, out)
+	}
+	// No checks ran: a handful of fingerprint requests, not the whole set.
+	if n := siteHits.Load(); n > 30 {
+		t.Errorf("prefetch sent %d requests to the site", n)
+	}
+	down.Store(true)
+	code, out, errs = tuner(t, "scan", site.URL, "--json", "--offline", "--id", "vuln-*")
+	if code != exitOK || !strings.Contains(out, "vuln-plugin-contact-form-7") || strings.Contains(errs+out, "not cached") {
+		t.Errorf("offline scan after prefetch: exit %d, stderr %s\n%s", code, errs, out)
+	}
+
+	// With the data service down, a cold prefetch fails and says why.
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	if code, _, errs := tuner(t, "update", "--prefetch", site.URL); code != exitError || !strings.Contains(errs, "vulnerability data") {
+		t.Errorf("prefetch with API down: exit %d, stderr %s", code, errs)
+	}
+}
+
+func TestUpdateUsage(t *testing.T) {
+	cases := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"update", "--clean"}, "unknown flag --clean; did you mean --clear?"},
+		{[]string{"update", "--pre"}, "unknown flag --pre; did you mean --prefetch?"},
+		{[]string{"update", "--offline"}, "unknown flag --offline; update always fetches"},
+		{[]string{"update", "--frobnicate"}, "unknown flag --frobnicate\n"},
+		{[]string{"update", "--prefetch"}, "--prefetch needs a site or a folder"},
+		{[]string{"update", "example.com"}, "update takes no targets; to cache data for example.com, run: rhythm tuner update --prefetch example.com"},
+		{[]string{"update", "--prefetch", "./no-such-dir"}, "no such directory"},
+		{[]string{"update", "--clear", "--prefetch", "example.com"}, "pick one of --clear and --prefetch"},
+	}
+	for _, c := range cases {
+		code, out, errs := tuner(t, c.args...)
+		if code != exitUsage || !strings.Contains(errs, c.want) || out != "" {
+			t.Errorf("%v: exit %d, stdout %q, stderr %q; want %q", c.args, code, out, errs, c.want)
+		}
+		if strings.Contains(errs, "flag provided but not defined") || strings.Contains(errs, "Usage of") {
+			t.Errorf("%v: raw flag package text: %s", c.args, errs)
+		}
+	}
+	for _, h := range []string{"--help", "-h"} {
+		if code, out, _ := tuner(t, "update", h); code != exitOK || !strings.Contains(out, "--prefetch <dir|url>") {
+			t.Errorf("update %s: exit %d\n%s", h, code, out)
+		}
+	}
+}
+
+func TestClosestFlag(t *testing.T) {
+	known := []string{"clear", "prefetch", "php"}
+	for in, want := range map[string]string{"cleer": "clear", "prefech": "prefetch", "ph": "php", "pref": "prefetch", "verbose": "", "": ""} {
+		if got := closestFlag(in, known); got != want {
+			t.Errorf("closestFlag(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
