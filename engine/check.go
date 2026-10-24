@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -123,6 +124,11 @@ func LoadChecks(fsys fs.FS) ([]*Check, error) {
 	return checks, nil
 }
 
+// safeQuery is the only query string a check path may carry: plain
+// name=value pairs. Percent escapes, quotes, parentheses, semicolons and
+// spaces are refused, so a check can never send an injection payload.
+var safeQuery = regexp.MustCompile(`^[A-Za-z0-9_.~-]+=[A-Za-z0-9_.~/-]*(&[A-Za-z0-9_.~-]+=[A-Za-z0-9_.~/-]*)*$`)
+
 // ParseCheck decodes and validates a single check. Unknown keys are errors,
 // so a typo in a check fails loudly instead of silently matching nothing.
 func ParseCheck(data []byte) (*Check, error) {
@@ -146,9 +152,19 @@ func ParseCheck(data []byte) (*Check, error) {
 		if !strings.HasPrefix(p, "/") {
 			return nil, fmt.Errorf("request.path %q must start with /", p)
 		}
+		if _, q, ok := strings.Cut(p, "?"); ok && !safeQuery.MatchString(q) {
+			return nil, fmt.Errorf("request.path %q: the query may only hold plain name=value pairs (letters, digits, _ . ~ - and / in values)", p)
+		}
 	}
-	if c.Request.Method == "" {
+	// Checks only read: a write method such as DELETE or POST could change
+	// the site, which Tuner never does.
+	switch m := strings.ToUpper(c.Request.Method); m {
+	case "":
 		c.Request.Method = "GET"
+	case "GET", "HEAD":
+		c.Request.Method = m
+	default:
+		return nil, fmt.Errorf("request.method %q: checks may only use GET or HEAD", c.Request.Method)
 	}
 	if c.Profile == "" {
 		c.Profile = ProfileDefault
