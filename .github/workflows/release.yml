@@ -21,6 +21,7 @@ jobs:
     permissions:
       contents: write
       id-token: write # keyless cosign over checksums.txt
+      attestations: write # build provenance from the shared release workflow
 
   # The container image for `serve`, built here rather than by GoReleaser
   # in release-go.yml: that workflow never logs in to ghcr.io and its
