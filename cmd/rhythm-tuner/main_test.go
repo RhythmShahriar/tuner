@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,6 +21,10 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/RhythmShahriar/tuner/engine"
+	"github.com/RhythmShahriar/tuner/fingerprint"
+	"github.com/RhythmShahriar/tuner/report"
 )
 
 const rawSecret = "supersecret-db-pass"
@@ -723,5 +728,186 @@ func TestDuplicateTargetForms(t *testing.T) {
 		if targetKey(c[0]) == targetKey(c[1]) {
 			t.Errorf("%s and %s should stay apart", c[0], c[1])
 		}
+	}
+}
+
+// pluginSite looks like WordPress with contact-form-7 5.3.1, so a scan
+// asks the vulnerability API about it.
+func pluginSite(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/":
+			w.Write([]byte(`<link href="/wp-content/plugins/contact-form-7/s.css?ver=5.3.1">`))
+		case "/wp-content/plugins/contact-form-7/readme.txt":
+			w.Write([]byte("Stable tag: 5.3.1\n"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+type statusReport struct {
+	Complete  *bool  `json:"complete"`
+	StoppedBy string `json:"stopped_by"`
+	VulnData  string `json:"vuln_data"`
+}
+
+func TestFailOnNeedsVulnData(t *testing.T) {
+	// The API accepts each connection and drops it without an answer.
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if conn, _, err := w.(http.Hijacker).Hijack(); err == nil {
+			conn.Close()
+		}
+	}))
+	defer api.Close()
+	t.Setenv("TUNER_VULN_API", api.URL)
+	t.Setenv("TUNER_WPORG_API", api.URL)
+	t.Setenv("TUNER_PHPNET_API", api.URL)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	site := pluginSite(t).URL
+
+	code, out, errs := tuner(t, "scan", site, "--json", "--fail-on", "high")
+	var rep statusReport
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatalf("bad JSON: %v\n%s", err, out)
+	}
+	if code != exitError || rep.VulnData != "missing" || rep.Complete == nil || !*rep.Complete ||
+		!strings.Contains(errs, "no vulnerability data, so --fail-on high can't pass it") ||
+		!strings.Contains(errs, "--allow-missing-vulns") {
+		t.Errorf("exit %d, %+v, stderr %q", code, rep, errs)
+	}
+	if code, _, errs := tuner(t, "scan", site, "--json", "--fail-on", "high", "--allow-missing-vulns"); code != exitOK {
+		t.Errorf("--allow-missing-vulns: exit %d: %s", code, errs)
+	}
+	if code, _, errs := tuner(t, "scan", site, "--json"); code != exitOK {
+		t.Errorf("no --fail-on: exit %d: %s", code, errs)
+	}
+	code, out, _ = tuner(t, "scan", site, "--json", "--fail-on", "high", "--no-vulns")
+	if json.Unmarshal([]byte(out), &rep); code != exitOK || rep.VulnData != "off" {
+		t.Errorf("--no-vulns: exit %d, vuln_data %q", code, rep.VulnData)
+	}
+}
+
+func TestVulnDataOK(t *testing.T) {
+	states, err := os.ReadFile("../../vulns/testdata/phpnet-states.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/releases/states.php" {
+			w.Write(states)
+			return
+		}
+		w.Write([]byte(`{"error":0,"data":{"vulnerability":[]}}`))
+	}))
+	defer api.Close()
+	t.Setenv("TUNER_VULN_API", api.URL)
+	t.Setenv("TUNER_WPORG_API", api.URL)
+	t.Setenv("TUNER_PHPNET_API", api.URL)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	code, out, errs := tuner(t, "scan", pluginSite(t).URL, "--json", "--fail-on", "critical")
+	var rep statusReport
+	if json.Unmarshal([]byte(out), &rep); code != exitOK || rep.VulnData != "ok" {
+		t.Errorf("exit %d, vuln_data %q, stderr %s\n%s", code, rep.VulnData, errs, out)
+	}
+}
+
+func TestInterruptedReportSaysSo(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("sends SIGINT to the test process")
+	}
+	srv, started := hangingSite(t)
+	go func() {
+		<-started
+		syscall.Kill(os.Getpid(), syscall.SIGINT)
+	}()
+	code, out, errs := tuner(t, "scan", srv.URL, "--json", "--no-vulns")
+	var rep statusReport
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatalf("bad JSON: %v\n%s", err, out)
+	}
+	if code != exitCanceled || rep.Complete == nil || *rep.Complete || rep.StoppedBy != "interrupted" {
+		t.Errorf("exit %d, %+v, stderr %q", code, rep, errs)
+	}
+}
+
+func TestMaxTimeReportSaysSo(t *testing.T) {
+	srv, _ := hangingSite(t)
+	code, out, errs := tuner(t, "scan", srv.URL, "--json", "--no-vulns", "--max-time", "500ms", "--fail-on", "high")
+	var rep statusReport
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatalf("bad JSON: %v\n%s", err, out)
+	}
+	if code != exitError || *rep.Complete || rep.StoppedBy != "max-time" ||
+		!strings.Contains(errs, "the scan is incomplete (stopped by --max-time)") {
+		t.Errorf("exit %d, %+v, stderr %q", code, rep, errs)
+	}
+}
+
+// A firewall challenge leaves a scan with no findings that proves nothing,
+// so --fail-on fails it unless --allow-partial says that's fine.
+func TestFailOnBlockedScan(t *testing.T) {
+	reports := []report.Report{{Result: &engine.Result{Target: "https://example.com/"}}}
+	blocked := runStatus{Complete: false, StoppedBy: "waf", BlockedBy: "Cloudflare challenge", VulnData: vulnOK}
+	for _, c := range []struct {
+		allow bool
+		want  int
+	}{{false, exitError}, {true, exitOK}} {
+		p := &scanPlan{failOn: engine.High}
+		p.o.allowPartial = c.allow
+		p.write.Status = []runStatus{blocked}
+		var errb bytes.Buffer
+		got := scanExit(context.Background(), p, reports, []string{""}, &errb)
+		if got != c.want {
+			t.Errorf("--allow-partial %v: exit %d, want %d", c.allow, got, c.want)
+		}
+		if !c.allow && !strings.Contains(errb.String(), "https://example.com/: the scan is incomplete (blocked by Cloudflare challenge)") {
+			t.Errorf("stderr %q", errb.String())
+		}
+	}
+	// Without --fail-on a partial scan keeps its exit code.
+	p := &scanPlan{}
+	p.write.Status = []runStatus{blocked}
+	if got := scanExit(context.Background(), p, reports, []string{""}, io.Discard); got != exitOK {
+		t.Errorf("no --fail-on: exit %d", got)
+	}
+}
+
+func TestVulnStatusFromWarnings(t *testing.T) {
+	for _, c := range []struct {
+		lookups  int
+		warnings []string
+		want     string
+	}{
+		{2, nil, vulnOK},
+		{0, nil, vulnOK},
+		{2, []string{"couldn't fetch vulnerability data for 2 components (plugin x: EOF)"}, vulnMissing},
+		{1, []string{"vulnerability data not cached for 1 components; run once online to cache it"}, vulnMissing},
+		{3, []string{"couldn't fetch vulnerability data for 1 components (plugin y: EOF)"}, vulnPartial},
+		{2, []string{"used cached vulnerability data older than 24h0m0s for 1 components"}, vulnPartial},
+		{2, []string{"couldn't fetch vulnerability data for many components"}, vulnMissing},
+		{2, []string{"something unrelated"}, vulnOK},
+	} {
+		if got := vulnStatusFromWarnings(c.lookups, c.warnings); got != c.want {
+			t.Errorf("%d lookups, %q: %s, want %s", c.lookups, c.warnings, got, c.want)
+		}
+	}
+	fp := fingerprint.Result{WordPress: "6.4.1", Server: "nginx/1.25.3", Components: []fingerprint.Component{{Slug: "a"}, {Slug: "b"}}}
+	fp.Tech = []string{"wordpress", "php"}
+	if n := advisorLookups(fp); n != 5 {
+		t.Errorf("advisorLookups: %d, want 5 (core, 2 plugins, hidden PHP, nginx)", n)
+	}
+	var s vulnSlot
+	if s.get() != vulnMissing {
+		t.Error("an advisor that never ran should leave the data missing")
+	}
+	s.set(vulnOK)
+	s.set(vulnPartial)
+	s.set(vulnOK)
+	if s.get() != vulnPartial {
+		t.Errorf("worst status should win, got %s", s.get())
 	}
 }

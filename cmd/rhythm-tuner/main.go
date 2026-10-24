@@ -21,7 +21,7 @@ const (
 	exitOK       = 0
 	exitFindings = 1 // findings at or above --fail-on
 	exitUsage    = 2
-	exitError    = 3 // a target couldn't be scanned
+	exitError    = 3 // a target couldn't be scanned, or --fail-on can't trust the result
 	exitCanceled = 130
 )
 
@@ -120,6 +120,11 @@ Batch and CI:
       --parallel <n>       sites scanned at once (default 4)
       --fail-on <level>    exit 1 if a finding is at or above this severity
       --baseline <file>    hide findings already in this JSON report
+      --allow-missing-vulns
+                           let --fail-on pass a site whose vulnerability data
+                           couldn't be fetched (otherwise exit 3)
+      --allow-partial      let --fail-on pass a scan that was blocked or cut
+                           short (otherwise exit 3)
 
 `+extensionHelp()+`Vulnerability data comes from WPVulnerability (CC0), api.wordpress.org and
 php.net; Composer packages are matched with OSV.dev. New checks arrive as a
@@ -128,7 +133,8 @@ directory and refreshed automatically once a day; TUNER_VULN_API,
 TUNER_WPORG_API, TUNER_PHPNET_API, TUNER_OSV_API and TUNER_CHECKS_URL point
 Tuner at mirrors.
 
-Exit codes: 0 ok · 1 findings at --fail-on · 2 usage error · 3 scan error · 130 interrupted
+Exit codes: 0 ok · 1 findings at --fail-on · 2 usage error · 130 interrupted ·
+3 scan error, or --fail-on with missing vulnerability data or a partial scan
 
 Examples:
   rhythm tuner scan example.com

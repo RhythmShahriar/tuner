@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -29,6 +31,7 @@ import (
 
 	"github.com/RhythmShahriar/rhythm/kit/config"
 	"github.com/RhythmShahriar/tuner/engine"
+	"github.com/RhythmShahriar/tuner/fingerprint"
 	"github.com/RhythmShahriar/tuner/local"
 	"github.com/RhythmShahriar/tuner/report"
 	"github.com/RhythmShahriar/tuner/vulns"
@@ -79,6 +82,10 @@ type scanOptions struct {
 	parallel int
 	failOn   string
 	baseline string
+
+	// allowMissingVulns and allowPartial let --fail-on pass a run it
+	// would otherwise not trust; see scanExit.
+	allowMissingVulns, allowPartial bool
 }
 
 func scanFlagSet(o *scanOptions, stderr io.Writer) *flag.FlagSet {
@@ -126,6 +133,8 @@ func scanFlagSet(o *scanOptions, stderr io.Writer) *flag.FlagSet {
 	fs.IntVar(&o.parallel, "parallel", 4, "")
 	fs.StringVar(&o.failOn, "fail-on", "", "")
 	fs.StringVar(&o.baseline, "baseline", "", "")
+	fs.BoolVar(&o.allowMissingVulns, "allow-missing-vulns", false, "")
+	fs.BoolVar(&o.allowPartial, "allow-partial", false, "")
 	return fs
 }
 
@@ -350,7 +359,9 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 		Proxy:       proxy,
 	}
 	if vulnsOn {
-		p.engine.Advisor = engine.Filtered(&vulns.Advisor{Client: vulnClient(ua, p.engine.Proxy, o.offline)}, sel)
+		// The tracker sits inside the filter so it sees every lookup,
+		// including ones whose findings the selection drops.
+		p.engine.Advisor = engine.Filtered(vulnTracker{&vulns.Advisor{Client: vulnClient(ua, p.engine.Proxy, o.offline)}}, sel)
 	}
 	p.sel = sel
 	if vulnsOn {
@@ -417,6 +428,7 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 	scanner := engine.New(p.checks, p.engine)
 	single := len(p.targets) == 1
 	results := make([]*engine.Result, len(p.targets))
+	statuses := make([]runStatus, len(p.targets))
 	failed := make([]string, len(p.targets)) // why each target failed, or ""
 	var outMu sync.Mutex
 	var jsonlErr error // the first failed --jsonl write, guarded by outMu
@@ -468,7 +480,9 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 				h.Request = view.Request
 			}
 
-			res, err := p.scanTarget(ctx, scanner, target, h)
+			slot := &vulnSlot{}
+			res, err := p.scanTarget(context.WithValue(ctx, vulnSlotKey{}, slot), scanner, target, h)
+			statuses[i] = p.status(ctx, err, slot)
 			if res != nil {
 				stampFindings(res, target)
 				suppressed := p.baseline.Filter(res)
@@ -491,8 +505,9 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 	wg.Wait()
 
 	var reports []report.Report
-	for _, res := range results {
+	for i, res := range results {
 		if res != nil {
+			p.write.Status = append(p.write.Status, statuses[i])
 			r := report.New(res, version)
 			r.CheckSet = p.checkSet.source
 			if p.checkSet.pack != nil {
@@ -564,6 +579,13 @@ func scanExit(ctx context.Context, p *scanPlan, reports []report.Report, failed 
 			if w := r.Worst(); w != "" && w.Rank() <= p.failOn.Rank() {
 				return exitFindings
 			}
+		}
+		// No findings only means a clean site when the scan saw it all.
+		if why := untrusted(p, reports); len(why) > 0 {
+			for _, w := range why {
+				fmt.Fprintln(stderr, "rhythm tuner:", w)
+			}
+			return exitError
 		}
 	}
 	if slices.ContainsFunc(failed, func(why string) bool { return why != "" }) {
@@ -642,11 +664,18 @@ type writeOptions struct {
 	Many    bool          // several targets: JSON is an array
 	Failed  []targetError // targets that could not be scanned
 	Version string        // the rhythm-tuner version
+
+	// Status holds each report's runStatus, in order. It goes once
+	// report.Report carries its own status (report.SetStatus).
+	Status []runStatus
 }
 
 func writeReport(format string, w io.Writer, reports []report.Report, o writeOptions) error {
 	switch format {
 	case "json":
+		if len(o.Status) == len(reports) {
+			return statusJSON(w, reports, o)
+		}
 		return report.JSON(w, reports, o.Many)
 	case "sarif":
 		return report.SARIF(w, reports, o.Version)
@@ -659,6 +688,194 @@ func writeReport(format string, w io.Writer, reports []report.Report, o writeOpt
 // stampFindings gives each finding a stable fingerprint before baseline
 // filtering. It is a seam for report.Stamp, which does nothing yet either.
 func stampFindings(*engine.Result, string) {}
+
+// runStatus says how much of a target one run saw. It mirrors
+// report.Status from the report writer work: until engine.Result and
+// report.Report carry these fields, the CLI fills them in from the run
+// context and the vulnerability advisor, and statusJSON adds them to JSON.
+type runStatus struct {
+	Complete  bool   `json:"complete"`
+	StoppedBy string `json:"stopped_by,omitempty"` // interrupted or max-time
+	BlockedBy string `json:"blocked_by,omitempty"` // a firewall, once the engine detects them
+	VulnData  string `json:"vuln_data,omitempty"`  // one of the vuln* values below
+}
+
+// How much vulnerability data a scan got, as vulns.Advisor.AdviseStatus
+// names it.
+const (
+	vulnOK      = "ok"      // every lookup worked
+	vulnPartial = "partial" // some lookups failed or used stale data
+	vulnMissing = "missing" // no usable data
+	vulnOff     = "off"     // matching was not part of the scan
+)
+
+// status works out a finished target's runStatus. err is what the scan
+// returned: a target that finished before Ctrl-C is still complete.
+func (p *scanPlan) status(ctx context.Context, err error, slot *vulnSlot) runStatus {
+	s := runStatus{Complete: true, VulnData: vulnOff}
+	switch {
+	case errors.Is(err, context.Canceled):
+		s.Complete, s.StoppedBy = false, "interrupted"
+	case errors.Is(err, context.DeadlineExceeded) && errors.Is(ctx.Err(), context.DeadlineExceeded):
+		s.Complete, s.StoppedBy = false, "max-time"
+	}
+	if p.engine.Advisor != nil {
+		s.VulnData = slot.get()
+	}
+	return s
+}
+
+// untrusted lists why --fail-on can't call these reports clean: the
+// vulnerability data was missing, or the scan was blocked or cut short.
+// --allow-missing-vulns and --allow-partial accept each case.
+func untrusted(p *scanPlan, reports []report.Report) []string {
+	var why []string
+	for i, r := range reports {
+		s := p.write.Status[i]
+		if s.VulnData == vulnMissing && !p.o.allowMissingVulns {
+			why = append(why, fmt.Sprintf("%s: no vulnerability data, so --fail-on %s can't pass it\n"+
+				"  rerun when the data source is back, or add --allow-missing-vulns", r.Target, p.failOn))
+		}
+		if (!s.Complete || s.BlockedBy != "") && !p.o.allowPartial {
+			why = append(why, fmt.Sprintf("%s: the scan is incomplete (%s), so --fail-on %s can't pass it\n"+
+				"  add --allow-partial to accept a partial scan", r.Target, s.reason(), p.failOn))
+		}
+	}
+	return why
+}
+
+// reason says in a few words why a scan is incomplete.
+func (s runStatus) reason() string {
+	switch {
+	case s.BlockedBy != "":
+		return "blocked by " + s.BlockedBy
+	case s.StoppedBy == "max-time":
+		return "stopped by --max-time"
+	case s.StoppedBy != "":
+		return s.StoppedBy
+	}
+	return "the scan did not finish"
+}
+
+// statusJSON is report.JSON with each report's runStatus added.
+func statusJSON(w io.Writer, reports []report.Report, o writeOptions) error {
+	type withStatus struct {
+		report.Report
+		runStatus
+	}
+	all := make([]withStatus, len(reports))
+	for i, r := range reports {
+		all[i] = withStatus{r, o.Status[i]}
+	}
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if len(all) == 1 && !o.Many {
+		return enc.Encode(all[0])
+	}
+	return enc.Encode(all)
+}
+
+// vulnTracker wraps the vulnerability advisor to record how much data each
+// target's lookups got, in the vulnSlot its scan context carries.
+type vulnTracker struct{ engine.Advisor }
+
+// statusAdvisor is the optional advisor method that reports the data
+// status itself, rather than leaving it to be read from warnings.
+type statusAdvisor interface {
+	AdviseStatus(ctx context.Context, base *url.URL, fp fingerprint.Result) ([]engine.Finding, []string, string)
+}
+
+func (v vulnTracker) Advise(ctx context.Context, base *url.URL, fp fingerprint.Result) ([]engine.Finding, []string) {
+	var findings []engine.Finding
+	var warnings []string
+	var status string
+	if sa, ok := v.Advisor.(statusAdvisor); ok {
+		findings, warnings, status = sa.AdviseStatus(ctx, base, fp)
+	} else {
+		findings, warnings = v.Advisor.Advise(ctx, base, fp)
+		status = vulnStatusFromWarnings(advisorLookups(fp), warnings)
+	}
+	if slot, ok := ctx.Value(vulnSlotKey{}).(*vulnSlot); ok {
+		slot.set(status)
+	}
+	return findings, warnings
+}
+
+// vulnStatusFromWarnings reads the status from vulns.Advisor's warnings,
+// for advisors without AdviseStatus. The warning counts the failed
+// lookups; lookups is how many the advisor made for fp.
+func vulnStatusFromWarnings(lookups int, warnings []string) string {
+	failed, stale := 0, false
+	for _, w := range warnings {
+		for _, prefix := range []string{"couldn't fetch vulnerability data for ", "vulnerability data not cached for "} {
+			if rest, ok := strings.CutPrefix(w, prefix); ok {
+				var n int
+				if _, err := fmt.Sscanf(rest, "%d", &n); err != nil {
+					n = lookups // unreadable: assume the worst
+				}
+				failed += n
+			}
+		}
+		stale = stale || strings.HasPrefix(w, "used cached vulnerability data older")
+	}
+	switch {
+	case failed > 0 && failed >= lookups:
+		return vulnMissing
+	case failed > 0 || stale:
+		return vulnPartial
+	}
+	return vulnOK
+}
+
+// serverVersion matches a Server header vulns.Advisor looks up.
+var serverVersion = regexp.MustCompile(`(?i)^(nginx|apache)/[0-9]+(\.[0-9]+)+`)
+
+// advisorLookups counts the lookups vulns.Advisor makes for fp: one per
+// component, plus one for recent PHP flaws when PHP runs but hides its
+// version. It goes with vulnStatusFromWarnings once AdviseStatus lands.
+func advisorLookups(fp fingerprint.Result) int {
+	n := len(fp.Components)
+	if fp.Has("wordpress") && fp.WordPress != "" {
+		n++
+	}
+	if fp.PHP != "" || fp.Has("php") {
+		n++
+	}
+	if serverVersion.MatchString(fp.Server) {
+		n++
+	}
+	return n
+}
+
+// vulnSlotKey is the context key for a target's vulnSlot.
+type vulnSlotKey struct{}
+
+// vulnSlot holds one target's vulnerability data status. A scan that never
+// reached the advisor got no data.
+type vulnSlot struct {
+	mu     sync.Mutex
+	status string
+}
+
+// set records a lookup's status; with several lookups the worst one wins.
+func (s *vulnSlot) set(status string) {
+	rank := map[string]int{vulnOK: 1, vulnPartial: 2, vulnMissing: 3}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if rank[status] > rank[s.status] {
+		s.status = status
+	}
+}
+
+func (s *vulnSlot) get() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.status == "" {
+		return vulnMissing
+	}
+	return s.status
+}
 
 // describe explains why a target failed. The run context tells a --max-time
 // stop apart from one slow request, which wraps the same DeadlineExceeded.
