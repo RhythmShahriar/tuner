@@ -14,7 +14,7 @@ import (
 	"github.com/RhythmShahriar/tuner/engine"
 )
 
-// Digest sums up one run's report, and what changed since the run
+// Digest sums up one run's report plus what changed since the run
 // before it when there was one.
 type Digest struct {
 	Sites    int                     `json:"sites"`

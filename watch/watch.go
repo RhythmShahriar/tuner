@@ -7,7 +7,7 @@
 //
 // Each run executes the Tuner binary as a child process instead of
 // scanning in this one. A scan's memory is returned to the OS when the
-// child exits, so a watch that runs for months doesn't grow, and the
+// child exits, so a watch that runs for months doesn't grow; the
 // scan command's flags and extensions apply unchanged.
 package watch
 
