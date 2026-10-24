@@ -5,6 +5,7 @@ package local
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -60,8 +61,8 @@ type wordpress struct {
 }
 
 // detectWordPress returns nil unless root is a WordPress install.
-func detectWordPress(root string) *wordpress {
-	b, err := readHead(filepath.Join(root, "wp-includes", "version.php"), 64<<10)
+func (s *scan) detectWordPress(ctx context.Context, root string) *wordpress {
+	b, err := s.readHead(filepath.Join(root, "wp-includes", "version.php"), 64<<10)
 	if err != nil {
 		return nil
 	}
@@ -69,7 +70,7 @@ func detectWordPress(root string) *wordpress {
 	if m := wpVersionVar.FindSubmatch(b); m != nil {
 		wp.version = string(m[1])
 	}
-	wp.components = append(plugins(filepath.Join(wp.content, "plugins")), themes(filepath.Join(wp.content, "themes"))...)
+	wp.components = append(s.plugins(ctx, filepath.Join(wp.content, "plugins")), s.themes(ctx, filepath.Join(wp.content, "themes"))...)
 	return wp
 }
 
@@ -93,22 +94,25 @@ func headerVersion(b []byte) string {
 
 // plugins reads each installed plugin's version from its main file's
 // header: the installed version, unlike readme.txt's Stable tag.
-func plugins(dir string) []fingerprint.Component {
+func (s *scan) plugins(ctx context.Context, dir string) []fingerprint.Component {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
 	}
 	var out []fingerprint.Component
 	for _, e := range entries {
+		if ctx.Err() != nil {
+			return out
+		}
 		name := e.Name()
 		switch {
 		case e.IsDir() && !strings.HasPrefix(name, "."):
-			if b := mainPluginFile(filepath.Join(dir, name), name); b != nil {
+			if b := s.mainPluginFile(filepath.Join(dir, name), name); b != nil {
 				out = append(out, fingerprint.Component{Type: "plugin", Slug: name, Version: headerVersion(b), Source: "plugin header"})
 			}
 		case e.Type().IsRegular() && strings.HasSuffix(name, ".php") && name != "index.php":
 			// A single-file plugin, e.g. hello.php.
-			if b, err := readHead(filepath.Join(dir, name), headerBytes); err == nil {
+			if b, err := s.readHead(filepath.Join(dir, name), headerBytes); err == nil {
 				if _, ok := header(b, "Plugin Name"); ok {
 					out = append(out, fingerprint.Component{Type: "plugin", Slug: strings.TrimSuffix(name, ".php"), Version: headerVersion(b), Source: "plugin header"})
 				}
@@ -120,7 +124,7 @@ func plugins(dir string) []fingerprint.Component {
 
 // mainPluginFile returns the head of the PHP file in dir with a "Plugin
 // Name:" header, trying <slug>.php first, or nil if there is none.
-func mainPluginFile(dir, slug string) []byte {
+func (s *scan) mainPluginFile(dir, slug string) []byte {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
@@ -135,7 +139,7 @@ func mainPluginFile(dir, slug string) []byte {
 		return cmp.Compare(boolInt(a != slug+".php"), boolInt(b != slug+".php"))
 	})
 	for _, f := range files[:min(len(files), maxPluginFiles)] {
-		b, err := readHead(filepath.Join(dir, f), headerBytes)
+		b, err := s.readHead(filepath.Join(dir, f), headerBytes)
 		if err != nil {
 			continue
 		}
@@ -161,17 +165,20 @@ func boolInt(b bool) int {
 }
 
 // themes reads each theme's version from its style.css.
-func themes(dir string) []fingerprint.Component {
+func (s *scan) themes(ctx context.Context, dir string) []fingerprint.Component {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
 	}
 	var out []fingerprint.Component
 	for _, e := range entries {
+		if ctx.Err() != nil {
+			return out
+		}
 		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
-		b, err := readHead(filepath.Join(dir, e.Name(), "style.css"), headerBytes)
+		b, err := s.readHead(filepath.Join(dir, e.Name(), "style.css"), headerBytes)
 		if err != nil {
 			continue
 		}
@@ -198,7 +205,7 @@ func (s *scan) muPlugins() []engine.Finding {
 			continue
 		}
 		item := e.Name()
-		if b, err := readHead(filepath.Join(dir, e.Name()), headerBytes); err == nil {
+		if b, err := s.readHead(filepath.Join(dir, e.Name()), headerBytes); err == nil {
 			if name, ok := header(b, "Plugin Name"); ok && name != "" {
 				item += " (" + name
 				if v := headerVersion(b); v != "" {
@@ -231,9 +238,11 @@ func (s *scan) wpConfig() []engine.Finding {
 		}
 		path = up
 	}
-	b, err := readHead(path, maxRead)
+	b, err := s.readHead(path, maxRead)
 	if err != nil {
-		s.warn("couldn't read wp-config.php: %v", err)
+		if !isNotRegular(err) { // already warned
+			s.warn("couldn't read wp-config.php: %v", err)
+		}
 		return nil
 	}
 	cfg := parseConfig(string(b))

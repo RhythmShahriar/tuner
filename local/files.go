@@ -4,6 +4,7 @@
 package local
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io/fs"
@@ -123,16 +124,25 @@ func (s *scan) file(p, name string, d fs.DirEntry) *engine.Finding {
 		size = fi.Size()
 	}
 	ev := []string{s.rel(p) + sizeNote(size)}
+	// Only regular files are read. Links aren't followed in the web root,
+	// and FIFOs, sockets and devices can block a read forever.
 	regular := d.Type().IsRegular()
-	secrets := func() []matchers.Secret {
+	if special := fs.ModeNamedPipe | fs.ModeSocket | fs.ModeDevice | fs.ModeCharDevice; d.Type()&special != 0 {
+		s.skip(p, fileKind(d.Type()))
+		return nil
+	}
+	head := func() []byte {
 		if !regular {
 			return nil
 		}
-		b, err := readHead(p, maxRead)
-		if err != nil {
-			return nil
+		b, _ := readHead(p, maxRead)
+		return b
+	}
+	secrets := func() []matchers.Secret {
+		if b := head(); b != nil {
+			return matchers.FindSecrets(b)
 		}
-		return matchers.FindSecrets(b)
+		return nil
 	}
 	with := func(f engine.Finding, sec []matchers.Secret) *engine.Finding {
 		f.Evidence.Secrets = sec
@@ -195,7 +205,7 @@ func (s *scan) file(p, name string, d fs.DirEntry) *engine.Finding {
 		}
 
 	case lower == "auth.json" && !inComponent:
-		if sec := secrets(); len(sec) > 0 || strings.Contains(string(mustHead(p)), "github-oauth") {
+		if sec := secrets(); len(sec) > 0 || bytes.Contains(head(), []byte("github-oauth")) {
 			return with(s.finding("local-composer-auth", engine.High, p, "Composer auth.json in the web root", ev,
 				"auth.json holds tokens for GitHub and private package repositories.",
 				"Move it out of the web root (use COMPOSER_AUTH or ~/.composer/auth.json) and rotate the tokens.",
@@ -215,11 +225,6 @@ func (s *scan) file(p, name string, d fs.DirEntry) *engine.Finding {
 func (s *scan) findingPtr(id string, sev engine.Severity, p, title string, ev []string, impact, fix string, tags ...string) *engine.Finding {
 	f := s.finding(id, sev, p, title, ev, impact, fix, tags...)
 	return &f
-}
-
-func mustHead(p string) []byte {
-	b, _ := readHead(p, maxRead)
-	return b
 }
 
 func sizeNote(n int64) string {

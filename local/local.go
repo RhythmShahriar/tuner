@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -85,7 +86,7 @@ func Scan(ctx context.Context, root string, opts Options, h engine.Hooks) (*engi
 		}
 	}
 	s.web = abs
-	if s.wp = detectWordPress(abs); s.wp != nil {
+	if s.wp = s.detectWordPress(ctx, abs); s.wp != nil {
 		add("wordpress")
 		add("php")
 		fp.WordPress = s.wp.version
@@ -184,6 +185,7 @@ type scan struct {
 	pkgs     []Package // from composer.lock
 	checks   int       // local checks evaluated, for the summary
 	warnings []string
+	skipped  map[string]bool // special files already warned about
 }
 
 func (s *scan) warn(format string, a ...any) {
@@ -220,14 +222,91 @@ func (s *scan) rel(abs string) string {
 	return "/" + filepath.ToSlash(r)
 }
 
-// readHead reads at most n bytes of a file.
+// notRegularError is returned for a path that isn't a regular file (or a
+// link to one): a FIFO, socket or device. Reading those can block forever
+// or never end, so local scans skip them.
+type notRegularError struct {
+	path string
+	kind string // "a named pipe", "a link to a device", …
+}
+
+func (e *notRegularError) Error() string { return e.path + " is " + e.kind + ", not a regular file" }
+
+// readHead reads at most n bytes of a regular file. Anything else is
+// refused with a *notRegularError before it is opened and again after
+// it, in case the path was swapped in between.
 func readHead(path string, n int64) ([]byte, error) {
-	f, err := os.Open(path) //nolint:gosec // reading the user's own site files is the point of a local scan
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if fi.Mode()&fs.ModeSymlink != 0 {
+		// Links to regular files are fine; WordPress setups often link
+		// wp-config.php from elsewhere.
+		target, err := os.Stat(path)
+		if err != nil {
+			return nil, err
+		}
+		if !target.Mode().IsRegular() {
+			return nil, &notRegularError{path, "a link to " + fileKind(target.Mode())}
+		}
+	} else if !fi.Mode().IsRegular() {
+		return nil, &notRegularError{path, fileKind(fi.Mode())}
+	}
+	f, err := openRead(path)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
+	if fi, err := f.Stat(); err != nil {
+		return nil, err
+	} else if !fi.Mode().IsRegular() {
+		return nil, &notRegularError{path, fileKind(fi.Mode())}
+	}
 	return io.ReadAll(io.LimitReader(f, n))
+}
+
+// readHead is readHead that warns when it skips a FIFO, socket or device,
+// so a scan that left a file out says so.
+func (s *scan) readHead(path string, n int64) ([]byte, error) {
+	b, err := readHead(path, n)
+	if nr := (*notRegularError)(nil); errors.As(err, &nr) {
+		s.skip(path, nr.kind)
+	}
+	return b, err
+}
+
+// skip warns once per path that a special file was left out.
+func (s *scan) skip(path, kind string) {
+	if s.skipped == nil {
+		s.skipped = map[string]bool{}
+	}
+	if !s.skipped[path] {
+		s.skipped[path] = true
+		s.warn("skipped %s: it is %s, not a regular file", s.rel(path), kind)
+	}
+}
+
+func isNotRegular(err error) bool {
+	var nr *notRegularError
+	return errors.As(err, &nr)
+}
+
+// fileKind names a non-regular file type for messages.
+func fileKind(m fs.FileMode) string {
+	switch {
+	case m.IsDir():
+		return "a folder"
+	case m&fs.ModeNamedPipe != 0:
+		return "a named pipe"
+	case m&fs.ModeSocket != 0:
+		return "a socket"
+	case m&fs.ModeCharDevice != 0:
+		return "a character device"
+	case m&fs.ModeDevice != 0:
+		return "a device"
+	}
+	return "a special file"
 }
 
 // static is an engine.Advisor that returns fixed findings, so local
