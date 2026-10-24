@@ -5,9 +5,7 @@ package local
 
 import (
 	"bytes"
-	"context"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -40,52 +38,55 @@ var (
 // .env variants that are templates, not real settings.
 var envTemplates = []string{".env.example", ".env.sample", ".env.dist", ".env.template", ".env.defaults"}
 
-// walk looks for files that shouldn't be in the document root. Nothing is
-// known to be served: remote checks confirm that, so findings say "in the
-// web root".
-func (s *scan) walk(ctx context.Context) []engine.Finding {
-	if _, err := os.Stat(s.web); err != nil {
-		return nil
-	}
-	s.checks += 11
-	var out []engine.Finding
-	entries := 0
-	err := filepath.WalkDir(s.web, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil // unreadable: skip it, keep going
-		}
-		if entries++; entries > s.opts.MaxEntries {
-			s.warn("stopped looking for stray files after %s entries; scan a smaller folder to cover the rest", thousands(s.opts.MaxEntries))
-			s.stoppedBy = "budget"
-			return fs.SkipAll
-		}
-		if entries%1024 == 0 && ctx.Err() != nil {
-			return ctx.Err()
-		}
-		name := d.Name()
-		if d.IsDir() {
-			if p == s.web {
-				return nil
-			}
-			f, skip := s.dir(p, name)
-			if f != nil {
-				out = append(out, *f)
-			}
-			if skip {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if f := s.file(p, name, d); f != nil {
-			out = append(out, *f)
-		}
-		return nil
-	})
-	if err != nil && ctx.Err() == nil {
-		s.warn("walking %s: %v", s.web, err)
-	}
-	return out
+// strayChecks are the stray-file checks, for the summary's count.
+var strayChecks = []string{
+	"local-vcs-dir", "local-db-admin", "local-dotenv", "local-wp-config-backup", "local-php-backup", "local-sql-dump",
+	"local-backup-archive", "local-log-file", "local-phpinfo", "local-composer-auth", "local-private-key",
 }
+
+// strayVisitor looks for files that shouldn't be in the document root.
+// Nothing is known to be served: remote checks confirm that, so
+// findings say "in the web root".
+type strayVisitor struct {
+	s *scan
+	collector
+}
+
+func (v *strayVisitor) root() string { return v.s.web }
+func (v *strayVisitor) checks() int  { return len(strayChecks) }
+
+func (v *strayVisitor) enter(e *entry) bool {
+	f, skip := v.s.dir(e.path, e.name)
+	if f != nil {
+		v.add(*f)
+	}
+	return !skip
+}
+
+// need reads only the files whose check looks inside them; the rest are
+// judged by name and size.
+func (v *strayVisitor) need(e *entry) need {
+	lower := strings.ToLower(e.name)
+	switch {
+	case envName.MatchString(e.name), wpConfigCopy.MatchString(e.name), phpCopy.MatchString(e.name),
+		strings.HasSuffix(lower, ".php"), strings.HasSuffix(lower, ".pem"), strings.HasSuffix(lower, ".key"),
+		slices.Contains(logNames, lower), slices.Contains(keyNames, lower), lower == "auth.json":
+		return needVisit | needHead
+	}
+	return needVisit
+}
+
+func (v *strayVisitor) visit(e *entry, f *fileData) {
+	if x := v.s.file(e, f); x != nil {
+		v.add(*x)
+	}
+}
+
+// Log and key file names the stray-file checks look for.
+var (
+	logNames = []string{"debug.log", "error_log", "error.log", "php_errors.log", "php-errors.log"}
+	keyNames = []string{"id_rsa", "id_ecdsa", "id_ed25519"}
+)
 
 // dir reports a directory worth a finding, and whether to skip its contents.
 func (s *scan) dir(p, name string) (*engine.Finding, bool) {
@@ -116,30 +117,17 @@ func (s *scan) dir(p, name string) (*engine.Finding, bool) {
 	return nil, false
 }
 
-// file reports a file worth a finding.
-func (s *scan) file(p, name string, d fs.DirEntry) *engine.Finding {
+// file reports a file worth a finding. Only regular files were read:
+// links aren't followed in the web root, so f.head is nil for them.
+func (s *scan) file(e *entry, f *fileData) *engine.Finding {
+	p, name := e.path, e.name
 	lower := strings.ToLower(name)
 	// Plugins and themes ship their own archives, examples and tests.
 	inComponent := strings.Contains(filepath.ToSlash(p), "/wp-content/plugins/") || strings.Contains(filepath.ToSlash(p), "/wp-content/themes/")
-	size := int64(-1)
-	if fi, err := d.Info(); err == nil {
-		size = fi.Size()
-	}
+	size := f.size
 	ev := []string{s.rel(p) + sizeNote(size)}
-	// Only regular files are read. Links aren't followed in the web root,
-	// and FIFOs, sockets and devices can block a read forever.
-	regular := d.Type().IsRegular()
-	if special := fs.ModeNamedPipe | fs.ModeSocket | fs.ModeDevice | fs.ModeCharDevice; d.Type()&special != 0 {
-		s.skip(p, fileKind(d.Type()))
-		return nil
-	}
-	head := func() []byte {
-		if !regular {
-			return nil
-		}
-		b, _ := readHead(p, maxRead)
-		return b
-	}
+	regular := e.regular()
+	head := func() []byte { return f.head }
 	secrets := func() []matchers.Secret {
 		if b := head(); b != nil {
 			return matchers.FindSecrets(b)
@@ -187,7 +175,7 @@ func (s *scan) file(p, name string, d fs.DirEntry) *engine.Finding {
 			"Site backups usually contain the whole site including wp-config.php or .env. Backup plugins protect their folders with .htaccess, which nginx ignores.",
 			"Store backups outside the web root or off the server, and delete old ones.", "leak", "backup")
 
-	case lower == "debug.log" || lower == "error_log" || lower == "error.log" || lower == "php_errors.log" || lower == "php-errors.log":
+	case slices.Contains(logNames, lower):
 		return with(s.finding("local-log-file", engine.Medium, p, "Log file in the web root", ev,
 			"Error logs reveal file paths, plugin internals, and sometimes queries, emails or tokens.",
 			"Write logs outside the web root (WP_DEBUG_LOG or error_log in php.ini) and delete this one.",
@@ -200,7 +188,7 @@ func (s *scan) file(p, name string, d fs.DirEntry) *engine.Finding {
 
 	case strings.HasSuffix(lower, ".php") && regular && size >= 0 && size <= maxPHPInfoSize && !inComponent &&
 		(infoName.MatchString(name) || filepath.Dir(p) == s.web):
-		if b, err := readHead(p, maxPHPInfoSize); err == nil && phpinfoFn.Match(b) {
+		if b := head(); b != nil && phpinfoFn.Match(b) {
 			return s.findingPtr("local-phpinfo", engine.Medium, p, "phpinfo() page in the web root", ev,
 				"phpinfo() shows the PHP version, modules, paths and environment variables, which may include secrets.",
 				"Delete it.", "php", "disclosure")
@@ -214,7 +202,7 @@ func (s *scan) file(p, name string, d fs.DirEntry) *engine.Finding {
 				"leak", "secrets"), sec)
 		}
 
-	case strings.HasSuffix(lower, ".pem") || strings.HasSuffix(lower, ".key") || lower == "id_rsa" || lower == "id_ecdsa" || lower == "id_ed25519":
+	case strings.HasSuffix(lower, ".pem") || strings.HasSuffix(lower, ".key") || slices.Contains(keyNames, lower):
 		if sec := secrets(); slices.ContainsFunc(sec, func(x matchers.Secret) bool { return x.Kind == "private-key" }) {
 			return with(s.finding("local-private-key", engine.High, p, "Private key in the web root", ev,
 				"Anyone who downloads a private key can impersonate the server or log in where the key is trusted.",

@@ -567,7 +567,7 @@ func TestRoot(t *testing.T) {
 func TestMaxEntries(t *testing.T) {
 	root := tree(t, map[string]string{"a/b/c/d.txt": "", "e/f.txt": "", "g.txt": ""})
 	res := scanTree(t, root, Options{MaxEntries: 2})
-	if !slices.ContainsFunc(res.Warnings, func(w string) bool { return strings.Contains(w, "stopped looking") }) {
+	if !slices.ContainsFunc(res.Warnings, func(w string) bool { return strings.Contains(w, "stopped after 2 entries") }) {
 		t.Errorf("warnings %v", res.Warnings)
 	}
 }

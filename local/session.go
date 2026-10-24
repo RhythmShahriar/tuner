@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/RhythmShahriar/tuner/engine"
 )
@@ -69,10 +70,10 @@ type handlerSwitch struct {
 	startedBefore bool   // session_start() only appears before it in the file
 }
 
-// sessionUploadProgress checks the CVE-2026-115560 preconditions.
-func (s *scan) sessionUploadProgress(ctx context.Context) []engine.Finding {
-	s.checks++
-	switches, overrides := s.sessionCode(ctx)
+// sessionUploadProgress checks the CVE-2026-115560 preconditions, with
+// the code the walk found.
+func (s *scan) sessionUploadProgress(ctx context.Context, code *sessionVisitor) []engine.Finding {
+	switches, overrides := code.results()
 	var toPHP, toUnsafe []handlerSwitch
 	for _, sw := range switches {
 		switch {
@@ -341,6 +342,11 @@ func parseKV(path string, line *regexp.Regexp) map[string]string {
 	if err != nil {
 		return nil
 	}
+	return kvFrom(b, line)
+}
+
+// kvFrom parses the settings in b, one per line.
+func kvFrom(b []byte, line *regexp.Regexp) map[string]string {
 	kv := map[string]string{}
 	for _, l := range strings.Split(string(b), "\n") {
 		l = strings.TrimSpace(l)
@@ -376,77 +382,99 @@ func globSorted(pattern string) []string {
 	return m
 }
 
-// sessionCode finds runtime switches of session.serialize_handler in the
-// site's PHP files, and .user.ini/.htaccess overrides of the two settings.
-// Like the stray-file walk it skips vendor/ and node_modules/: they hold
-// most of a project's files. A library that switches the handler is
-// the app's choice to call.
-func (s *scan) sessionCode(ctx context.Context) ([]handlerSwitch, []override) {
-	var switches []handlerSwitch
-	var ovs []override
-	entries := 0
-	var unreadable []string
-	err := filepath.WalkDir(s.root, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			unreadable = append(unreadable, s.rel(p)+": "+errText(err))
-			return nil // keep going
-		}
-		if entries++; entries > s.opts.MaxEntries {
-			s.warn("stopped after %s entries; the session check may be incomplete", thousands(s.opts.MaxEntries))
-			s.stoppedBy = "budget"
-			return fs.SkipAll
-		}
-		if entries%1024 == 0 && ctx.Err() != nil {
-			return ctx.Err()
-		}
-		name := d.Name()
-		if d.IsDir() {
-			switch {
-			case p == s.root:
-			case name == "node_modules" || name == "vendor" || name == ".git" || name == ".svn" || name == ".hg":
-				return fs.SkipDir
-			case name == "cache" && filepath.Base(filepath.Dir(p)) == "wp-content":
-				return fs.SkipDir
-			case yearDir.MatchString(name) && filepath.Base(filepath.Dir(p)) == "uploads":
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if !d.Type().IsRegular() {
-			return nil
-		}
-		switch {
-		case name == ".user.ini":
-			if kv := parseKV(p, iniLine); hasSessionKey(kv) {
-				ovs = append(ovs, override{path: p, rel: s.rel(p), kind: ".user.ini", kv: kv})
-			}
-		case name == ".htaccess":
-			if kv := parseKV(p, htaccessLine); hasSessionKey(kv) {
-				ovs = append(ovs, override{path: p, rel: s.rel(p), kind: ".htaccess", kv: kv})
-			}
-		case strings.HasSuffix(strings.ToLower(name), ".php"):
-			b, err := readHead(p, maxRead)
-			if err != nil || !bytes.Contains(b, []byte("serialize_handler")) {
-				return nil
-			}
-			switches = append(switches, findSwitches(p, b)...)
-		}
-		return nil
-	})
-	if err != nil && ctx.Err() == nil {
-		s.warn("session check: walking %s: %v", s.rel(s.root), err)
+// sessionVisitor finds runtime switches of session.serialize_handler in
+// the site's PHP files, and .user.ini/.htaccess overrides of the two
+// settings. Like the stray-file checks it skips vendor/ and
+// node_modules/: they hold most of a project's files. A library that
+// switches the handler is the app's choice to call.
+type sessionVisitor struct {
+	s        *scan
+	mu       sync.Mutex
+	switches []handlerSwitch
+	ovs      []override
+}
+
+func (v *sessionVisitor) root() string { return v.s.root }
+func (v *sessionVisitor) checks() int  { return 1 }
+
+func (v *sessionVisitor) enter(e *entry) bool {
+	parent := filepath.Base(filepath.Dir(e.path))
+	switch name := e.name; {
+	case name == "node_modules" || name == "vendor" || name == ".git" || name == ".svn" || name == ".hg":
+		return false
+	case name == "cache" && parent == "wp-content":
+		return false
+	case yearDir.MatchString(name) && parent == "uploads":
+		return false
 	}
-	if len(unreadable) > 0 {
-		s.warn("the session check couldn't read %d entr%s, so it may be incomplete (first: %s)",
-			len(unreadable), plural2(len(unreadable), "y", "ies"), unreadable[0])
+	return true
+}
+
+func (v *sessionVisitor) need(e *entry) need {
+	if !e.regular() {
+		return 0
 	}
-	// Literal switches to php first, ones confirmed before session_start()
-	// first among those, so the evidence shows the strongest case.
+	if e.name == ".user.ini" || e.name == ".htaccess" || strings.HasSuffix(strings.ToLower(e.name), ".php") {
+		return needHead
+	}
+	return 0
+}
+
+func (v *sessionVisitor) visit(e *entry, f *fileData) {
+	if f.head == nil {
+		return
+	}
+	var ov *override
+	var sws []handlerSwitch
+	switch e.name {
+	case ".user.ini":
+		if kv := kvFrom(f.head, iniLine); hasSessionKey(kv) {
+			ov = &override{path: e.path, rel: v.s.rel(e.path), kind: ".user.ini", kv: kv}
+		}
+	case ".htaccess":
+		if kv := kvFrom(f.head, htaccessLine); hasSessionKey(kv) {
+			ov = &override{path: e.path, rel: v.s.rel(e.path), kind: ".htaccess", kv: kv}
+		}
+	default:
+		// The regexes are case-insensitive and slow on big files, so
+		// only files that mention the setting (ini names are case
+		// sensitive) and the call (function names aren't) get them.
+		if !bytes.Contains(f.head, []byte("serialize_handler")) {
+			return
+		}
+		lower := f.lower()
+		if !bytes.Contains(lower, []byte("ini_set")) && !bytes.Contains(lower, []byte("ini_alter")) {
+			return
+		}
+		sws = findSwitchesLower(e.path, f.head, lower)
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if ov != nil {
+		v.ovs = append(v.ovs, *ov)
+	}
+	v.switches = append(v.switches, sws...)
+}
+
+// results returns the switches, literal switches to php first and ones
+// confirmed before session_start() first among those, so the evidence
+// shows the strongest case. The walk's workers find things in any
+// order, so overrides are sorted too.
+func (v *sessionVisitor) results() ([]handlerSwitch, []override) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	switches, ovs := slices.Clone(v.switches), slices.Clone(v.ovs)
 	slices.SortStableFunc(switches, func(a, b handlerSwitch) int {
 		return cmp.Or(
 			cmp.Compare(rankSwitch(a), rankSwitch(b)),
 			strings.Compare(a.file, b.file),
 			cmp.Compare(a.line, b.line))
+	})
+	// Shallow folders first, so the web root's override is applied
+	// before the folders below it start from it.
+	slices.SortFunc(ovs, func(a, b override) int {
+		return cmp.Or(cmp.Compare(strings.Count(a.path, string(filepath.Separator)), strings.Count(b.path, string(filepath.Separator))),
+			strings.Compare(a.path, b.path))
 	})
 	return switches, ovs
 }
@@ -472,11 +500,19 @@ func hasSessionKey(kv map[string]string) bool {
 // source, ignoring comments, strings and inline HTML. It also notes
 // where session_start() sits relative to each.
 func findSwitches(path string, src []byte) []handlerSwitch {
+	return findSwitchesLower(path, src, bytes.ToLower(src))
+}
+
+// findSwitchesLower is findSwitches with src already in lower case, to
+// skip the session_start() search in files that never call it.
+func findSwitchesLower(path string, src, lower []byte) []handlerSwitch {
 	code, notCode := scanPHP(src)
 	var starts [][]int
-	for _, st := range sessionStart.FindAllIndex(code, -1) {
-		if !notCode[st[0]] {
-			starts = append(starts, st)
+	if bytes.Contains(lower, []byte("session_start")) {
+		for _, st := range sessionStart.FindAllIndex(code, -1) {
+			if !notCode[st[0]] {
+				starts = append(starts, st)
+			}
 		}
 	}
 	var out []handlerSwitch

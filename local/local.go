@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"io/fs"
 	"net/url"
@@ -22,6 +23,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/RhythmShahriar/tuner/engine"
@@ -62,6 +64,9 @@ type Options struct {
 	// ConfigRoot is where PHP's system configuration (/etc/php…, PHP-FPM
 	// pools) is read from; empty means "/". Tests point it at a fake tree.
 	ConfigRoot string
+
+	// read replaces readFile in the walk, so tests can count opens.
+	read func(path string, n int64, hs ...hash.Hash) ([]byte, int64, error)
 }
 
 // Scan scans the directory root. The fingerprint and then each finding
@@ -131,9 +136,11 @@ func scanStatus(ctx context.Context, root string, opts Options, h engine.Hooks) 
 		findings = append(findings, s.muPlugins()...)
 	}
 	findings = append(findings, s.laravelEnv()...)
-	findings = append(findings, s.walk(ctx)...)
+	stray, session := &strayVisitor{s: s}, &sessionVisitor{s: s}
+	s.walkTree(ctx, stray, session)
+	findings = append(findings, stray.findings()...)
 	osv := s.vulnStep(func() { findings = append(findings, s.composer(ctx)...) })
-	findings = append(findings, s.sessionUploadProgress(ctx)...)
+	findings = append(findings, s.sessionUploadProgress(ctx, session)...)
 	findings, _ = engine.Filtered(static(findings), opts.Select).Advise(ctx, s.base, *fp)
 	advisor := s.advise(ctx, *fp, &findings)
 
@@ -231,11 +238,15 @@ type scan struct {
 	checks   int       // local checks evaluated, for the summary
 	warnings []string
 	skipped  map[string]bool // special files already warned about
-	// stoppedBy is "budget" once a walk stopped at MaxEntries.
+	// stoppedBy is "budget" once the walk stopped at MaxEntries.
 	stoppedBy string
+	// mu guards warnings and skipped: the walk's workers warn too.
+	mu sync.Mutex
 }
 
 func (s *scan) warn(format string, a ...any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.warnings = append(s.warnings, fmt.Sprintf(format, a...))
 }
 
@@ -281,34 +292,52 @@ func (e *notRegularError) Error() string { return e.path + " is " + e.kind + ", 
 // refused with a *notRegularError before it is opened and again after
 // it, in case the path was swapped in between.
 func readHead(path string, n int64) ([]byte, error) {
+	b, _, err := readFile(path, n)
+	return b, err
+}
+
+// readFile is readHead that also returns the file's size and feeds the
+// whole file, not just its head, to hs. The file is opened once.
+func readFile(path string, n int64, hs ...hash.Hash) ([]byte, int64, error) {
 	fi, err := os.Lstat(path)
 	if err != nil {
-		return nil, err
+		return nil, -1, err
 	}
 	if fi.Mode()&fs.ModeSymlink != 0 {
 		// Links to regular files are fine; WordPress setups often link
 		// wp-config.php from elsewhere.
 		target, err := os.Stat(path)
 		if err != nil {
-			return nil, err
+			return nil, -1, err
 		}
 		if !target.Mode().IsRegular() {
-			return nil, &notRegularError{path, "a link to " + fileKind(target.Mode())}
+			return nil, -1, &notRegularError{path, "a link to " + fileKind(target.Mode())}
 		}
 	} else if !fi.Mode().IsRegular() {
-		return nil, &notRegularError{path, fileKind(fi.Mode())}
+		return nil, -1, &notRegularError{path, fileKind(fi.Mode())}
 	}
 	f, err := openRead(path)
 	if err != nil {
-		return nil, err
+		return nil, -1, err
 	}
 	defer func() { _ = f.Close() }()
-	if fi, err := f.Stat(); err != nil {
-		return nil, err
+	if fi, err = f.Stat(); err != nil {
+		return nil, -1, err
 	} else if !fi.Mode().IsRegular() {
-		return nil, &notRegularError{path, fileKind(fi.Mode())}
+		return nil, -1, &notRegularError{path, fileKind(fi.Mode())}
 	}
-	return io.ReadAll(io.LimitReader(f, n))
+	head, err := io.ReadAll(io.LimitReader(f, n))
+	if err != nil || len(hs) == 0 {
+		return head, fi.Size(), err
+	}
+	w := make([]io.Writer, len(hs))
+	for i, h := range hs {
+		w[i] = h
+	}
+	all := io.MultiWriter(w...)
+	_, _ = all.Write(head) // hash.Hash writes never fail
+	_, err = io.Copy(all, f)
+	return head, fi.Size(), err
 }
 
 // readHead is readHead that warns when it skips a FIFO, socket or device,
@@ -323,12 +352,14 @@ func (s *scan) readHead(path string, n int64) ([]byte, error) {
 
 // skip warns once per path that a special file was left out.
 func (s *scan) skip(path, kind string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.skipped == nil {
 		s.skipped = map[string]bool{}
 	}
 	if !s.skipped[path] {
 		s.skipped[path] = true
-		s.warn("skipped %s: it is %s, not a regular file", s.rel(path), kind)
+		s.warnings = append(s.warnings, fmt.Sprintf("skipped %s: it is %s, not a regular file", s.rel(path), kind))
 	}
 }
 

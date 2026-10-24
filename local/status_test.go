@@ -39,7 +39,7 @@ func TestSessionEntryCap(t *testing.T) {
 		files[fmt.Sprintf("lib/f%02d.php", i)] = "<?php echo 1;"
 	}
 	res, st := scanWithStatus(t, tree(t, files), Options{MaxEntries: 10})
-	if !hasWarning(res, "stopped after 10 entries; the session check may be incomplete") {
+	if !hasWarning(res, "stopped after 10 entries, so the file checks are incomplete; scan a smaller folder to cover the rest") {
 		t.Errorf("warnings %q", res.Warnings)
 	}
 	if st.complete || st.stoppedBy != "budget" {
@@ -78,7 +78,7 @@ func TestSessionUnreadableFolder(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) }) //nolint:gosec // restore so TempDir can clean up
 	res := scanTree(t, root, Options{})
-	if !hasWarning(res, "the session check couldn't read 1 entry, so it may be incomplete (first: /private: permission denied)") {
+	if !hasWarning(res, "couldn't read 1 entry, so the file checks may be incomplete (first: /private: permission denied)") {
 		t.Errorf("warnings %q", res.Warnings)
 	}
 }
