@@ -763,6 +763,17 @@ func TestBadHeaderValues(t *testing.T) {
 			t.Errorf("%q: exit %d, stderr %q", args, code, errs)
 		}
 	}
+	// A rejected header names the header but never shows its value: CI
+	// logs keep what stderr says.
+	for _, c := range []struct{ header, want string }{
+		{"Authorization: Bearer topsecret\rX-Evil: 1", "rhythm tuner scan: bad -H Authorization: the value can't hold line breaks or control characters\n"},
+		{"Bearer topsecret", "rhythm tuner scan: bad -H: use \"Name: value\"\n"},
+	} {
+		code, _, errs := tuner(t, "scan", srv.URL, "-H", c.header)
+		if code != exitUsage || errs != c.want || strings.Contains(errs, "topsecret") {
+			t.Errorf("%q: exit %d, stderr %q", c.header, code, errs)
+		}
+	}
 	if hits.Load() != 0 {
 		t.Errorf("bad headers still sent %d requests", hits.Load())
 	}

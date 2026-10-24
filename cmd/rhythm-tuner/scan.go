@@ -333,10 +333,13 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 		name, value, ok := strings.Cut(raw, ":")
 		value = strings.TrimSpace(value)
 		if name = strings.TrimSpace(name); !ok || !validHeaderName(name) {
-			return nil, usagef("bad header %q, use \"Name: value\"", raw)
+			// The name alone may be the start of a credential, so this
+			// message shows nothing of what was given.
+			return nil, usagef("bad -H: use \"Name: value\"")
 		}
 		if !validHeaderValue(value) {
-			return nil, usagef("bad header %q: the value can't hold line breaks or control characters", raw)
+			// Name the header, never quote its value: it is often a token.
+			return nil, usagef("bad -H %s: the value can't hold line breaks or control characters", name)
 		}
 		h.Add(name, value)
 	}
