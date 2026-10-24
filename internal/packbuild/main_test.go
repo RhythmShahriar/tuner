@@ -7,9 +7,12 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/json"
 	"flag"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -41,7 +44,7 @@ func TestGolden(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
-	if !strings.Contains(stdout, "pack 2026.10.01-100000: 1 checks, min rhythm-tuner 0.2.0, commit 0123456789") || strings.Contains(stdout, "unsigned") {
+	if !strings.Contains(stdout, "pack 2026.10.01-100000: 1 checks, 0 data files, 0 local rules, min rhythm-tuner 0.2.0, commit 0123456789") || strings.Contains(stdout, "unsigned") {
 		t.Errorf("stdout:\n%s", stdout)
 	}
 	names := []string{checkpack.ArchiveName, checkpack.ManifestName, checkpack.SumsName, checkpack.SigName}
@@ -138,5 +141,43 @@ func TestGenKey(t *testing.T) {
 	}
 	if priv == nil || pub == nil || !pub.Equal(priv.Public()) {
 		t.Errorf("key pair doesn't match:\n%s", o.String())
+	}
+}
+
+// Fingerprint data and local rules travel in the pack; rule fixtures
+// stay out, like check fixtures.
+func TestDataAndLocalRules(t *testing.T) {
+	code, out, stdout, stderr := build(t, "-data", "testdata/data", "-local", "testdata/local")
+	if code != 0 || !strings.Contains(stdout, "1 checks, 1 data files, 1 local rules") {
+		t.Fatalf("exit %d: %s\n%s", code, stderr, stdout)
+	}
+	read := func(name string) []byte {
+		data, err := os.ReadFile(filepath.Join(out, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return data
+	}
+	var m checkpack.Manifest
+	if err := json.Unmarshal(read(checkpack.ManifestName), &m); err != nil || !slices.Equal(m.Data, []string{"rest-namespaces.json"}) || m.Local != 1 {
+		t.Fatalf("manifest %+v, %v", m, err)
+	}
+	fsys, _, err := checkpack.Open(m, read(checkpack.ArchiveName), "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, err := fs.ReadFile(fsys, "data/rest-namespaces.json"); err != nil || !bytes.Contains(data, []byte("contact-form-7")) {
+		t.Errorf("data: %q %v", data, err)
+	}
+	if _, err := fs.Stat(fsys, "local/sample.yaml"); err != nil {
+		t.Error(err)
+	}
+	if _, err := fs.Stat(fsys, "local/sample_test.yaml"); err == nil {
+		t.Error("rule fixtures should stay out of the pack")
+	}
+
+	// A folder named on the command line must exist; the defaults may not.
+	if code, _, _, stderr := build(t, "-data", "testdata/nope"); code != 2 || !strings.Contains(stderr, "-data testdata/nope: not a directory") {
+		t.Errorf("missing -data: exit %d %s", code, stderr)
 	}
 }

@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 
 # Publishes checks/ as a check pack on the rolling checks-latest release,
-# so new checks reach users without a new binary. rhythm-tuner downloads
+# with the fingerprint data (fingerprint/data/*.json) and local scan rules
+# (local/rules/*.yaml), so new checks and data reach users without a new
+# binary. rhythm-tuner downloads
 # the pack (see checkpack/ and https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Check-Packs), verifies the signature on
 # its checksums and uses it when it's newer than the checks compiled into
 # the binary.
@@ -20,6 +22,8 @@ on:
     branches: [master]
     paths:
       - "checks/**"
+      - "fingerprint/data/**"
+      - "local/rules/**"
       - ".github/workflows/checks-pack.yml"
   workflow_dispatch:
 
@@ -46,9 +50,13 @@ jobs:
         with:
           go-version-file: go.mod
 
-      # Every check must pass its positive and negative fixtures.
+      # Every check must pass its positive and negative fixtures, and the
+      # fingerprint data and local rules their own tests.
       - name: Test checks
-        run: go test ./engine/... ./checkpack ./internal/packbuild
+        run: go test ./engine/... ./checkpack ./internal/packbuild ./fingerprint/... ./local/...
+
+      - name: Lint checks
+        run: go run ./cmd/rhythm-tuner checks lint checks
 
       # The same command as a local `make pack`, plus the signature, so the
       # assets can be rebuilt and compared byte for byte. packbuild refuses

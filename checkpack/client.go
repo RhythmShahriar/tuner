@@ -83,6 +83,34 @@ type Pack struct {
 	Warning error           // why a newer pack, if any, isn't the one returned
 }
 
+// Data returns the fingerprint data file name (e.g. rest-namespaces.json)
+// from the pack, or false when the pack has none, in which case the copy
+// built into the binary applies.
+func (p *Pack) Data(name string) ([]byte, bool) {
+	if p == nil || p.FS == nil || !dataName.MatchString(name) {
+		return nil, false
+	}
+	data, err := fs.ReadFile(p.FS, DataDir+"/"+name)
+	return data, err == nil
+}
+
+// LocalRules returns the pack's local scan rules as a filesystem of
+// <name>.yaml files, or nil when the pack has none, so the rules built
+// into the binary apply.
+func (p *Pack) LocalRules() fs.FS {
+	if p == nil || p.FS == nil {
+		return nil
+	}
+	if names, _ := fs.Glob(p.FS, LocalDir+"/*.yaml"); len(names) == 0 {
+		return nil
+	}
+	sub, err := fs.Sub(p.FS, LocalDir)
+	if err != nil {
+		return nil
+	}
+	return sub
+}
+
 // DefaultCacheDir is ~/.cache/rhythm/tuner/checks (or the OS equivalent).
 func DefaultCacheDir() string {
 	d, err := os.UserCacheDir()

@@ -12,6 +12,11 @@
 // builds are reproducible too. The key is read from the environment and
 // never from a file, so it cannot end up committed next to the checks.
 //
+// The pack also carries fingerprint data (-data, *.json) and local scan
+// rules (-local, *.yaml). Their default folders are skipped when missing,
+// so the pack builds before either exists; a folder named on the command
+// line must exist.
+//
 // -gen-key prints a new key pair: the private key for the Actions secret
 // and the public key for checkpack/keys.go.
 package main
@@ -23,6 +28,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -37,6 +43,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("packbuild", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	src := flags.String("src", "checks", "checks directory")
+	dataDir := flags.String("data", "fingerprint/data", "fingerprint data directory (*.json)")
+	localDir := flags.String("local", "local/rules", "local rules directory (*.yaml)")
 	out := flags.String("out", "dist/checks-pack", "output directory")
 	commit := flags.String("commit", "", "commit SHA the pack is built from (required)")
 	at := flags.String("time", "", "that commit's time, RFC 3339 (required)")
@@ -69,7 +77,23 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	built, err := checkpack.Build(os.DirFS(*src), *commit, created)
+	set := map[string]bool{}
+	flags.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	var x checkpack.Extras
+	for _, e := range []struct {
+		flag, dir string
+		dst       *fs.FS
+	}{{"data", *dataDir, &x.Data}, {"local", *localDir, &x.Local}} {
+		switch info, err := os.Stat(e.dir); {
+		case err == nil && info.IsDir():
+			*e.dst = os.DirFS(e.dir)
+		case set[e.flag]:
+			fmt.Fprintf(stderr, "packbuild: -%s %s: not a directory\n", e.flag, e.dir)
+			return 2
+		}
+	}
+
+	built, err := checkpack.BuildWith(os.DirFS(*src), x, *commit, created)
 	if err != nil {
 		fmt.Fprintln(stderr, "packbuild:", err)
 		return 1
@@ -95,7 +119,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, p)
 	}
 	m := built.Manifest
-	fmt.Fprintf(stdout, "pack %s: %d checks, min rhythm-tuner %s, commit %s\n", m.Version, m.Checks, m.MinTuner, m.Commit)
+	fmt.Fprintf(stdout, "pack %s: %d checks, %d data files, %d local rules, min rhythm-tuner %s, commit %s\n",
+		m.Version, m.Checks, len(m.Data), m.Local, m.MinTuner, m.Commit)
 	if key == nil {
 		fmt.Fprintln(stdout, "unsigned: rhythm-tuner only uses it with TUNER_CHECKS_INSECURE=1")
 	}
