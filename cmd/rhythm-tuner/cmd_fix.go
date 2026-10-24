@@ -123,9 +123,9 @@ the nginx or Apache snippets that fix the findings, each snippet once,
 commented with the checks and URLs it fixes. Snippets for Tuner's own
 checks come from this version, not from the report, so reports from older
 versions work too. A snippet the report carries for any other check is
-marked as taken from the report. It prints to stdout and changes nothing: review the bundle,
-add it to your server config and test it (nginx -t or apachectl -t).
-Use - to read a report from stdin.
+marked as taken from the report. It prints to stdout and changes nothing:
+review the bundle, add it to your server config and test it (nginx -t or
+apachectl -t). Use - to read a report from stdin.
 
 Flags:
       --server <name>      nginx or apache

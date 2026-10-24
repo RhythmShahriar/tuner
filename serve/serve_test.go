@@ -964,3 +964,47 @@ func TestPublicAddrUnwrapsEmbeddedIPv4(t *testing.T) {
 		}
 	}
 }
+
+// TestIPTargetFileProofOnly checks that an IP-address target is offered
+// and checked only by the file proof: there is no DNS name to hold a
+// TXT record, so a record planted at the made-up name proves nothing.
+func TestIPTargetFileProofOnly(t *testing.T) {
+	var token atomic.Value
+	token.Store("")
+	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/tuner-verify.txt" {
+			fmt.Fprintln(w, token.Load())
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer site.Close()
+	h := newHarness(t, nil)
+	code, tg := h.do("POST", "/v0/targets", map[string]string{"url": site.URL})
+	if code != http.StatusCreated {
+		t.Fatal(code, tg)
+	}
+	verify := tg["verify"].(map[string]any)
+	if _, ok := verify["dns"]; ok {
+		t.Errorf("an IP target offers DNS proof: %v", verify)
+	}
+	if verify["file"].(map[string]any)["url"] != site.URL+"/.well-known/tuner-verify.txt" {
+		t.Errorf("file proof %v", verify["file"])
+	}
+	h.dns["_tuner-verify.127.0.0.1"] = []string{tg["token"].(string)}
+	path := "/v0/targets/" + tg["id"].(string) + "/verify"
+
+	code, body := h.do("POST", path, map[string]string{"method": "dns"})
+	if code != http.StatusBadRequest || !strings.Contains(fmt.Sprint(body["error"]), "127.0.0.1 is an IP address") {
+		t.Errorf("dns on an IP: %d %v", code, body)
+	}
+	code, body = h.do("POST", path, nil)
+	checks, _ := body["checks"].([]any)
+	if code != http.StatusUnprocessableEntity || len(checks) != 1 || checks[0].(map[string]any)["method"] != "file" {
+		t.Errorf("no method on an IP: %d %v", code, body)
+	}
+	token.Store(tg["token"])
+	if code, body = h.do("POST", path, nil); code != http.StatusOK || body["verified_by"] != "file" {
+		t.Errorf("file proof: %d %v", code, body)
+	}
+}

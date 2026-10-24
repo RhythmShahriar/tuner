@@ -213,7 +213,7 @@ Output:
       --jsonl              one JSON finding per line, streamed as found
       --sarif              SARIF 2.1.0 for GitHub code scanning
       --md                 Markdown for issues and pull requests
-  -o, --output <file>      write the report to a file (format from the extension)
+  -o, --output <file>      write the report to a file (format by extension)
                            and keep the live view on the terminal; an existing
                            file is replaced only once the new report is complete
   -q, --quiet              findings only
@@ -233,7 +233,8 @@ Checks:
       --no-check-updates   use the built-in checks, not the latest check pack
       --no-vulns           skip known-vulnerability matching
       --offline            use cached vulnerability data and check pack only;
-                           no update check either (RHYTHM_OFFLINE=1 skips it too)
+                           no update check either. RHYTHM_OFFLINE=1 also skips
+                           the update check
 
 Requests:
       --rate <n>           max requests per second per site (default 5, or 50
@@ -272,7 +273,8 @@ Batch and CI:
                            vulnerability data couldn't be fetched
                            (otherwise exit 3)
       --allow-partial      let --fail-on and --fail-on-new pass a scan that
-                           was blocked or cut short (otherwise exit 3)
+                           was blocked or cut short, or whose --integrity
+                           checksums couldn't be loaded (otherwise exit 3)
       --config <file>      read settings from this file instead of .tuner.yml
       --no-config          don't read .tuner.yml; use it in folders you
                            don't trust
@@ -311,7 +313,7 @@ Examples:
   rhythm tuner scan example.com
   rhythm tuner scan example.com --profile quick -o report.md
   rhythm tuner scan -l sites.txt --json > results.json
-  rhythm tuner scan staging.example.com -H "Authorization: Basic dXNlcjpwYXNz" -k
+  rhythm tuner scan staging.example.com -H "Authorization: Bearer $TOKEN" -k
   rhythm tuner scan example.com --sarif --fail-on high > tuner.sarif
   rhythm tuner scan /var/www/example.com --php /usr/bin/php8.3
 `

@@ -515,7 +515,7 @@ func TestReportKeptWhenEveryTargetFails(t *testing.T) {
 		path := filepath.Join(t.TempDir(), name)
 		os.WriteFile(path, []byte(oldReport), 0o600)
 		code, _, errs := tuner(t, "scan", dead.URL, "-o", path, "--retries", "0")
-		if code != exitError || !strings.Contains(errs, "rhythm tuner scan: no report written: every target failed") {
+		if code != exitError || !strings.Contains(errs, "rhythm tuner scan: no report written to "+path+": every target failed; it keeps the previous report") {
 			t.Errorf("%s: exit %d, stderr %q", name, code, errs)
 		}
 		if data, _ := os.ReadFile(path); string(data) != oldReport {
@@ -524,6 +524,45 @@ func TestReportKeptWhenEveryTargetFails(t *testing.T) {
 		if left, _ := filepath.Glob(filepath.Join(filepath.Dir(path), ".*.tmp")); len(left) > 0 {
 			t.Errorf("temporary files left: %v", left)
 		}
+	}
+}
+
+// --html follows the -o rule: when every target failed, the previous
+// HTML report stays and stderr names it. A missing file isn't created.
+func TestHTMLKeptWhenEveryTargetFails(t *testing.T) {
+	dead := httptest.NewServer(http.NotFoundHandler())
+	dead.Close()
+	dir := t.TempDir()
+	page, path := filepath.Join(dir, "keep.html"), filepath.Join(dir, "r.json")
+	const oldPage = "<!doctype html><p>last night's report</p>"
+	os.WriteFile(page, []byte(oldPage), 0o600)
+	os.WriteFile(path, []byte(oldReport), 0o600)
+	code, _, errs := tuner(t, "scan", dead.URL, "--html", page, "-o", path, "--retries", "0")
+	if code != exitError {
+		t.Errorf("exit %d, stderr %q", code, errs)
+	}
+	for _, want := range []string{
+		"no report written to " + path + ": every target failed; it keeps the previous report",
+		"no HTML report written to " + page + ": every target failed; it keeps the previous report",
+	} {
+		if !strings.Contains(errs, want) {
+			t.Errorf("stderr lacks %q:\n%s", want, errs)
+		}
+	}
+	if data, _ := os.ReadFile(page); string(data) != oldPage {
+		t.Errorf("HTML report replaced: %.200q", data)
+	}
+	if strings.Contains(errs, "\nHTML report written to") {
+		t.Errorf("stderr claims a written HTML report:\n%s", errs)
+	}
+
+	fresh := filepath.Join(dir, "new.html")
+	_, _, errs = tuner(t, "scan", dead.URL, "--html", fresh, "--retries", "0")
+	if _, err := os.Stat(fresh); err == nil {
+		t.Error("an HTML page of failures was written")
+	}
+	if !strings.Contains(errs, "no HTML report written to "+fresh+": every target failed\n") {
+		t.Errorf("stderr:\n%s", errs)
 	}
 }
 
@@ -538,7 +577,7 @@ func TestReportKeptOnCancel(t *testing.T) {
 		interruptSelf() // execute catches it as a cancel
 	}()
 	code, _, errs := tuner(t, "scan", srv.URL, "-o", path, "--jsonl")
-	if code != exitCanceled || !strings.Contains(errs, "no report written: scan canceled; "+path+" keeps the previous report") {
+	if code != exitCanceled || !strings.Contains(errs, "no report written to "+path+": scan canceled; it keeps the previous report") {
 		t.Errorf("exit %d, stderr %q", code, errs)
 	}
 	assertOld(t, path)
@@ -1926,6 +1965,36 @@ func TestEndToEndIntegrityAndDiscover(t *testing.T) {
 	var reps []struct{ Target string }
 	if (code != exitOK && code != exitFindings) || json.Unmarshal([]byte(out), &reps) != nil || len(reps) != 2 {
 		t.Errorf("--discover: exit %d, %d reports, stderr %s\n%.400s", code, len(reps), errs, out)
+	}
+}
+
+// --integrity with the checksum service down compared no file, so a
+// --fail-on gate must not pass it, the same as missing vulnerability
+// data, unless --allow-partial accepts that.
+func TestEndToEndIntegrityChecksumsDown(t *testing.T) {
+	needScanFlags(t, "integrity")
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	site := filepath.Join(t.TempDir(), "shop")
+	wordPressFolder(t, site)
+
+	code, out, errs := tuner(t, "scan", site, "--integrity", "--no-vulns", "--json", "--fail-on", "high")
+	var rep struct {
+		Complete  bool   `json:"complete"`
+		StoppedBy string `json:"stopped_by"`
+	}
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatalf("report: %v\n%s", err, out)
+	}
+	if code != exitError || rep.Complete || rep.StoppedBy != "integrity" {
+		t.Errorf("exit %d, complete %v, stopped by %q; want 3, false, integrity\n%s", code, rep.Complete, rep.StoppedBy, errs)
+	}
+	if !strings.Contains(errs, "the scan is incomplete (some checksums for --integrity could not be loaded), so --fail-on high can't pass it") {
+		t.Errorf("stderr lacks the reason:\n%s", errs)
+	}
+
+	code, _, errs = tuner(t, "scan", site, "--integrity", "--no-vulns", "--json", "--fail-on", "high", "--allow-partial")
+	if code != exitOK && code != exitFindings {
+		t.Errorf("--allow-partial: exit %d\n%s", code, errs)
 	}
 }
 

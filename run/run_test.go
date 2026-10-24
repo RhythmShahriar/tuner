@@ -278,7 +278,7 @@ func TestRunFastTargets(t *testing.T) {
 // A firewall challenge leaves a scan with no findings that proves nothing,
 // so FailOn fails it unless AllowPartial says that's fine.
 func TestExitBlockedScan(t *testing.T) {
-	blocked := Status{Complete: false, StoppedBy: "waf", BlockedBy: "Cloudflare challenge", VulnData: VulnOK}
+	blocked := Status{Complete: false, StoppedBy: "waf", BlockedBy: "cloudflare", VulnData: VulnOK}
 	out := &Outcome{
 		Targets: []Target{{Target: "https://example.com/"}},
 		Reports: []report.Report{{Result: &engine.Result{Target: "https://example.com/"}}},
@@ -372,5 +372,27 @@ func TestUntrusted(t *testing.T) {
 	}
 	if why := Untrusted("https://a.example", Status{Complete: true, VulnData: VulnOK}, "--fail-on high", false, false); len(why) != 0 {
 		t.Errorf("complete: %q", why)
+	}
+}
+
+// The gate's reason uses the report notes' plain words, never the
+// internal stopped_by tokens.
+func TestStatusReason(t *testing.T) {
+	for _, c := range []struct {
+		s    Status
+		want string
+	}{
+		{Status{StoppedBy: "budget"}, "stopped at the request budget"},
+		{Status{StoppedBy: "home-status"}, "the home page did not load"},
+		{Status{StoppedBy: "waf"}, "blocked by a firewall challenge"},
+		{Status{StoppedBy: "waf", BlockedBy: "sucuri"}, "blocked by Sucuri challenge"},
+		{Status{StoppedBy: "interrupted"}, "interrupted"},
+		{Status{StoppedBy: "max-time"}, "stopped by --max-time"},
+		{Status{StoppedBy: "integrity"}, "some checksums for --integrity could not be loaded"},
+		{Status{}, "the scan did not finish"},
+	} {
+		if got := c.s.Reason(); got != c.want {
+			t.Errorf("%+v: %q, want %q", c.s, got, c.want)
+		}
 	}
 }

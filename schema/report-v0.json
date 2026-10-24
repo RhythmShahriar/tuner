@@ -55,7 +55,7 @@
         "complete": { "type": "boolean", "description": "False when the scan stopped early or was blocked, so findings may be missing." },
         "stopped_by": {
           "type": "string",
-          "description": "Why the scan stopped early: interrupted, max-time, waf, home-status or budget. Other values may be added."
+          "description": "Why the scan stopped early: interrupted, max-time, waf, home-status, budget or integrity (a local --integrity scan whose checksums could not be loaded). Other values may be added."
         },
         "blocked_by": { "type": "string", "description": "The firewall that challenged the scan, e.g. cloudflare or sucuri." },
         "vuln_data": { "type": "string", "enum": ["ok", "partial", "missing", "off"] },

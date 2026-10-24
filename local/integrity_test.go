@@ -168,6 +168,10 @@ func TestIntegrityPristine(t *testing.T) {
 	if res.Checks < len(integrityChecks) {
 		t.Errorf("checks %d", res.Checks)
 	}
+	// A plugin wordpress.org doesn't host leaves the scan complete.
+	if !res.Complete || res.StoppedBy != "" {
+		t.Errorf("complete %v, stopped by %q", res.Complete, res.StoppedBy)
+	}
 }
 
 func TestIntegrityFindsChanges(t *testing.T) {
@@ -251,6 +255,9 @@ func TestIntegrityOffline(t *testing.T) {
 		!hasWarning(res, "integrity: skipped 2 plugins with no cached checksums while offline: acme-custom, akismet") {
 		t.Errorf("warnings %q", res.Warnings)
 	}
+	if res.Complete || res.StoppedBy != "integrity" {
+		t.Errorf("offline without cache: complete %v, stopped by %q", res.Complete, res.StoppedBy)
+	}
 
 	// Online once fills the cache.
 	integrityScan(t, integrityTree(t, nil), api.client(cache, false))
@@ -264,6 +271,9 @@ func TestIntegrityOffline(t *testing.T) {
 	}
 	if f := find(res, "local-integrity-plugin-unchecked"); f == nil || f.Evidence.Matched[0] != "no checksums to compare: acme-custom" {
 		t.Errorf("findings %v", ids(res))
+	}
+	if !res.Complete || res.StoppedBy != "" {
+		t.Errorf("offline with cache: complete %v, stopped by %q", res.Complete, res.StoppedBy)
 	}
 
 	// Online but down, with the cache: the cache still answers.
@@ -282,6 +292,11 @@ func TestIntegrityServiceDown(t *testing.T) {
 	if !hasWarning(res, "integrity: couldn't get checksums for WordPress 6.5.2 (en_US): ") ||
 		!hasWarning(res, "integrity: couldn't get checksums for 2 plugins: acme-custom: ") {
 		t.Errorf("warnings %q", res.Warnings)
+	}
+	// No file was compared, so the scan must not read as complete: a
+	// --fail-on gate would pass it otherwise.
+	if res.Complete || res.StoppedBy != "integrity" {
+		t.Errorf("complete %v, stopped by %q; want a partial scan stopped by integrity", res.Complete, res.StoppedBy)
 	}
 }
 

@@ -19,6 +19,58 @@ class ScanArgsTest extends TestCase {
 		$this->assertSame( 3, $result['code'] );
 	}
 
+	public function test_no_config_when_the_release_knows_it() {
+		$argv = ScanCommand::buildScanArgs( '/srv', array(), true );
+		$this->assertContains( '--no-config', $argv );
+		$this->assertNotContains( '--no-config', ScanCommand::buildScanArgs( '/srv', array() ) );
+	}
+
+	public function test_help_lists_no_config() {
+		$help = "      --config <file>      read settings from this file instead of .tuner.yml\n      --no-config          don't read .tuner.yml\n";
+		$this->assertTrue( ScanCommand::helpHasFlag( $help, 'no-config' ) );
+		$this->assertFalse( ScanCommand::helpHasFlag( "      --config <file>  x\n", 'no-config' ) );
+	}
+
+	public function test_run_uses_the_given_folder() {
+		$dir = ScanCommand::workDir();
+		$this->assertNotNull( $dir );
+		try {
+			$this->assertSame( array(), scandir_clean( $dir ), 'the work folder must start empty' );
+			$result = ScanCommand::run( array( PHP_BINARY, '-r', 'echo getcwd();' ), $dir );
+			$this->assertSame( realpath( $dir ), realpath( $result['stdout'] ) );
+		} finally {
+			rmdir( $dir );
+		}
+	}
+
+	public function test_a_planted_config_is_not_read() {
+		// A .tuner.yml in the folder WP-CLI runs from must not reach the
+		// child: it runs in its own empty folder.
+		$site = ScanCommand::workDir();
+		$work = ScanCommand::workDir();
+		file_put_contents( $site . '/.tuner.yml', "ignore: [{id: local-malware-*, reason: vendor file}]\n" );
+		$old = getcwd();
+		chdir( $site );
+		try {
+			$result = ScanCommand::run( array( PHP_BINARY, '-r', 'echo file_exists(".tuner.yml") ? "seen" : "clean";' ), $work );
+			$this->assertSame( 'clean', $result['stdout'] );
+		} finally {
+			chdir( $old );
+			unlink( $site . '/.tuner.yml' );
+			rmdir( $site );
+			rmdir( $work );
+		}
+	}
+
+	public function test_notes_keep_every_line() {
+		$stderr = "rt scan: using .tuner.yml\n\nrt scan: .tuner.yml: 1 ignore entry hid 1 finding\n";
+		$this->assertSame(
+			array( 'rt scan: using .tuner.yml', 'rt scan: .tuner.yml: 1 ignore entry hid 1 finding' ),
+			ScanCommand::notes( $stderr )
+		);
+		$this->assertSame( array(), ScanCommand::notes( '' ) );
+	}
+
 	public function test_defaults() {
 		$argv = ScanCommand::buildScanArgs( '/var/www/html', array() );
 		$this->assertSame(
@@ -92,4 +144,9 @@ class ScanArgsTest extends TestCase {
 		$this->assertNull( ScanCommand::scanFailure( array( 'code' => 1, 'stdout' => '', 'stderr' => '' ) ) );
 		$this->assertNull( ScanCommand::scanFailure( array( 'code' => 0, 'stdout' => '{}', 'stderr' => '' ) ) );
 	}
+}
+
+/** scandir_clean lists a folder without . and .. */
+function scandir_clean( $dir ) {
+	return array_values( array_diff( scandir( $dir ), array( '.', '..' ) ) );
 }

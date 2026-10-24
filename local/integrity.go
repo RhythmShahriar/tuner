@@ -299,7 +299,8 @@ type integrityVisitor struct {
 }
 
 // prepareIntegrity fetches the checksums the walk needs, warning about
-// anything it couldn't check. It returns nil when there is nothing to
+// anything it couldn't check. Checksums it couldn't load set
+// s.integrityGap, which marks the scan partial. It returns nil when there is nothing to
 // compare. Plugins wordpress.org doesn't host are no failure of the
 // scan, so they get an info finding instead of a warning.
 func (s *scan) prepareIntegrity(ctx context.Context) (*integrityVisitor, []engine.Finding) {
@@ -325,10 +326,12 @@ func (s *scan) prepareIntegrity(ctx context.Context) (*integrityVisitor, []engin
 		case err == nil:
 			v.core = core
 		case errors.Is(err, errNotCached):
+			s.integrityGap = true
 			s.warn("integrity: no cached checksums for WordPress %s (%s) while offline; run once online to cache them", v.version, v.locale)
 		case errors.Is(err, errNotListed):
 			s.warn("integrity: WordPress.org has no checksums for WordPress %s (%s), so core files weren't compared", v.version, v.locale)
 		case ctx.Err() == nil:
+			s.integrityGap = true
 			s.warn("integrity: couldn't get checksums for WordPress %s (%s): %v", v.version, v.locale, err)
 		}
 	}
@@ -386,6 +389,12 @@ func (s *scan) prepareIntegrity(ctx context.Context) (*integrityVisitor, []engin
 	note(noVersion, "integrity: skipped %d plugin%s without a version: %s")
 	note(offline, "integrity: skipped %d plugin%s with no cached checksums while offline: %s")
 	note(failed, "integrity: couldn't get checksums for %d plugin%s: %s")
+	// Checksums that should exist but couldn't be loaded leave files
+	// unchecked, so the scan is partial, as with missing vulnerability
+	// data. A plugin wordpress.org doesn't host is no gap.
+	if len(failed) > 0 || len(offline) > 0 {
+		s.integrityGap = true
+	}
 	var info []engine.Finding
 	if len(notListed) > 0 {
 		slices.Sort(notListed)

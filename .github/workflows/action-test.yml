@@ -167,6 +167,46 @@ jobs:
           [ "$OUTCOME" = failure ] && [ "$CODE" = 1 ] ||
             { echo "::error::fail-on high should fail the step with exit 1; got $OUTCOME, $CODE"; exit 1; }
 
+      # The exposed .env is a confirmed finding, so it still fails the step
+      # when only confirmed findings count.
+      - name: Gate on confirmed findings only
+        id: confirmed
+        continue-on-error: true
+        uses: ./
+        with:
+          target: ${{ env.SITE }}
+          fail-on: high
+          min-confidence: confirmed
+          args: ${{ env.HERMETIC }}
+          verify-signature: false
+          download-url: ${{ env.MIRROR }}/good
+
+      # high is the older name for confirmed and must not be a usage error.
+      - name: Gate with the older confidence name
+        id: confidence-alias
+        continue-on-error: true
+        uses: ./
+        with:
+          target: ${{ env.SITE }}
+          fail-on: high
+          min-confidence: high
+          args: ${{ env.HERMETIC }}
+          verify-signature: false
+          download-url: ${{ env.MIRROR }}/good
+
+      - name: Check the confidence gates
+        shell: bash
+        env:
+          OUTCOME: ${{ steps.confirmed.outcome }}
+          CODE: ${{ steps.confirmed.outputs.exit-code }}
+          ALIAS_OUTCOME: ${{ steps.confidence-alias.outcome }}
+          ALIAS_CODE: ${{ steps.confidence-alias.outputs.exit-code }}
+        run: |
+          [ "$OUTCOME" = failure ] && [ "$CODE" = 1 ] ||
+            { echo "::error::min-confidence confirmed should fail on the .env with exit 1; got $OUTCOME, $CODE"; exit 1; }
+          [ "$ALIAS_OUTCOME" = failure ] && [ "$ALIAS_CODE" = 1 ] ||
+            { echo "::error::min-confidence high should work like confirmed; got $ALIAS_OUTCOME, $ALIAS_CODE"; exit 1; }
+
       - name: Scan the fixture folder
         id: folder
         uses: ./

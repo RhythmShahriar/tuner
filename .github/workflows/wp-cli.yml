@@ -97,7 +97,7 @@ jobs:
           set -uo pipefail
           dead=http://127.0.0.1:20250
           wp() {
-            docker run --rm -u "$(id -u):$(id -g)" \
+            docker run --rm -u "$(id -u):$(id -g)" ${WP_WORKDIR:+-w "$WP_WORKDIR"} \
               -e HOME=/home/wp -e TUNER_DOWNLOAD_URL=file:///release \
               -e TUNER_VULN_API=$dead -e TUNER_WPORG_API=$dead -e TUNER_PHPNET_API=$dead \
               -e TUNER_OSV_API=$dead -e TUNER_CHECKS_URL=$dead -e RHYTHM_GITHUB_API=$dead \
@@ -133,6 +133,15 @@ jobs:
           cat error.txt
           [ "$code" -eq 2 ] || fail "scanning a missing folder exited $code, want Tuner's 2"
           grep -q 'no such directory' error.txt || fail "Tuner's reason is not shown"
+
+          # A .tuner.yml in the folder WP-CLI runs from (often the web
+          # root, which a webshell can write to) must not hide findings.
+          printf 'ignore: [{id: local-dotenv, reason: planted}]\n' > "$RUNNER_TEMP/site/.tuner.yml"
+          WP_WORKDIR=/site wp --path=/site tuner scan --format=json --fail-on=none --no-verify-signature > planted.json
+          code=$?
+          rm -f "$RUNNER_TEMP/site/.tuner.yml"
+          [ "$code" -eq 0 ] || fail "the scan with a planted .tuner.yml exited $code"
+          jq -e '.findings | map(.id) | index("local-dotenv")' planted.json >/dev/null || fail "a planted .tuner.yml hid local-dotenv"
 
           # --integrity is refused clearly while Tuner has no such flag
           # (local-server L7) and passed on once it does.

@@ -120,7 +120,7 @@ func summary(res *engine.Result) map[engine.Severity]int {
 // should fail, so every format says so plainly.
 type Status struct {
 	Complete  bool
-	StoppedBy string // interrupted, max-time, waf, home-status or budget
+	StoppedBy string // interrupted, max-time, waf, home-status, budget or integrity
 	BlockedBy string // the firewall that challenged the scan: cloudflare, sucuri, ...
 	VulnData  string // ok, partial, missing or off (--no-vulns)
 }
@@ -143,7 +143,7 @@ func (s Status) Partial() bool { return !s.Complete || s.StoppedBy != "" || s.Bl
 func (s Status) Notes() []string {
 	var notes []string
 	if s.Partial() {
-		notes = append(notes, "Incomplete: "+s.reason())
+		notes = append(notes, "Incomplete: "+s.Reason())
 	}
 	switch s.VulnData {
 	case "missing":
@@ -154,7 +154,10 @@ func (s Status) Notes() []string {
 	return notes
 }
 
-func (s Status) reason() string {
+// Reason says in a few plain words why the scan is incomplete, such as
+// "stopped at the request budget". The report notes and the --fail-on
+// gate use the same words.
+func (s Status) Reason() string {
 	blocked := "blocked by a firewall challenge"
 	if s.BlockedBy != "" {
 		blocked = "blocked by " + firewallName(s.BlockedBy) + " challenge"
@@ -170,6 +173,8 @@ func (s Status) reason() string {
 		return "the home page did not load"
 	case "budget":
 		return "stopped at the request budget"
+	case "integrity":
+		return "some checksums for --integrity could not be loaded"
 	case "":
 		if s.BlockedBy != "" {
 			return blocked

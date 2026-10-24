@@ -37,8 +37,9 @@ inputs:
     default: high
   min-confidence:
     description: >
-      Only let findings at this confidence or higher fail the step: high (confirmed) or low (also likely).
-      Needs a Tuner release with --min-confidence. Default Tuner's own.
+      Only let findings at this confidence or higher fail the step: confirmed, or likely (confirmed
+      and likely). Empty means Tuner's default, likely. The older values high and low still work
+      and mean confirmed and likely. Needs a Tuner release with --min-confidence.
     required: false
     default: ""
   baseline:
@@ -257,6 +258,11 @@ runs:
         case "$FAIL_ON" in
           ""|none) ;;
           *) flags+=(--fail-on "$FAIL_ON") ;;
+        esac
+        # high and low are the names older docs gave; map them to the CLI's.
+        case "$MIN_CONFIDENCE" in
+          high) MIN_CONFIDENCE=confirmed ;;
+          low) MIN_CONFIDENCE=likely ;;
         esac
         [ -z "$MIN_CONFIDENCE" ] || flags+=(--min-confidence "$MIN_CONFIDENCE")
         base=()

@@ -229,6 +229,12 @@ func TestReportExtensionNotifyFirstRun(t *testing.T) {
 }
 
 func TestReportExtensionNotifyFailure(t *testing.T) {
+	// The warning names the command Tuner was started as, like every
+	// other scan message.
+	t.Setenv(invokedAsEnv, "")
+	was := argv0
+	argv0 = "/usr/local/bin/rt"
+	defer func() { argv0 = was }()
 	old, _ := diffFixtures(t)
 	srv, _ := hookReceiver(t, http.StatusInternalServerError)
 	for strict, want := range map[bool]int{false: exitOK, true: exitError} {
@@ -242,7 +248,7 @@ func TestReportExtensionNotifyFailure(t *testing.T) {
 		}
 		var errs bytes.Buffer
 		code, err := e.Finished(&scanPlan{}, thisWeek(), &errs)
-		warn := "rhythm tuner: warning: could not notify webhook+https://" + srv.Listener.Addr().String() + ": receiver answered 500 Internal Server Error\n"
+		warn := "rt scan: warning: could not notify webhook+https://" + srv.Listener.Addr().String() + ": receiver answered 500 Internal Server Error\n"
 		if err != nil || code != want || !strings.HasSuffix(errs.String(), warn) || strings.Contains(errs.String(), "SECRETTOKEN") {
 			t.Errorf("strict=%v: exit %d (%v):\n%s", strict, code, err, errs.String())
 		}

@@ -197,6 +197,9 @@ func scanStatus(ctx context.Context, root string, opts Options, h engine.Hooks) 
 	res.Warnings = s.warnings
 	res.Score = engine.Score(res.Findings)
 	res.Duration = time.Since(start)
+	if s.stoppedBy == "" && s.integrityGap {
+		s.stoppedBy = "integrity"
+	}
 	st := status{complete: s.stoppedBy == "", stoppedBy: s.stoppedBy, vulnData: combineVulnData(advisor, osv)}
 	if observe != nil {
 		observe(opts, res)
@@ -297,6 +300,9 @@ type scan struct {
 	skipped  map[string]bool // special files already warned about
 	// stoppedBy is "budget" once the walk stopped at MaxEntries.
 	stoppedBy string
+	// integrityGap is set when --integrity couldn't load core or plugin
+	// checksums it should have had, so some files went uncompared.
+	integrityGap bool
 	// mu guards warnings and skipped: the walk's workers warn too.
 	mu sync.Mutex
 }

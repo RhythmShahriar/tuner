@@ -47,6 +47,10 @@ wp tuner scan --format=json > tuner.json
    reuse it only while it still matches that hash; an interrupted or
    damaged install is downloaded again.
 
+Tuner runs in an empty temporary folder with `--no-config`, so a
+`.tuner.yml` in the folder WP-CLI runs from (often the web root) can't
+hide findings. Tuner's notes on stderr are always shown as warnings.
+
 The exit code is Tuner's own: 0 ok, 1 findings at `--fail-on`, 2 a usage
 error, 3 a target could not be scanned. When Tuner stops with 2 or 3
 before writing a report, its own error is shown and its code kept.

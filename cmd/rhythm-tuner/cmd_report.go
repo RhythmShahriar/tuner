@@ -70,7 +70,7 @@ func cmdReport(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 	usageErr := func(format string, a ...any) int {
-		fmt.Fprintf(stderr, "rhythm tuner: "+format+"\n", a...)
+		printErr(stderr, "", fmt.Sprintf(format, a...))
 		return exitUsage
 	}
 	if len(pos) == 0 {

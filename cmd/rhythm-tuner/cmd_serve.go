@@ -25,12 +25,13 @@ const serveUsage = `Usage:
 Runs Tuner as an HTTP API for agencies and hosts. A site is scanned only
 after it proves its owner asked for it: a DNS TXT record at
 _tuner-verify.<host> or the file /.well-known/tuner-verify.txt holding
-the token Tuner hands out. The file is fetched from the target's own
-scheme, host and port: a target of http://example.com:8080 serves it at
+the token Tuner hands out. An IP address can only use the file. The file
+is fetched from the target's own scheme, host and port: a target of
+http://example.com:8080 serves it at
 http://example.com:8080/.well-known/tuner-verify.txt. Redirects must
-stay on that host and an https check never drops to http. Proof lasts
-30 days. Each scan runs as its own rhythm tuner scan process, one at a
-time per site.
+stay on that host and an https check never drops to http. Proof lasts 30
+days. Each scan runs as its own rhythm tuner scan process, one at a time
+per site.
 
   GET    /v0/health
   POST   /v0/targets               {"url": "https://example.com"} -> token
@@ -75,8 +76,10 @@ A scan's own webhook_url must be a public address unless the server runs
 with --webhook-allow-private; --webhook is yours and may be any address.
 
 Examples:
-  TUNER_SERVE_TOKEN=$(openssl rand -hex 32) rhythm tuner serve --listen 0.0.0.0:8080 --data /var/lib/tuner
-  curl -H "Authorization: Bearer $TUNER_SERVE_TOKEN" -H "Content-Type: application/json" \
+  export TUNER_SERVE_TOKEN=$(openssl rand -hex 32)
+  rhythm tuner serve --listen 0.0.0.0:8080 --data /var/lib/tuner
+  curl -H "Authorization: Bearer $TUNER_SERVE_TOKEN" \
+    -H "Content-Type: application/json" \
     -d '{"url":"https://example.com"}' localhost:8080/v0/targets
 `
 

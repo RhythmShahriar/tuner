@@ -126,7 +126,8 @@ const checksUsage = `Usage:
   rhythm tuner checks new <id> [dir]   write a new check and its fixtures
   rhythm tuner checks test [dir]       run checks against their fixtures
   rhythm tuner checks lint [dir]       check checks against the house rules
-  rhythm tuner checks export --nuclei <dir>   write checks as Nuclei templates
+  rhythm tuner checks export --nuclei <dir>
+                                       write checks as Nuclei templates
 
 Lists the checks a scan with the same flags would run. Unlike scan, it
 lists every check unless --profile picks one. test and lint read the
@@ -170,7 +171,7 @@ func oneDir(name string, args []string, usage string, stdout, stderr io.Writer) 
 	for _, a := range args {
 		switch {
 		case a == "-h" || a == "--help":
-			fmt.Fprint(stdout, usage)
+			fmt.Fprint(stdout, named(usage))
 			return "", exitOK, false
 		case strings.HasPrefix(a, "-"):
 			fmt.Fprintf(stderr, "rhythm tuner: checks %s: unknown flag %s\n\n%s", name, a, usage)

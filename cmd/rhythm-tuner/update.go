@@ -27,9 +27,10 @@ import (
 )
 
 const updateUsage = `Usage:
-  rhythm tuner update                         refresh everything cached
-  rhythm tuner update --prefetch <target>...  cache what scans of these sites need
-  rhythm tuner update --clear                 delete the cached check pack and data
+  rhythm tuner update                  refresh everything cached
+  rhythm tuner update --prefetch <target>...
+                                       cache what scans of these sites need
+  rhythm tuner update --clear          delete the cached check pack and data
 
 Refreshes the check pack and the cached vulnerability data now. Scans also
 refresh both on their own once they are a day old.

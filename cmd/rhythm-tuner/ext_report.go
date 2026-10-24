@@ -182,7 +182,13 @@ func checkBrand(html bool, name, logo string) error {
 // on stdout, then sends the notifications. It exits 1 for --fail-on-new and
 // 3 for a notification that failed under --notify-strict.
 func (e *reportExtension) Finished(p *scanPlan, reports []report.Report, stderr io.Writer) (int, error) {
-	if e.html != "" {
+	switch {
+	case e.html != "" && len(reports) == 0 && len(p.write.Failed) > 0:
+		// The -o rule: a page listing only failures would replace the
+		// last good HTML report, such as a client's nightly one.
+		_, err := os.Stat(e.html) //nolint:gosec // the user names the file to write
+		printErr(stderr, "scan", "no HTML report written to "+e.html+": "+everyTargetFailed(err == nil))
+	case e.html != "":
 		o := p.write // the scan's failed targets and version reach the HTML file too
 		o.Brand = report.Brand{Name: e.brandName, LogoPath: e.brandLogo}
 		if !e.firstRun {
@@ -287,7 +293,7 @@ func (e *reportExtension) send(res diff.Result, since string, reports []report.R
 		switch {
 		case err != nil:
 			ok = false
-			fmt.Fprintf(stderr, "rhythm tuner: warning: could not notify %s: %v\n", n, report.SafeText(err.Error()))
+			printErr(stderr, "scan", fmt.Sprintf("warning: could not notify %s: %s", n, report.SafeText(err.Error())))
 		case !quiet:
 			noun := "findings"
 			if len(msg.Findings) == 1 {

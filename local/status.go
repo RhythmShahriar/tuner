@@ -16,7 +16,7 @@ import (
 // there to match versions against.
 type status struct {
 	complete  bool
-	stoppedBy string // "budget" when a walk stopped at MaxEntries
+	stoppedBy string // "budget" when a walk stopped at MaxEntries, "integrity" when checksums were missing
 	// vulnData is "ok" when every lookup succeeded, "partial" when some
 	// failed, "missing" when none did and "off" when matching was off.
 	vulnData string

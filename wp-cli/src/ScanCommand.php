@@ -67,7 +67,11 @@ class ScanCommand {
 	 * @param array $assoc_args Flags.
 	 */
 	public function __invoke( $args, $assoc_args ) {
-		$target = ABSPATH;
+		// Absolute, since Tuner runs in a folder of its own (see workDir).
+		$target = realpath( ABSPATH );
+		if ( false === $target ) {
+			$target = ABSPATH;
+		}
 		$format = Utils\get_flag_value( $assoc_args, 'format', 'table' );
 
 		$downloader = new Downloader(
@@ -85,16 +89,29 @@ class ScanCommand {
 			return;
 		}
 
-		if ( ! empty( $assoc_args['integrity'] ) ) {
-			$help = self::runBinary( $binary, array( 'scan', '--help' ) );
-			if ( ! self::helpHasFlag( $help['stdout'] . $help['stderr'], 'integrity' ) ) {
+		// Tuner reads a .tuner.yml from the folder it runs in. WP-CLI
+		// often runs in the web root, where whoever planted a webshell can
+		// also plant a .tuner.yml that ignores it. So Tuner runs in an
+		// empty folder of its own and, when the release knows the flag,
+		// with --no-config as well.
+		$cwd = self::workDir();
+		if ( null === $cwd ) {
+			WP_CLI::error( "couldn't make a temporary folder to run Tuner in" );
+			return;
+		}
+		try {
+			$help     = self::runBinary( $binary, array( 'scan', '--help' ), $cwd );
+			$helpText = $help['stdout'] . $help['stderr'];
+			if ( ! empty( $assoc_args['integrity'] ) && ! self::helpHasFlag( $helpText, 'integrity' ) ) {
 				WP_CLI::error( 'This Tuner release has no integrity checking yet, so --integrity is not available. Install a release that has it with --version, or leave --integrity off.' );
 				return;
 			}
-		}
 
-		$scanArgs = self::buildScanArgs( $target, $assoc_args );
-		$result   = self::runBinary( $binary, $scanArgs );
+			$scanArgs = self::buildScanArgs( $target, $assoc_args, self::helpHasFlag( $helpText, 'no-config' ) );
+			$result   = self::runBinary( $binary, $scanArgs, $cwd );
+		} finally {
+			@rmdir( $cwd );
+		}
 
 		// A usage or scan error (2, 3) often leaves no report. Show Tuner's
 		// own reason and keep its code, instead of failing on the missing
@@ -116,12 +133,16 @@ class ScanCommand {
 			self::renderTable( $result['stdout'] );
 		}
 
+		// With --quiet, Tuner's stderr holds only what the user must see,
+		// such as which settings file steered the scan and how many
+		// findings it hid. Show it whatever the exit code.
+		foreach ( self::notes( $result['stderr'] ) as $note ) {
+			WP_CLI::warning( $note );
+		}
+
 		// Tuner's own exit code: 0 ok, 1 findings at --fail-on, 2 usage,
 		// 3 a target couldn't be scanned. Pass it on so CI gates work.
 		if ( 0 !== $result['code'] ) {
-			if ( '' !== trim( $result['stderr'] ) ) {
-				WP_CLI::warning( trim( $result['stderr'] ) );
-			}
 			WP_CLI::halt( $result['code'] );
 		}
 	}
@@ -131,10 +152,16 @@ class ScanCommand {
 	 * always asks for JSON so the command can render it and for a local
 	 * scan of the target folder.
 	 *
+	 * $noConfig adds --no-config, so no .tuner.yml can hide findings; pass
+	 * true when the release lists the flag in its help.
+	 *
 	 * @return string[] arguments after "scan".
 	 */
-	public static function buildScanArgs( $target, array $assoc_args ) {
+	public static function buildScanArgs( $target, array $assoc_args, $noConfig = false ) {
 		$argv = array( 'scan', $target, '--json', '--plain', '--quiet' );
+		if ( $noConfig ) {
+			$argv[] = '--no-config';
+		}
 
 		$failOn = Utils_get( $assoc_args, 'fail-on', 'high' );
 		if ( 'none' !== $failOn && '' !== $failOn ) {
@@ -188,9 +215,40 @@ class ScanCommand {
 		return 1 === preg_match( '/(^|[\s,])--' . preg_quote( $name, '/' ) . '\b(?!-)/m', (string) $help );
 	}
 
-	/** runBinary runs rhythm-tuner and captures stdout, stderr and the code. */
-	private static function runBinary( $binary, array $scanArgs ) {
-		$result = self::run( array_merge( array( $binary ), $scanArgs ) );
+	/**
+	 * notes splits Tuner's stderr into the lines to show, leaving out
+	 * blank ones.
+	 *
+	 * @return string[]
+	 */
+	public static function notes( $stderr ) {
+		$out = array();
+		foreach ( preg_split( '/\r?\n/', (string) $stderr ) as $line ) {
+			$line = trim( $line );
+			if ( '' !== $line ) {
+				$out[] = $line;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * workDir makes an empty, private temporary folder for Tuner to run
+	 * in, or returns null when it can't. The caller removes it.
+	 */
+	public static function workDir() {
+		for ( $i = 0; $i < 5; $i++ ) {
+			$dir = sys_get_temp_dir() . '/tuner-cwd-' . bin2hex( random_bytes( 8 ) );
+			if ( @mkdir( $dir, 0700 ) ) {
+				return $dir;
+			}
+		}
+		return null;
+	}
+
+	/** runBinary runs rhythm-tuner in $cwd and captures stdout, stderr and the code. */
+	private static function runBinary( $binary, array $scanArgs, $cwd ) {
+		$result = self::run( array_merge( array( $binary ), $scanArgs ), $cwd );
 		if ( null === $result ) {
 			WP_CLI::error( "couldn't run $binary" );
 		}
@@ -201,9 +259,10 @@ class ScanCommand {
 	 * run runs argv without a shell and returns its stdout, stderr and
 	 * exit code, or null when it can't start. stderr goes to a temporary
 	 * file: with both on pipes, a child that fills the stderr pipe while
-	 * this side still reads stdout would block both processes.
+	 * this side still reads stdout would block both processes. $cwd is
+	 * the folder it runs in; null keeps this process's own.
 	 */
-	public static function run( array $argv ) {
+	public static function run( array $argv, $cwd = null ) {
 		$errFile = tempnam( sys_get_temp_dir(), 'tuner-stderr-' );
 		if ( false === $errFile ) {
 			return null;
@@ -212,7 +271,7 @@ class ScanCommand {
 			1 => array( 'pipe', 'w' ),
 			2 => array( 'file', $errFile, 'w' ),
 		);
-		$proc = proc_open( $argv, $descriptors, $pipes );
+		$proc = proc_open( $argv, $descriptors, $pipes, $cwd );
 		if ( ! is_resource( $proc ) ) {
 			unlink( $errFile );
 			return null;

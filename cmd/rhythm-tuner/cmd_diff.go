@@ -30,7 +30,8 @@ Flags:
       --fail-on-new <level>
                            exit 1 if a new finding is at or above this severity
 
-Exit codes: 0 ok · 1 new findings at --fail-on-new · 2 usage error · 3 a report couldn't be read
+Exit codes: 0 ok · 1 new findings at --fail-on-new · 2 usage error ·
+3 a report couldn't be read
 `
 
 func init() {

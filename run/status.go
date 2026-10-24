@@ -14,6 +14,7 @@ import (
 
 	"github.com/RhythmShahriar/tuner/engine"
 	"github.com/RhythmShahriar/tuner/fingerprint"
+	"github.com/RhythmShahriar/tuner/report"
 )
 
 // Status says how much of a target one run saw. Run works it out from the
@@ -22,7 +23,7 @@ import (
 // report with report.SetStatus.
 type Status struct {
 	Complete  bool   `json:"complete"`
-	StoppedBy string `json:"stopped_by,omitempty"` // interrupted, max-time, waf, home-status or budget
+	StoppedBy string `json:"stopped_by,omitempty"` // interrupted, max-time, waf, home-status, budget or integrity
 	BlockedBy string `json:"blocked_by,omitempty"` // the firewall that challenged the scan
 	VulnData  string `json:"vuln_data,omitempty"`  // one of the Vuln* values below
 }
@@ -36,17 +37,10 @@ const (
 	VulnOff     = "off"     // matching was not part of the scan
 )
 
-// Reason says in a few words why a scan is incomplete.
+// Reason says in a few plain words why a scan is incomplete, in the
+// words the report notes use, such as "stopped at the request budget".
 func (s Status) Reason() string {
-	switch {
-	case s.BlockedBy != "":
-		return "blocked by " + s.BlockedBy
-	case s.StoppedBy == "max-time":
-		return "stopped by --max-time"
-	case s.StoppedBy != "":
-		return s.StoppedBy
-	}
-	return "the scan did not finish"
+	return report.Status{Complete: s.Complete, StoppedBy: s.StoppedBy, BlockedBy: s.BlockedBy, VulnData: s.VulnData}.Reason()
 }
 
 // status works out a finished target's Status. err is what the scan

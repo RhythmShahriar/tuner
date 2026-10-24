@@ -11,6 +11,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/RhythmShahriar/tuner/report"
 )
@@ -151,6 +152,38 @@ func TestSubcommandsUseTheirName(t *testing.T) {
 	for _, line := range strings.Split(usageList, "\n") {
 		if len(line) > usageWidth {
 			t.Errorf("%d columns: %q", len(line), line)
+		}
+	}
+}
+
+// Every help page fits an 80-column terminal when run as rhythm-tuner,
+// the longest name the help is printed with.
+func TestHelpFitsEightyColumns(t *testing.T) {
+	t.Setenv(invokedAsEnv, "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	old := argv0
+	argv0 = "/usr/local/bin/rhythm-tuner"
+	defer func() { argv0 = old }()
+
+	pages := [][]string{{"--help"}, {"scan", "--help"}, {"update", "--help"},
+		{"checks", "--help"}, {"checks", "new", "--help"}, {"checks", "test", "--help"},
+		{"checks", "lint", "--help"}, {"checks", "export", "--help"}, {"init", "ci", "--help"}}
+	for _, c := range commands {
+		if !strings.HasPrefix(c.Name, "test-") { // registered by tests
+			pages = append(pages, []string{c.Name, "--help"})
+		}
+	}
+	for _, args := range pages {
+		var out, errs bytes.Buffer
+		run(args, &out, &errs)
+		text := out.String() + errs.String()
+		if !strings.Contains(text, "rhythm-tuner") {
+			t.Errorf("%v: no help printed:\n%s", args, text)
+		}
+		for _, line := range strings.Split(text, "\n") {
+			if n := utf8.RuneCountInString(line); n > usageWidth {
+				t.Errorf("%v: %d columns: %q", args, n, line)
+			}
 		}
 	}
 }

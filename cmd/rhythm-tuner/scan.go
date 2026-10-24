@@ -899,9 +899,9 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 	switch {
 	case file == nil:
 	case outcome.Canceled && file.existed:
-		keep = "scan canceled; " + o.output + " keeps the previous report"
+		keep = "scan canceled; it keeps the previous report"
 	case len(reports) == 0 && len(p.write.Failed) > 0:
-		keep = "every target failed"
+		keep = everyTargetFailed(file.existed)
 	}
 	werr := jsonlErr
 	if werr != nil && file != nil {
@@ -913,7 +913,7 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 	switch {
 	case keep != "":
 		file.discard()
-		printErr(stderr, "scan", "no report written:", keep)
+		printErr(stderr, "scan", "no report written to "+o.output+": "+keep)
 	case werr == nil && file != nil:
 		werr = file.commit()
 	}
@@ -948,6 +948,16 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 		exit = max(exit, code)
 	}
 	return exit
+}
+
+// everyTargetFailed is why a report file wasn't written when no target
+// gave results. existed says the file held a report, which it keeps: one
+// outage must not replace the last good report with a list of errors.
+func everyTargetFailed(existed bool) string {
+	if existed {
+		return "every target failed; it keeps the previous report"
+	}
+	return "every target failed"
 }
 
 // configNote names the settings file in use and the targets it supplied,

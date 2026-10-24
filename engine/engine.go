@@ -205,7 +205,7 @@ type Result struct {
 	Warnings       []string          `json:"warnings,omitempty"`
 
 	// Complete is true when every planned request ran. StoppedBy says why
-	// not: interrupted, max-time, waf, home-status or budget.
+	// not: interrupted, max-time, waf, home-status, budget or (local scans) integrity.
 	Complete  bool   `json:"complete"`
 	StoppedBy string `json:"stopped_by,omitempty"`
 	BlockedBy string `json:"blocked_by,omitempty"` // WAF or bot wall in the way, e.g. cloudflare

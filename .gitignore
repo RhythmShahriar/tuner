@@ -1,5 +1,8 @@
 /bin/
 /dist/
+# A binary built at the root with go build ./cmd/rhythm-tuner
+/rhythm-tuner
+/rhythm-tuner.exe
 *.exe
 *.test
 *.out

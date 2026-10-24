@@ -55,7 +55,7 @@ type targetView struct {
 }
 
 type verifyOptions struct {
-	DNS  dnsProof  `json:"dns"`
+	DNS  *dnsProof `json:"dns,omitempty"` // nil for an IP address, which has no DNS name to hold a record
 	File fileProof `json:"file"`
 }
 
@@ -81,7 +81,9 @@ func (s *Server) view(t Target) targetView {
 		exp := t.Verified.Add(VerifyTTL)
 		v.Expires = &exp
 	}
-	v.Verify.DNS = dnsProof{Name: dnsLabel + hostname(t.Host), Type: "TXT", Value: t.Token}
+	if !t.isIP() {
+		v.Verify.DNS = &dnsProof{Name: dnsLabel + hostname(t.Host), Type: "TXT", Value: t.Token}
+	}
 	v.Verify.File = fileProof{URL: t.proofURL(), Body: t.Token}
 	return v
 }
@@ -96,6 +98,10 @@ func (t Target) proofURL() string {
 	}
 	return scheme + "://" + t.Host + filePath
 }
+
+// isIP reports whether the target's host is an IP address. Only the file
+// proof works for one: there is no DNS name to put a TXT record under.
+func (t Target) isIP() bool { return net.ParseIP(hostname(t.Host)) != nil }
 
 // hostname drops a port from host.
 func hostname(host string) string {
@@ -207,10 +213,15 @@ func (s *Server) verifyTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var methods []string
-	switch req.Method {
-	case "":
+	switch {
+	case req.Method == MethodDNS && t.isIP():
+		writeError(w, http.StatusBadRequest, "method dns: "+hostname(t.Host)+" is an IP address, which has no DNS name for a TXT record; use file")
+		return
+	case req.Method == "" && t.isIP():
+		methods = []string{MethodFile}
+	case req.Method == "":
 		methods = []string{MethodDNS, MethodFile}
-	case MethodDNS, MethodFile:
+	case req.Method == MethodDNS || req.Method == MethodFile:
 		methods = []string{req.Method}
 	default:
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("method %q: want dns or file (or none to try both)", req.Method))

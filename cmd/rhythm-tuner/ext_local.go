@@ -37,8 +37,9 @@ func (e *localExtension) Help() string {
       --integrity          compare WordPress core and wordpress.org plugin files
                            with the checksums WordPress.org publishes (fetched
                            once per release and cached; --offline uses the
-                           cache). TUNER_WPORG_API and TUNER_WPDL_API point it
-                           at mirrors.
+                           cache). Checksums that can't be loaded mark the
+                           scan partial. TUNER_WPORG_API and TUNER_WPDL_API
+                           point it at mirrors.
       --discover           scan every WordPress and Laravel install under each
                            folder target, each with its own report (looks 6
                            folders deep; skips vendor, node_modules and .git)
