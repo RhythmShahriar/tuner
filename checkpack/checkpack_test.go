@@ -332,7 +332,7 @@ func TestOffline(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := rel.total()
-	c.TTL = time.Nanosecond // the cache is now stale, and offline uses it anyway
+	c.TTL = time.Nanosecond // the cache is now stale; offline uses it anyway
 	p, err := c.Get(context.Background())
 	if err != nil || !p.Stale || len(p.Loaded) != 1 || rel.total() != before {
 		t.Fatalf("offline with cache: p=%+v err=%v requests=%d", p, err, rel.total()-before)

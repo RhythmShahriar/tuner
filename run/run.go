@@ -53,6 +53,9 @@ type Plan struct {
 
 	// Version, CheckSet and CheckPack go into each report.
 	Version, CheckSet, CheckPack string
+	// Selection, when set, goes into each report too, so a later
+	// comparison knows which findings the scan looked for.
+	Selection *report.Selection
 
 	// Scan scans one target. Nil means s.Scan, which handles URLs only;
 	// set it to scan folders too or to wrap each scan.
@@ -161,6 +164,7 @@ func Run(ctx context.Context, p *Plan, hooks Hooks) *Outcome {
 		}
 		r := report.New(t.Result, p.Version)
 		r.CheckSet, r.CheckPack = p.CheckSet, p.CheckPack
+		r.Selection = p.Selection
 		r.Baselined = t.Baselined
 		r.SetStatus(report.Status(t.Status))
 		out.Reports = append(out.Reports, r)

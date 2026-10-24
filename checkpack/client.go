@@ -40,8 +40,8 @@ var ErrNotCached = errors.New("no check pack cached")
 var ErrUnreachable = errors.New("check pack host unreachable")
 
 // Client fetches and caches check packs, like vulns.Client does for
-// vulnerability data: a fresh cache is used as is, a stale one is
-// refreshed, and when the refresh fails the stale copy is still used.
+// vulnerability data: a fresh cache is used as is and a stale one is
+// refreshed. When the refresh fails the stale copy is still used.
 type Client struct {
 	HTTP      *http.Client
 	UserAgent string

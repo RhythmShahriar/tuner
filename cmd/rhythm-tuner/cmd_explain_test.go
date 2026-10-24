@@ -6,6 +6,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -166,5 +168,31 @@ func TestExplainNeverFetches(t *testing.T) {
 	out.Reset()
 	if code := cmdExplain([]string{"leak-dotenv"}, &out, &errb); code != exitOK || hits.Load() != 0 {
 		t.Errorf("exit %d, %d requests to the pack host", code, hits.Load())
+	}
+}
+
+// Local and vulnerability finding IDs are registered rules, so explain
+// knows them and SARIF links each to its own Finding Reference entry.
+func TestExplainRegisteredRules(t *testing.T) {
+	for id, want := range map[string]string{
+		"local-dotenv":                    "#local-dotenv",
+		"local-malware-php-in-uploads":    "#local-malware-php-in-uploads",
+		"vuln-plugin-contact-form-7":      "#vuln-plugin",
+		"php-eol":                         "#php-eol",
+		"vuln-composer-guzzlehttp-guzzle": "#vuln-composer",
+	} {
+		code, out, errs := tuner(t, "explain", id, "--no-check-updates")
+		if code != exitOK || !strings.Contains(out, "Tuner-Finding-Reference"+want) {
+			t.Errorf("explain %s: exit %d, stderr %q\n%s", id, code, errs, out)
+		}
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("DB_PASSWORD=hunter2hunter2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, out, errs := tuner(t, "scan", dir, "--sarif", "--no-vulns")
+	if !strings.Contains(out, `"helpUri": "https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Finding-Reference#local-dotenv"`) {
+		t.Errorf("SARIF helpUri for local-dotenv: %s\n%.2000s", errs, out)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
@@ -939,5 +940,27 @@ func TestWebhookBadURL(t *testing.T) {
 	var perm permanentError
 	if !errors.As(err, &perm) || err.Error() != "bad webhook URL" {
 		t.Errorf("err %v", err)
+	}
+}
+
+// A webhook may only reach public hosts, also when a private IPv4
+// address hides inside a NAT64, 6to4 or IPv4-compatible IPv6 address.
+func TestPublicAddrUnwrapsEmbeddedIPv4(t *testing.T) {
+	for addr, want := range map[string]bool{
+		"93.184.216.34":        true,
+		"2606:2800:220:1::1":   true,
+		"64:ff9b::5db8:d822":   true, // NAT64 of a public address
+		"10.0.0.1":             false,
+		"64:ff9b::a00:1":       false, // NAT64 of 10.0.0.1
+		"64:ff9b:1::a9fe:a9fe": false, // local-use NAT64 of 169.254.169.254
+		"2002:7f00:1::":        false, // 6to4 of 127.0.0.1
+		"::a00:1":              false, // IPv4-compatible 10.0.0.1
+		"240.0.0.1":            false,
+		"::ffff:192.168.1.1":   false,
+		"64:ff9b::e000:1":      false, // NAT64 of multicast 224.0.0.1
+	} {
+		if got := publicAddr(netip.MustParseAddr(addr)); got != want {
+			t.Errorf("publicAddr(%s) = %v, want %v", addr, got, want)
+		}
 	}
 }

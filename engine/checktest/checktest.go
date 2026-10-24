@@ -29,8 +29,8 @@ import (
 )
 
 // StrictOutput makes output leaks fail Test rather than only being
-// logged. It is on: the engine redacts before truncating and strips
-// control bytes, and every report goes through one sanitizer.
+// logged. It is on. The engine redacts before truncating and strips
+// control bytes; every report goes through one sanitizer.
 const StrictOutput = true
 
 // Result is the outcome of one fixture case, or of a check whose fixture

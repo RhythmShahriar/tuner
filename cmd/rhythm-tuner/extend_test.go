@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -118,5 +119,38 @@ func TestScanExtension(t *testing.T) {
 	}
 	if code, _, _ := tuner(t, "scan", a.URL, "--json"); code != exitOK || testExt.finished != 1 {
 		t.Errorf("inert extension: exit %d, Finished saw %d", code, testExt.finished)
+	}
+}
+
+// Run as rhythm-tuner, subcommand help and errors name rhythm-tuner, and
+// the usage list stays within 80 columns with each command's arguments.
+func TestSubcommandsUseTheirName(t *testing.T) {
+	t.Setenv(invokedAsEnv, "")
+	old := argv0
+	argv0 = "/usr/local/bin/rhythm-tuner"
+	defer func() { argv0 = old }()
+
+	var out, errs bytes.Buffer
+	if code := run([]string{"diff", "only-one.json"}, &out, &errs); code != exitUsage ||
+		!strings.HasPrefix(errs.String(), "rhythm-tuner: diff takes two JSON reports") || strings.Contains(errs.String(), "rhythm tuner") {
+		t.Errorf("diff error: %d %q", code, errs.String())
+	}
+	out.Reset()
+	if code := run([]string{"watch", "--help"}, &out, &errs); code != exitOK || !strings.Contains(out.String(), "rhythm-tuner watch -l <file>") || strings.Contains(out.String(), "rhythm tuner") {
+		t.Errorf("watch help: %d\n%s", code, out.String())
+	}
+
+	out.Reset()
+	usage(&out)
+	for _, want := range []string{"rhythm-tuner diff <old.json> <new.json>", "rhythm-tuner explain <id>", "rhythm-tuner update [--clear | --prefetch <dir|url>...]"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("usage lacks %q", want)
+		}
+	}
+	usageList, _, _ := strings.Cut(out.String(), "\nOutput:")
+	for _, line := range strings.Split(usageList, "\n") {
+		if len(line) > usageWidth {
+			t.Errorf("%d columns: %q", len(line), line)
+		}
 	}
 }

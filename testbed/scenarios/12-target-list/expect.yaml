@@ -6,7 +6,6 @@
 # different forms. Every target is read and the duplicate scanned once.
 title: target lists with a BOM, CRLF, long lines and duplicates
 qa: [12]
-xfail: U3
 servers:
   - name: a
     routes:

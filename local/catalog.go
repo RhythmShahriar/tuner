@@ -59,6 +59,7 @@ var goRules = []RuleInfo{
 	{ID: "local-integrity-plugin-modified", Title: "Modified file in a wordpress.org plugin", Severity: engine.High, Tags: []string{"integrity", "wordpress", "malware"}},
 	{ID: "local-integrity-plugin-unknown", Title: "Unexpected PHP file in a wordpress.org plugin", Severity: engine.Medium, Tags: []string{"integrity", "wordpress", "malware"}},
 	{ID: "local-integrity-plugin-unchecked", Title: "Plugins not on wordpress.org weren't compared", Severity: engine.Info, Tags: []string{"integrity", "wordpress"}},
+	{ID: "local-integrity-plugin-unlisted", Title: "wordpress.org plugin at a version it never released", Severity: engine.Medium, Tags: []string{"integrity", "wordpress", "malware"}},
 }
 
 // Catalog lists every finding ID local scans report: the Go checks and

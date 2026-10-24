@@ -92,6 +92,10 @@ func NucleiTemplate(c *engine.Check, opts Options) Template {
 		return t
 	}
 	t.Soft404 = soft404
+	if expressionIn(c.Request.Path, ms) {
+		t.Skipped = "a path or pattern holds {{, which Nuclei would run as an expression (such as an out-of-band callback)"
+		return t
+	}
 
 	paths := make([]string, len(c.Request.Path))
 	for i, p := range c.Request.Path {
@@ -143,6 +147,26 @@ func NucleiTemplate(c *engine.Check, opts Options) Template {
 	_ = enc.Close()
 	t.Data = b.Bytes()
 	return t
+}
+
+// expressionIn reports whether a path (other than Tuner's {{host}}) or a
+// word or regex pattern holds "{{". Nuclei evaluates {{...}} in those
+// places, so a check from a third-party folder could otherwise turn into
+// a template that sends a payload or calls back out of band.
+func expressionIn(paths []string, ms []nucleiMatcher) bool {
+	for _, p := range paths {
+		if strings.Contains(strings.ReplaceAll(p, "{{host}}", ""), "{{") {
+			return true
+		}
+	}
+	for _, m := range ms {
+		for _, list := range [][]string{m.Words, m.Regex} {
+			if slices.ContainsFunc(list, func(s string) bool { return strings.Contains(s, "{{") }) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // The template layout, in the field order nuclei-templates use.
@@ -318,14 +342,27 @@ func magicDSL(magic string) string {
 
 // headerRegex matches the header section for a header whose value
 // matches value, the way Tuner matches each value of the header. An empty
-// value only asks that the header is there.
+// value only asks that the header is there. A value with | alternatives
+// is turned branch by branch, so each one is tied to the header.
 func headerRegex(name, value string) string {
 	re := `(?mi)^` + regexp.QuoteMeta(name) + `:[ \t]*`
 	if value == "" {
 		return re
 	}
-	// The value regex keeps its own case rules; ^ and $ refer to the
-	// value, so they become the start after the colon and the line end.
+	branches := splitAlternatives(value)
+	for i, b := range branches {
+		branches[i] = headerBranch(b)
+	}
+	if len(branches) == 1 {
+		return re + `(?-i:` + branches[0] + `)`
+	}
+	return re + `(?-i:(?:` + strings.Join(branches, "|") + `))`
+}
+
+// headerBranch adapts one alternative of a header value regex. It keeps
+// its own case rules; ^ and $ refer to the value, so they become the
+// start after the colon and the line end.
+func headerBranch(value string) string {
 	anchored := strings.HasPrefix(value, "^")
 	value = strings.TrimPrefix(value, "^")
 	if strings.HasSuffix(value, "$") && !strings.HasSuffix(value, `\$`) {
@@ -334,7 +371,35 @@ func headerRegex(name, value string) string {
 	if !anchored {
 		value = `[^\r\n]*?` + value
 	}
-	return re + `(?-i:` + value + `)`
+	return value
+}
+
+// splitAlternatives splits a regex at its top-level |, the ones outside
+// groups and character classes.
+func splitAlternatives(re string) []string {
+	var out []string
+	depth, start, class := 0, 0, false
+	for i := 0; i < len(re); i++ {
+		switch c := re[i]; {
+		case c == '\\':
+			i++ // the next byte is escaped
+		case class:
+			class = c != ']'
+		case c == '[':
+			class = true
+			if i+1 < len(re) && re[i+1] == ']' {
+				i++ // a ] right after [ is a literal
+			}
+		case c == '(':
+			depth++
+		case c == ')':
+			depth--
+		case c == '|' && depth == 0:
+			out = append(out, re[start:i])
+			start = i + 1
+		}
+	}
+	return append(out, re[start:])
 }
 
 func sortedKeys(m map[string]string) []string {

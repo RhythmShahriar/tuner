@@ -34,7 +34,7 @@ Exit codes: 0 ok · 1 new findings at --fail-on-new · 2 usage error · 3 a repo
 `
 
 func init() {
-	registerCommand(command{Name: "diff", Summary: "compare two JSON reports: what is new and what was fixed", Run: cmdDiff})
+	registerCommand(command{Name: "diff", Args: "<old.json> <new.json>", Summary: "compare two JSON reports: what is new and what was fixed", Run: cmdDiff})
 }
 
 // cmdDiff runs rhythm tuner diff. It is registered with registerCommand
@@ -53,7 +53,7 @@ func cmdDiff(args []string, stdout, stderr io.Writer) int {
 	pos, err := cli.ParseInterspersed(flags, args)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			fmt.Fprint(stdout, diffUsage)
+			fmt.Fprint(stdout, named(diffUsage))
 			return exitOK
 		}
 		fmt.Fprintf(stderr, "rhythm tuner: %v\n\n%s", err, diffUsage)
@@ -72,18 +72,15 @@ func cmdDiff(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "rhythm tuner:", err)
 		return exitUsage
 	}
-	before, err := loadReports(pos[0])
-	if err != nil {
-		fmt.Fprintln(stderr, "rhythm tuner:", err)
-		return exitError
-	}
-	after, err := loadReports(pos[1])
-	if err != nil {
-		fmt.Fprintln(stderr, "rhythm tuner:", err)
-		return exitError
+	var sides [2]diff.Scan
+	for i := range sides {
+		if sides[i].Reports, sides[i].Failed, err = readSaved(pos[i]); err != nil {
+			fmt.Fprintln(stderr, "rhythm tuner:", err)
+			return exitError
+		}
 	}
 
-	res := diff.Compare(before, after)
+	res := diff.CompareScans(sides[0], sides[1])
 	write := diff.WriteText
 	switch {
 	case asJSON:
@@ -108,12 +105,6 @@ func severityFlag(name, v string) (engine.Severity, error) {
 		return "", fmt.Errorf("%s %q: want one of %v", name, v, engine.Severities)
 	}
 	return s, nil
-}
-
-// loadReports reads a saved JSON report: one target's, or a batch.
-func loadReports(path string) ([]report.Report, error) {
-	reports, _, err := readSaved(path)
-	return reports, err
 }
 
 // readSaved reads a saved JSON report with the targets it couldn't scan.

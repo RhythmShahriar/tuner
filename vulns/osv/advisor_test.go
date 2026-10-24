@@ -5,6 +5,7 @@ package osv
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -114,5 +115,23 @@ func TestComposerAdvisorNegative(t *testing.T) {
 	if findings, warnings := a.AdviseResponse(ctx, leak, body); len(findings) != 0 || len(warnings) != 1 ||
 		!strings.Contains(warnings[0], "2 Composer packages") {
 		t.Errorf("down: %+v %v", findings, warnings)
+	}
+}
+
+// A lock file from a site decides how many lookups a scan makes, so only
+// the first MaxRemotePackages packages are matched, with a warning.
+func TestComposerAdvisorCapsPackages(t *testing.T) {
+	api := osvtest.NewServer(t)
+	a := &ComposerAdvisor{Client: &Client{HTTP: api.Client(), Base: api.URL, CacheDir: t.TempDir()}}
+	var pkgs []string
+	pkgs = append(pkgs, `{"name":"guzzlehttp/guzzle","version":"7.4.1"}`)
+	for i := range MaxRemotePackages + 50 {
+		pkgs = append(pkgs, fmt.Sprintf(`{"name":"acme/p%d","version":"1.0.0"}`, i))
+	}
+	lock := `{"packages":[` + strings.Join(pkgs, ",") + `]}`
+	leak, body := exposedLock(t, map[string]string{"/composer.lock": lock}, "/composer.lock")
+	findings, warnings := a.AdviseResponse(context.Background(), leak, body)
+	if len(findings) != 1 || len(warnings) != 1 || warnings[0] != fmt.Sprintf("the exposed /composer.lock lists %d packages; only the first %d were matched", MaxRemotePackages+51, MaxRemotePackages) {
+		t.Errorf("findings %d, warnings %q", len(findings), warnings)
 	}
 }

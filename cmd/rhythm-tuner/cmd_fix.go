@@ -24,7 +24,7 @@ var fixStdin io.Reader = os.Stdin
 const maxReport = 64 << 20
 
 func init() {
-	registerCommand(command{Name: "fix", Summary: "build one nginx or apache config from reports", Run: cmdFix})
+	registerCommand(command{Name: "fix", Args: "<report.json>... --server <name>", Summary: "build one nginx or Apache config from reports", Run: cmdFix})
 }
 
 // cmdFix runs `rhythm tuner fix <report.json>... --server nginx|apache`:
@@ -46,7 +46,7 @@ func cmdFix(args []string, stdout, stderr io.Writer) int {
 	files, err := cli.ParseInterspersed(flags, args)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			fmt.Fprint(stdout, fixUsage)
+			fmt.Fprint(stdout, named(fixUsage))
 			return exitOK
 		}
 		fmt.Fprintf(stderr, "rhythm tuner: %v\n\n%s", err, fixUsage)

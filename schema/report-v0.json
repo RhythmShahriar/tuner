@@ -40,6 +40,18 @@
         "check_set": { "type": "string", "enum": ["built-in", "pack", "directory"] },
         "check_pack": { "type": "string", "description": "The check pack's version, when check_set is pack." },
         "baselined": { "type": "integer", "minimum": 0, "description": "Findings a --baseline file hid." },
+        "selection": {
+          "description": "What a narrowed scan (--id, --tags, --severity, --profile quick and so on) left out, so a comparison counts a finding as fixed only when its check ran. Missing when the scan ran every check, as in reports written before it existed.",
+          "type": "object",
+          "properties": {
+            "skipped_checks": { "type": "array", "items": { "type": "string" }, "description": "IDs of the HTTP checks the scan had but did not run." },
+            "ids": { "type": "array", "items": { "type": "string" } },
+            "exclude_ids": { "type": "array", "items": { "type": "string" } },
+            "tags": { "type": "array", "items": { "type": "string" } },
+            "exclude_tags": { "type": "array", "items": { "type": "string" } },
+            "min_severity": { "$ref": "#/$defs/Severity" }
+          }
+        },
         "complete": { "type": "boolean", "description": "False when the scan stopped early or was blocked, so findings may be missing." },
         "stopped_by": {
           "type": "string",

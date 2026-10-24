@@ -43,12 +43,10 @@ Exit codes: 0 ok · 2 usage error · 3 a report couldn't be read or written
 var reportFormats = []string{"html", "md", "sarif", "json"}
 
 func init() {
-	registerCommand(command{Name: "report", Summary: "render saved JSON reports as HTML, Markdown or SARIF", Run: cmdReport})
+	registerCommand(command{Name: "report", Args: "<report.json>... -o <file>", Summary: "render saved JSON reports as HTML, Markdown or SARIF", Run: cmdReport})
 }
 
-// cmdReport runs rhythm tuner report. It is registered with
-// registerCommand (cmd/rhythm-tuner/extend.go) once that lands; until then
-// only tests call it.
+// cmdReport runs rhythm tuner report.
 func cmdReport(args []string, stdout, stderr io.Writer) int {
 	var output, since, brandName, brandLogo string
 	flags := flag.NewFlagSet("report", flag.ContinueOnError)
@@ -65,7 +63,7 @@ func cmdReport(args []string, stdout, stderr io.Writer) int {
 	pos, err := cli.ParseInterspersed(flags, args)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			fmt.Fprint(stdout, reportUsage)
+			fmt.Fprint(stdout, named(reportUsage))
 			return exitOK
 		}
 		fmt.Fprintf(stderr, "rhythm tuner: %v\n\n%s", err, reportUsage)
@@ -122,8 +120,14 @@ func cmdReport(args []string, stdout, stderr io.Writer) int {
 		reports, o.Failed = append(reports, rs...), append(o.Failed, failed...)
 	}
 	o.Many = len(pos) > 1 || len(reports)+len(o.Failed) > 1
+	// SARIF names the Tuner that found the results: the one that wrote
+	// the saved report, else this one.
+	o.Version = version
+	if len(reports) > 0 && reports[0].Version != "" {
+		o.Version = reports[0].Version
+	}
 	if since != "" {
-		if o.Since, err = loadReports(since); err != nil {
+		if o.Since, o.SinceFailed, err = readSaved(since); err != nil {
 			fmt.Fprintln(stderr, "rhythm tuner:", err)
 			return exitError
 		}

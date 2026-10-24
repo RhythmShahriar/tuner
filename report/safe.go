@@ -78,8 +78,8 @@ func MDText(s string) string { return mdReplacer.Replace(SafeText(oneLine(s))) }
 func MDCode(s string) string { return mdCode(s, false) }
 
 // MDCodeCell is MDCode for a table cell: pipes are escaped so they can't
-// end the cell. GitHub strips the backslash there, but would show it
-// in a code span outside a table.
+// end the cell. GitHub strips the backslash there but would show it in
+// a code span outside a table.
 func MDCodeCell(s string) string { return mdCode(s, true) }
 
 func mdCode(s string, cell bool) string {

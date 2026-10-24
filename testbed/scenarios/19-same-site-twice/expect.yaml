@@ -6,7 +6,6 @@
 # the load.
 title: the same site in different forms is scanned once
 qa: [19]
-xfail: U3
 servers:
   - name: site
     routes:

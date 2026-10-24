@@ -109,3 +109,58 @@ func TestCmdDiffExitCodes(t *testing.T) {
 		t.Errorf("--help: exit %d:\n%s", code, out.String())
 	}
 }
+
+// The reviewer's repro: before.json scanned one site and failed another.
+// A scan of the failed site compared with it has everything new.
+func TestSinceWithFailedTargetInBefore(t *testing.T) {
+	leaky, clean := leakySite(t), cleanSite(t)
+	before := filepath.Join(t.TempDir(), "before.json")
+	// clean is scanned; the leaky site is listed as failed.
+	code, out, errs := tuner(t, "scan", clean.URL, "--json-array", "--no-vulns")
+	if code != exitOK {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	var batch []json.RawMessage
+	if err := json.Unmarshal([]byte(out), &batch); err != nil {
+		t.Fatal(err)
+	}
+	failed, _ := json.Marshal(map[string]string{"target": leaky.URL, "error": "can't reach"})
+	data, _ := json.Marshal(append(batch, failed))
+	os.WriteFile(before, data, 0o600)
+
+	code, _, errs = tuner(t, "scan", leaky.URL, "--since", before, "--fail-on-new", "critical", "-q", "--no-vulns")
+	if code != exitFindings || !strings.Contains(errs, "fixed since") || strings.Contains(errs, "0 new,") {
+		t.Errorf("--since: exit %d, stderr %q", code, errs)
+	}
+
+	after := filepath.Join(t.TempDir(), "after.json")
+	if code, _, errs := tuner(t, "scan", leaky.URL, "-o", after, "-q", "--no-vulns"); code != exitOK {
+		t.Fatalf("after: exit %d: %s", code, errs)
+	}
+	var stdout, stderr bytes.Buffer
+	code = cmdDiff([]string{before, after, "--fail-on-new", "critical"}, &stdout, &stderr)
+	if code != exitFindings || strings.HasPrefix(stdout.String(), "0 new") {
+		t.Errorf("diff: exit %d\n%s", code, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Not in the new scan, so not compared: "+clean.URL) {
+		t.Errorf("diff lacks the not compared site:\n%s", stdout.String())
+	}
+}
+
+// A narrowed scan does not report the checks it skipped as fixed.
+func TestDiffSkippedChecksNotFixed(t *testing.T) {
+	srv := leakySite(t)
+	dir := t.TempDir()
+	full, leaks := filepath.Join(dir, "a.json"), filepath.Join(dir, "lk.json")
+	if code, _, errs := tuner(t, "scan", srv.URL, "-o", full, "-q", "--no-vulns"); code != exitOK {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	if code, _, errs := tuner(t, "scan", srv.URL, "--id", "leak-*", "-o", leaks, "-q", "--no-vulns"); code != exitOK {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	var out bytes.Buffer
+	cmdDiff([]string{full, leaks}, &out, &bytes.Buffer{})
+	if !strings.HasPrefix(out.String(), "0 new, 0 fixed, 1 unchanged since "+full+"; ") || !strings.Contains(out.String(), "not seen (not checked this time)") {
+		t.Errorf("diff:\n%s", out.String())
+	}
+}

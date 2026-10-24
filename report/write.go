@@ -40,6 +40,9 @@ type WriteOptions struct {
 	// how each score moved. Other writers ignore it.
 	Since     []Report
 	SinceName string // what to call the earlier scan, e.g. its file name
+	// SinceFailed lists the targets the earlier scan could not scan. With
+	// any failed target on either side, reports pair up by target only.
+	SinceFailed []TargetError
 }
 
 // Writer renders reports in one format.

@@ -59,7 +59,7 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 	pos, err := cli.ParseInterspersed(flags, args)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			fmt.Fprint(stdout, updateUsage)
+			fmt.Fprint(stdout, named(updateUsage))
 			return exitOK
 		}
 		fmt.Fprintf(stderr, "rhythm tuner: %s\nrun 'rhythm tuner update --help' for its flags\n", updateFlagError(err, flags))
@@ -116,7 +116,7 @@ func cmdUpdate(args []string, stdout, stderr io.Writer) int {
 	}
 	if ok+failed+osvOK+osvFailed == 0 {
 		fmt.Fprintln(stdout, "Nothing cached yet. Vulnerability data is fetched during scans and refreshed daily.")
-		fmt.Fprintln(stdout, "To cache it ahead of an --offline scan, run: rhythm tuner update --prefetch <dir|url>")
+		fmt.Fprintln(stdout, named("To cache it ahead of an --offline scan, run: rhythm tuner update --prefetch <dir|url>"))
 	} else {
 		sources := []string{vulns.Source}
 		if c.Wordfence != nil {
@@ -318,8 +318,14 @@ func keptNote(failed int) string {
 }
 
 // updatePack refreshes the check pack and says which checks scans will use.
+// A build that trusts no signing key (a fork or a dev build) never uses a
+// pack, which is not a failure: its scans use the built-in checks.
 func updatePack(ctx context.Context, pc *checkpack.Client, stdout, stderr io.Writer) bool {
 	p, err := pc.Get(ctx)
+	if errors.Is(err, checkpack.ErrNoTrustedKeys) {
+		fmt.Fprintf(stdout, "Checks: built-in (rhythm-tuner %s)\n", version)
+		return true
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "rhythm tuner: check pack: %v\n", err)
 		fmt.Fprintf(stdout, "Checks: built-in (rhythm-tuner %s)\n", version)

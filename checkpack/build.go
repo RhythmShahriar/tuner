@@ -39,7 +39,7 @@ func CurrentBuild() BuildInfo {
 // A pack built from a later commit wins. A binary with uncommitted changes
 // keeps its own checks, so a check author always runs what they're
 // editing. When the build time is unknown, a compatible pack wins: the
-// pack is rebuilt from master on every checks change, and releases are
+// pack is rebuilt from master on every checks change and releases are
 // cut from master.
 func (p *Pack) Supersedes(b BuildInfo) bool {
 	return p.supersedes(b)

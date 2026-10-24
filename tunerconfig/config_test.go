@@ -226,3 +226,16 @@ func TestProfileDeepAccepted(t *testing.T) {
 		t.Errorf("profile deep: %+v, %v", c, err)
 	}
 }
+
+// EnvHeaders names the headers that read a variable, so a scan can keep
+// them away from targets the file chose.
+func TestEnvHeaders(t *testing.T) {
+	env := func(string) (string, bool) { return "v", true }
+	c, err := Parse([]byte("headers:\n  X-Plain: literal\n  Authorization: Bearer ${TUNER_T}\n  X-Mixed: a-${TUNER_U}\n"), ".tuner.yml", env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(c.EnvHeaders, ",") != "Authorization,X-Mixed" || len(c.Headers) != 3 {
+		t.Errorf("EnvHeaders %v, Headers %d", c.EnvHeaders, len(c.Headers))
+	}
+}

@@ -44,8 +44,12 @@ func (a *ComposerAdvisor) AdviseResponse(ctx context.Context, f engine.Finding, 
 	if len(pkgs) == 0 {
 		return nil, nil
 	}
-	res := a.Client.Check(ctx, pkgs)
 	var warnings []string
+	if len(pkgs) > MaxRemotePackages {
+		warnings = append(warnings, fmt.Sprintf("the exposed %s lists %d packages; only the first %d were matched", f.Path, len(pkgs), MaxRemotePackages))
+		pkgs = pkgs[:MaxRemotePackages]
+	}
+	res := a.Client.Check(ctx, pkgs)
 	if w := a.Client.Warning(res); w != "" {
 		warnings = append(warnings, w)
 	}

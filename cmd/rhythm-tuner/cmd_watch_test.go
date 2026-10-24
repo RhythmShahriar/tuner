@@ -41,6 +41,9 @@ func TestWatchOnce(t *testing.T) {
 	t.Setenv(fakeWatchEnv, argv)
 	exe, _ := os.Executable()
 	state := filepath.Join(dir, "state")
+	// A sites.txt of the user's own in --dir is left alone.
+	os.MkdirAll(state, 0o700)
+	os.WriteFile(filepath.Join(state, "sites.txt"), []byte("mine\n"), 0o600)
 	var out, errb bytes.Buffer
 	code := cmdWatch([]string{"example.com", "--once", "--exec", exe, "--dir", state,
 		"--fail-on-new", "high", "--notify", "webhook+https://hooks.example/x", "--", "--profile", "quick"}, &out, &errb)
@@ -50,7 +53,7 @@ func TestWatchOnce(t *testing.T) {
 	b, _ := os.ReadFile(argv)
 	var got []string
 	json.Unmarshal(b, &got)
-	list := filepath.Join(state, "sites.txt")
+	list := filepath.Join(state, watchSitesName)
 	if len(got) < 6 || got[5] == "" {
 		t.Fatalf("argv %q", got)
 	}
@@ -60,7 +63,10 @@ func TestWatchOnce(t *testing.T) {
 		t.Errorf("argv\n%q\nwant\n%q", got, want)
 	}
 	if b, _ := os.ReadFile(list); string(b) != "example.com\n" {
-		t.Errorf("sites.txt %q", b)
+		t.Errorf("%s %q", watchSitesName, b)
+	}
+	if b, _ := os.ReadFile(filepath.Join(state, "sites.txt")); string(b) != "mine\n" {
+		t.Errorf("the user's sites.txt changed: %q", b)
 	}
 	if !strings.Contains(out.String(), ": 1 site, 1 finding (1 critical); report "+got[5]+" (scan exit 1)") {
 		t.Errorf("output:\n%s", out.String())
@@ -125,6 +131,18 @@ func TestWatchFlags(t *testing.T) {
 	out.Reset()
 	if code := cmdWatch([]string{"--every", "1h"}, &out, &errb); code != exitUsage || !strings.Contains(errb.String(), "run 'rhythm tuner watch --help' for its flags") {
 		t.Errorf("usage error: %d\n%s", code, errb.String())
+	}
+}
+
+func TestSafeWatchName(t *testing.T) {
+	for in, want := range map[string]string{
+		"Client Sites": "Client-Sites", "..hidden": "hidden", "": "watch",
+		"CON": "CON-watch", "nul.txt": "nul.txt-watch", "com1": "com1-watch", "console": "console",
+		"name.": "name",
+	} {
+		if got := safeWatchName(in); got != want {
+			t.Errorf("safeWatchName(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 

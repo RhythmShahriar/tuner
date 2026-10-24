@@ -20,6 +20,8 @@ match:
   all:
     - status: 200
     - regex: 'define\(\s*[''"]DB_(?:NAME|USER|PASSWORD|HOST)[''"]'
+    # wp-config-sample.php's placeholder password: a template, no secret.
+    - not_regex: 'define\(\s*[''"]DB_PASSWORD[''"]\s*,\s*[''"]password_here[''"]'
     - not_baseline: true
 extract:
   secrets: true

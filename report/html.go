@@ -129,7 +129,7 @@ func writeHTML(w io.Writer, reports []Report, o WriteOptions) error {
 	for i, r := range reports {
 		var old *Report
 		if len(o.Since) > 0 {
-			old = earlier(o.Since, len(reports), r)
+			old = earlier(o.Since, len(reports), r, len(o.SinceFailed)+len(o.Failed) > 0)
 		}
 		page.Sites = append(page.Sites, htmlSiteFor(i, r, old, len(o.Since) > 0, o.SinceName))
 	}
@@ -145,8 +145,14 @@ func htmlSiteFor(i int, r Report, old *Report, compared bool, sinceName string) 
 	for _, c := range r.Fingerprint.Components {
 		s.Components = append(s.Components, htmlComponent{c.Type, c.Slug, or(c.Version, "unknown"), c.Source})
 	}
+	// Counted from the findings, which a report edited by hand or by a
+	// script may no longer match its saved summary.
+	counts := map[engine.Severity]int{}
+	for _, f := range r.Findings {
+		counts[f.Severity]++
+	}
 	for _, sev := range engine.Severities {
-		s.Counts = append(s.Counts, htmlCount{sev, r.Summary[sev]})
+		s.Counts = append(s.Counts, htmlCount{sev, counts[sev]})
 	}
 	prev := previous(old)
 	if old != nil {
@@ -198,7 +204,7 @@ func htmlSiteFor(i int, r Report, old *Report, compared bool, sinceName string) 
 	}
 	if old != nil {
 		for _, f := range old.Findings {
-			if fp := Fingerprint(f, ""); !current[fp] {
+			if fp := Fingerprint(f, ""); !current[fp] && r.Unseen(f) == "" {
 				current[fp] = true
 				s.Fixed = append(s.Fixed, htmlFixed{f.Severity, f.Title, Place(f)})
 			}
@@ -283,10 +289,11 @@ func previous(old *Report) map[string]seenFinding {
 }
 
 // earlier finds r's report in since: the only one when each side has one
-// report (so staging compares with production), else the one with the
-// same target. It is nil for a site the earlier scan didn't have.
-func earlier(since []Report, n int, r Report) *Report {
-	if len(since) == 1 && n == 1 {
+// report and neither side has a failed target (so staging compares with
+// production), else the one with the same target. It is nil for a site
+// the earlier scan didn't have.
+func earlier(since []Report, n int, r Report, failed bool) *Report {
+	if len(since) == 1 && n == 1 && !failed {
 		return &since[0]
 	}
 	for i := range since {

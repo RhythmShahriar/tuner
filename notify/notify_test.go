@@ -392,3 +392,12 @@ func TestIncompleteScan(t *testing.T) {
 		}
 	}
 }
+
+// A cut never leaves half an escape before the ellipsis.
+func TestDiscordCutKeepsEscapes(t *testing.T) {
+	for in, want := range map[string]string{`aa\`: `aa`, `aa\\`: `aa\\`, `aa\\\`: `aa\\`, `aa`: `aa`, ``: ``} {
+		if got := cutEscape(in); got != want {
+			t.Errorf("cutEscape(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

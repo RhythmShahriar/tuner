@@ -156,10 +156,13 @@ var nonPublic = []netip.Prefix{
 	netip.MustParsePrefix("240.0.0.0/4"),
 }
 
-// publicAddr reports whether a is a public unicast address.
+// publicAddr reports whether a is a public unicast address. An IPv4
+// address inside a NAT64, 6to4, Teredo or IPv4-compatible IPv6 address
+// counts as that IPv4 address, as the engine's own check does: a gateway
+// turns 64:ff9b::a00:1 back into 10.0.0.1.
 func publicAddr(a netip.Addr) bool {
 	a = a.Unmap()
-	if !a.IsValid() || a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast() || a.IsUnspecified() || a.IsMulticast() ||
+	if !a.IsValid() || engine.InternalAddr(a) || a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast() || a.IsUnspecified() || a.IsMulticast() ||
 		a.IsLinkLocalMulticast() || a.IsInterfaceLocalMulticast() {
 		return false
 	}

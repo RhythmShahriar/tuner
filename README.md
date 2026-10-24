@@ -72,7 +72,7 @@ The installers and `rhythm update` check every download against the release's `c
 rhythm tuner scan yoursite.com
 ```
 
-That's it. Tuner fingerprints the site, learns how it answers "not found", runs every check, matches versions against known vulnerabilities, and prints a fix for each finding. A typical scan takes 15–30 seconds.
+That's it. Tuner fingerprints the site, learns how it answers "not found", runs every check, matches versions against known vulnerabilities and prints a fix for each finding. A typical scan takes 15–30 seconds.
 
 | You want to… | Run |
 |---|---|
@@ -99,7 +99,7 @@ That's it. Tuner fingerprints the site, learns how it answers "not found", runs 
 | Scan your clients' sites every night and see what changed | `rhythm tuner watch -l clients.txt --at 02:00 --fail-on-new high --html` |
 | Run scans from your own app over an HTTP API | `TUNER_SERVE_TOKEN=… rhythm tuner serve --listen 127.0.0.1:8080` |
 
-Every flag is in the [CLI reference](https://github.com/RhythmShahriar/rhythm/wiki/Tuner-CLI-Reference), and the [documentation wiki](https://github.com/RhythmShahriar/rhythm/wiki) covers everything else.
+Every flag is in the [CLI reference](https://github.com/RhythmShahriar/rhythm/wiki/Tuner-CLI-Reference); the [documentation wiki](https://github.com/RhythmShahriar/rhythm/wiki) covers everything else.
 
 > [!IMPORTANT]
 > Scan only sites you own or have permission to test. Tuner is non-intrusive (its checks send plain GET requests with no exploit payloads, 5 requests a second by default, 50 for localhost and private addresses). Even so, a scan of someone else's site without permission may be illegal. See [Responsible use](#responsible-use--disclaimer).
@@ -117,7 +117,7 @@ Every flag is in the [CLI reference](https://github.com/RhythmShahriar/rhythm/wi
 <td width="50%" valign="top">
 
 ### 🧩 Known vulnerabilities
-WordPress core, plugins, themes, PHP, nginx and Apache, matched against CVE, Wordfence, WPScan and Patchstack data. Each finding lists CVEs, the fixed version, and flags anything **actively exploited** (CISA KEV).
+WordPress core, plugins, themes, PHP, nginx and Apache, matched against CVE, Wordfence, WPScan and Patchstack data. Each finding lists CVEs and the fixed version and flags anything **actively exploited** (CISA KEV).
 
 </td>
 </tr>
@@ -131,7 +131,7 @@ User enumeration, XML-RPC, admin-ajax, directory listing, `display_errors`, Lara
 <td valign="top">
 
 ### 🛡️ Server &amp; TLS
-Security headers, cookie flags, version leaks, plain HTTP, expired or untrusted certificates, and obsolete TLS 1.0/1.1.
+Security headers, cookie flags, version leaks, plain HTTP, expired or untrusted certificates and obsolete TLS 1.0/1.1.
 
 </td>
 </tr>
@@ -150,9 +150,7 @@ Security headers, cookie flags, version leaks, plain HTTP, expired or untrusted 
 
 These are being fixed; until then, plan around them.
 
-- **Headers follow redirects.** `-H` and `--cookie` go with every request of a scan, also after the home page redirects to another host. Scan the final address directly when you pass credentials.
-- **Only built-in checks are held to GET.** Every check Tuner ships sends GET requests only, as does the published check pack. Tuner does not yet refuse other methods in checks you load with `--checks`, so load only checks you trust.
-- **The check pack is checksummed, not signed.** Its checksum comes from the same release as the pack. `--no-check-updates` keeps to the checks built into the binary.
+- **Deep plugin discovery knows the popular plugins only.** `--plugins deep` asks for the readme of the 1,500 most installed plugins. A plugin outside that list is found only when the home page or the REST API names it, even when it has known advisories.
 
 ## CI
 
@@ -171,7 +169,6 @@ Show findings in your repository's **Security** tab:
 Keep the settings in a `.tuner.yml` next to your code instead of on the command line. Flags still win over it:
 
 ```yaml
-targets: [https://staging.yoursite.com]
 fail_on: high
 min_confidence: confirmed
 headers:
@@ -183,15 +180,15 @@ ignore:
     until: 2026-12-31                    # after this day the finding shows again
 ```
 
-Pass the secret to the step under the `TUNER_` name the file uses:
+Pass the secret to the step under the `TUNER_` name the file uses. Name the site on the command line:
 
 ```yaml
-- run: rhythm tuner scan --sarif -o tuner.sarif
+- run: rhythm tuner scan https://staging.yoursite.com --sarif -o tuner.sarif
   env:
     TUNER_STAGING_AUTH: ${{ secrets.STAGING_AUTH }}
 ```
 
-A scan reads `.tuner.yml` from the current folder, so a cloned repository or a pull request can bring its own. Headers can only read variables whose names start with `TUNER_`. When the file chooses the targets, `-H` and `--cookie` are refused, so a secret on the command line never goes to a host only the file named: name the targets too, or use `--no-config`. Every scan prints which file it used, which targets that file chose and how many findings its ignore entries and baseline hid, also under `-q` and `--json`. Run `scan --no-config` in folders you don't trust.
+A scan reads `.tuner.yml` from the current folder, so a cloned repository or a pull request can bring its own. Headers can only read variables whose names start with `TUNER_`. A file may also list `targets:`. Then `-H`, `--cookie` and headers that read a `${TUNER_...}` variable are refused, so a secret never goes to a host only the file named. Name the targets on the command line, or use `--no-config`. A `.tuner.yml` found this way can't point at folders or a baseline outside its own folder. Every scan prints which file it used, which targets that file chose, any `rate` or `concurrency` it set and how many findings its ignore entries and baseline hid, also under `-q` and `--json`. Run `scan --no-config` in folders you don't trust.
 
 More in the [CI guide](https://github.com/RhythmShahriar/rhythm/wiki/Tuner-CI).
 

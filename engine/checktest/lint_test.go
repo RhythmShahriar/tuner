@@ -11,6 +11,8 @@ import (
 
 	"github.com/RhythmShahriar/tuner/checks"
 	"github.com/RhythmShahriar/tuner/engine"
+	// The advisor registers its rules, which the lint checks IDs against.
+	_ "github.com/RhythmShahriar/tuner/vulns"
 )
 
 // goodCheck passes every lint rule; each case below breaks one.
@@ -74,7 +76,7 @@ func TestLintRules(t *testing.T) {
 		{"camel id", r("leak-thing", "leakThing"), goodFixture, "id", "lower-case words joined by hyphens"},
 		{"one word id", r("leak-thing", "thing"), goodFixture, "id", "lower-case words joined by hyphens"},
 		{"unknown prefix", r("leak-thing", "acme-thing"), goodFixture, "id", "start it with one of hdr-, laravel-, leak-"},
-		{"advisor prefix", r("leak-thing", "wp-core-thing"), goodFixture, "id", "belongs to vulnerability matching"},
+		{"advisor prefix", r("leak-thing", "wp-core-outdated"), goodFixture, "id", "belongs to vulnerability matching"},
 		// The engine refuses these at load time, so lint reports the load error.
 		{"post", r("request:\n", "request:\n  method: POST\n"), goodFixture, "load", "checks may only use GET or HEAD"},
 		{"traversal", r("/thing.txt\", \"/{{host}}", "/../etc/passwd\", \"/{{host}}"), goodFixture, "query", "path traversal"},

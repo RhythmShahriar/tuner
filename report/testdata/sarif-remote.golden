@@ -86,7 +86,7 @@
               "help": {
                 "text": "Upgrade PHP to a supported release."
               },
-              "helpUri": "https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Finding-Reference#vulnerability-and-version-findings",
+              "helpUri": "https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Finding-Reference#vuln-php",
               "properties": {
                 "security-severity": "8.0",
                 "tags": [

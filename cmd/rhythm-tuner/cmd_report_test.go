@@ -98,13 +98,35 @@ func TestCmdReportMatchesScanHTML(t *testing.T) {
 	}
 }
 
+// report --sarif names a version: the saved report's, else this build's.
+func TestCmdReportSARIFVersion(t *testing.T) {
+	saved := saveBatch(t, "scan.json", twoSites())
+	var out, errs bytes.Buffer
+	if code := cmdReport([]string{saved, "--sarif"}, &out, &errs); code != exitOK {
+		t.Fatalf("exit %d: %s", code, errs.String())
+	}
+	reports, _, _ := readSaved(saved)
+	want := `"version": "` + reports[0].Version + `"`
+	if reports[0].Version == "" || !strings.Contains(out.String(), want) {
+		t.Errorf("SARIF lacks %s:\n%.400s", want, out.String())
+	}
+	b, _ := os.ReadFile(saved)
+	os.WriteFile(saved, bytes.ReplaceAll(b, []byte(`"version": "`+reports[0].Version+`"`), []byte(`"version": ""`)), 0o600)
+	out.Reset()
+	cmdReport([]string{saved, "--sarif"}, &out, &errs)
+	if !strings.Contains(out.String(), `"version": "`+version+`"`) {
+		t.Errorf("SARIF without a saved version lacks this build's:\n%.400s", out.String())
+	}
+}
+
 func TestCmdReportFormats(t *testing.T) {
 	saved := saveBatch(t, "scan.json", twoSites(), report.TargetError{Target: "https://down.test", Error: "connection refused"})
 	reports, failed, err := readSaved(saved)
 	if err != nil || len(reports) != 2 || len(failed) != 1 {
 		t.Fatalf("%v %d %d", err, len(reports), len(failed))
 	}
-	o := report.WriteOptions{Many: true, Failed: failed}
+	// SARIF names the Tuner that wrote the saved report.
+	o := report.WriteOptions{Many: true, Failed: failed, Version: reports[0].Version}
 	for format, args := range map[string][]string{"md": {"--md"}, "sarif": {"--sarif"}, "json": {"--json"}, "html": {"--html"}} {
 		var out, errs bytes.Buffer
 		if code := cmdReport(append([]string{saved}, args...), &out, &errs); code != exitOK {

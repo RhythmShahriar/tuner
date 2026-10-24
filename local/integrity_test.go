@@ -110,6 +110,12 @@ func (f *fakeWPOrg) RoundTrip(r *http.Request) (*http.Response, error) {
 			sums[p] = md5hex(b)
 		}
 		return reply(200, map[string]any{"checksums": sums})
+	case r.URL.Host == "core.test" && r.URL.Path == "/plugins/info/1.2/":
+		// wordpress.org hosts akismet; acme-custom is not found.
+		if slug := r.URL.Query().Get("request[slug]"); slug == "akismet" {
+			return reply(200, `{"name":"Akismet","slug":"akismet","version":"5.3"}`)
+		}
+		return reply(404, `{"error":"Plugin not found."}`)
 	case r.URL.Host == "dl.test" && r.URL.Path == "/plugin-checksums/akismet/5.3.json":
 		files := map[string]any{}
 		for p, b := range pristineAkismet {
@@ -380,5 +386,25 @@ func TestIntegrityLinks(t *testing.T) {
 	}
 	if f := got["local-integrity-core-modified /wp-includes/load.php"]; f.Severity != engine.High {
 		t.Errorf("severity %s", f.Severity)
+	}
+}
+
+// A wordpress.org plugin whose Version header names a release that
+// doesn't exist is reported, not passed off as a plugin wordpress.org
+// doesn't host.
+func TestIntegrityUnlistedVersion(t *testing.T) {
+	api := &fakeWPOrg{}
+	root := integrityTree(t, map[string]string{
+		"wp-content/plugins/akismet/akismet.php":       "<?php\n/*\nPlugin Name: Akismet\nVersion: 9.9.9\n*/\n",
+		"wp-content/plugins/akismet/class.akismet.php": "<?php class Akismet { /* edited */ }",
+	})
+	res := integrityScan(t, root, api.client("", false))
+	f := find(res, "local-integrity-plugin-unlisted")
+	if f == nil || f.Severity != engine.Medium || f.Confidence != "low" ||
+		!slices.Equal(f.Evidence.Matched, []string{"no checksums for: akismet 9.9.9"}) {
+		t.Fatalf("finding %+v", f)
+	}
+	if note := find(res, "local-integrity-plugin-unchecked"); note == nil || !slices.Equal(note.Evidence.Matched, []string{"no checksums to compare: acme-custom"}) {
+		t.Errorf("unchecked note %+v", note)
 	}
 }

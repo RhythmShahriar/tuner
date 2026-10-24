@@ -195,14 +195,20 @@ func (b *Bundle) Write(w io.Writer, version string) error {
 }
 
 // WritePlan prints what the bundle holds without the config text, for
-// --dry-run: one line per block with its checks and finding count.
+// --dry-run: one line per block with its checks and finding count. A
+// block whose snippet came from the report, not from a Tuner check, says
+// so, as the bundle does: nobody vetted that text.
 func (b *Bundle) WritePlan(w io.Writer) error {
 	var buf bytes.Buffer
 	// IDs come from the report, so they go through inert like the
 	// bundle's comments do.
 	fmt.Fprintf(&buf, "%s bundle: %s for %s\n", b.Server, plural(len(b.Blocks), "snippet"), plural(b.Findings, "finding"))
 	for _, blk := range b.Blocks {
-		fmt.Fprintf(&buf, "  %s (%s)\n", inert(strings.Join(blk.Checks, ", ")), plural(len(blk.URLs), "URL"))
+		from := ""
+		if blk.FromReport {
+			from = " (from the report)"
+		}
+		fmt.Fprintf(&buf, "  %s (%s)%s\n", inert(strings.Join(blk.Checks, ", ")), plural(len(blk.URLs), "URL"), from)
 	}
 	if len(b.Without) > 0 {
 		fmt.Fprintf(&buf, "no %s snippet: %s\n", b.Server, inert(strings.Join(b.Without, ", ")))

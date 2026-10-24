@@ -29,6 +29,8 @@ type Report struct {
 	CheckSet   string                  `json:"check_set,omitempty"`  // built-in, pack or directory
 	CheckPack  string                  `json:"check_pack,omitempty"` // the pack's version, when check_set is pack
 	Baselined  int                     `json:"baselined"`            // findings a baseline file hid
+	// Selection is what the scan looked for; see Selection.
+	Selection *Selection `json:"selection,omitempty"`
 
 	// How complete the scan is (see Status). These sit on Report rather
 	// than in an embedded struct so they win over the same names on

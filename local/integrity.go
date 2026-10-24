@@ -38,6 +38,7 @@ const (
 var integrityChecks = []string{
 	"local-integrity-core-modified", "local-integrity-core-unknown", "local-integrity-core-missing",
 	"local-integrity-plugin-modified", "local-integrity-plugin-unknown", "local-integrity-plugin-unchecked",
+	"local-integrity-plugin-unlisted",
 }
 
 // Missing core files listed in one finding's evidence.
@@ -152,6 +153,30 @@ func (c *Checksums) Plugin(ctx context.Context, slug, version string) (map[strin
 		}
 		return out, nil
 	})
+}
+
+// hosted reports whether wordpress.org hosts the plugin slug at all, at
+// any version. A plugin it hosts whose installed version has no
+// checksums may have had its Version header edited to dodge the check.
+func (c *Checksums) hosted(ctx context.Context, slug string) (bool, error) {
+	c.init()
+	q := url.Values{"action": {"plugin_information"}, "request[slug]": {slug}, "request[fields][sections]": {"0"}}
+	_, err := c.lookup(ctx, "hosted", slug, c.CoreBase+"/plugins/info/1.2/?"+q.Encode(), func(b []byte) (map[string][]string, error) {
+		var r struct {
+			Slug string `json:"slug"`
+		}
+		if err := json.Unmarshal(b, &r); err != nil {
+			return nil, err
+		}
+		if r.Slug == "" {
+			return nil, errNotListed
+		}
+		return map[string][]string{"slug": {r.Slug}}, nil
+	})
+	if errors.Is(err, errNotListed) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // lookup answers from the cache, or fetches u and parses it.
@@ -310,7 +335,7 @@ func (s *scan) prepareIntegrity(ctx context.Context) (*integrityVisitor, []engin
 
 	// Plugins, a few at a time.
 	var mu sync.Mutex
-	var notListed, noVersion, offline []string
+	var notListed, unlisted, noVersion, offline []string
 	var failed []string
 	sem := make(chan struct{}, 4)
 	var wg sync.WaitGroup
@@ -329,11 +354,19 @@ func (s *scan) prepareIntegrity(ctx context.Context) (*integrityVisitor, []engin
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			sums, err := c.Plugin(ctx, comp.Slug, comp.Version)
+			hosted := false
+			if errors.Is(err, errNotListed) {
+				// An error here (offline, say) leaves it a plugin that
+				// isn't on wordpress.org, as before the lookup.
+				hosted, _ = c.hosted(ctx, comp.Slug)
+			}
 			mu.Lock()
 			defer mu.Unlock()
 			switch {
 			case err == nil:
 				v.plugins[comp.Slug], v.pver[comp.Slug] = sums, comp.Version
+			case errors.Is(err, errNotListed) && hosted:
+				unlisted = append(unlisted, comp.Slug+" "+comp.Version)
 			case errors.Is(err, errNotListed):
 				notListed = append(notListed, comp.Slug)
 			case errors.Is(err, errNotCached):
@@ -362,6 +395,20 @@ func (s *scan) prepareIntegrity(ctx context.Context) (*integrityVisitor, []engin
 			"WordPress.org only publishes checksums for the plugins it hosts. Premium and custom plugins can't be checked this way, so a changed file in them goes unnoticed here.",
 			"Compare them with a fresh copy from their vendor, or keep them in version control and check for changes there.",
 			"integrity", "wordpress")
+		f.Evidence.Request = "look up checksums"
+		info = append(info, f)
+	}
+	if len(unlisted) > 0 {
+		slices.Sort(unlisted)
+		f := s.finding("local-integrity-plugin-unlisted", engine.Medium, filepath.Join(s.wp.content, "plugins"),
+			fmt.Sprintf("%d wordpress.org plugin%s at a version wordpress.org never released", len(unlisted), plural(len(unlisted))),
+			[]string{"no checksums for: " + strings.Join(unlisted, ", ")},
+			"WordPress.org hosts these plugins but has no checksums for the installed version, so their files weren't compared. "+
+				"A Version header edited to a release that doesn't exist hides changed files from this check.",
+			"Check the version in each plugin's main file against its wordpress.org page. Reinstall the plugin from wordpress.org if it doesn't match.",
+			"integrity", "wordpress", "malware")
+		f.Confidence = confidenceLow
+		f.Caveat = "likely: a development build or a release published minutes ago has no checksums yet either"
 		f.Evidence.Request = "look up checksums"
 		info = append(info, f)
 	}

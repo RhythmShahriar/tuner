@@ -241,3 +241,40 @@ func TestLogo(t *testing.T) {
 		t.Error("oversized logo written")
 	}
 }
+
+// The HTML report pairs one site with one earlier site only when neither
+// scan had a failed target, counts from the findings and lists as fixed
+// only what the new scan looked for in full.
+func TestHTMLComparesLikeDiff(t *testing.T) {
+	now, before := htmlBatch()
+	one := now[:1]
+	other := []Report{New(&engine.Result{Target: "https://other.test"}, "1.2.3")}
+	if earlier(other, 1, one[0], false) == nil {
+		t.Error("1v1 without failed targets should pair")
+	}
+	if earlier(other, 1, one[0], true) != nil {
+		t.Error("with a failed target, a different site must not pair")
+	}
+	if earlier(before, 1, one[0], true) == nil {
+		t.Error("the same target still pairs")
+	}
+
+	r := now[0]
+	r.Summary = map[engine.Severity]int{engine.Critical: 9}
+	site := htmlSiteFor(0, r, &before[0], true, "old.json")
+	for _, c := range site.Counts {
+		if c.Severity == engine.Critical && c.N != 1 {
+			t.Errorf("critical count %d, want 1 from the findings", c.N)
+		}
+	}
+
+	r.SetStatus(Status{Complete: false, StoppedBy: "waf", BlockedBy: "cloudflare"})
+	if site := htmlSiteFor(0, r, &before[0], true, "old.json"); len(site.Fixed) != 0 {
+		t.Errorf("a blocked scan lists fixed findings: %+v", site.Fixed)
+	}
+	r.SetStatus(Status{Complete: true, VulnData: "ok"})
+	r.Selection = &Selection{Skipped: []string{"leak-git-config"}}
+	if site := htmlSiteFor(0, r, &before[0], true, "old.json"); len(site.Fixed) != 0 {
+		t.Errorf("a check that did not run lists fixed findings: %+v", site.Fixed)
+	}
+}

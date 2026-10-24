@@ -105,3 +105,16 @@ func TestMergeNegative(t *testing.T) {
 		t.Error("eq bound")
 	}
 }
+
+// Merging keeps at most six references but never drops a Wordfence
+// record link, which the feed's terms ask for.
+func TestMergeKeepsWordfenceLinks(t *testing.T) {
+	a := Vuln{References: []string{"https://r/1", "https://r/2", "https://r/3", "https://r/4", "https://r/5", "https://r/6"}}
+	b1 := Vuln{References: []string{wordfenceRecordURL + "one", "https://r/7"}}
+	b2 := Vuln{References: []string{wordfenceRecordURL + "two"}}
+	got := combine(combine(a, b1), b2)
+	want := []string{"https://r/1", "https://r/2", "https://r/3", "https://r/4", "https://r/5", "https://r/6", wordfenceRecordURL + "one", wordfenceRecordURL + "two"}
+	if !slices.Equal(got.References, want) {
+		t.Errorf("references %v, want %v", got.References, want)
+	}
+}

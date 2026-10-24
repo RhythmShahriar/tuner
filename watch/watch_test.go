@@ -396,6 +396,35 @@ func TestHTMLAndPrune(t *testing.T) {
 	}
 }
 
+// TestPruneLeavesOtherFiles keeps files in Dir that are not watch runs,
+// however their names sort. Same-second runs sort by their suffix.
+func TestPruneLeavesOtherFiles(t *testing.T) {
+	dir := t.TempDir()
+	mine := []string{"0-notes.log", "2025-annual-audit.json", "report.html", "sites.txt", "20261024T010000Zx.json"}
+	runs := []string{
+		"20261024T010000Z.json", "20261024T010000Z-2.json", "20261024T010000Z-10.json",
+		"20261024T020000Z.json", "20261024T020000Z.log",
+	}
+	for _, n := range append(slices.Clone(mine), runs...) {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w := &Watcher{Dir: dir, Keep: 2}
+	w.prune()
+	entries, _ := os.ReadDir(dir)
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	want := append(slices.Clone(mine), "20261024T010000Z-10.json", "20261024T020000Z.json", "20261024T020000Z.log")
+	slices.Sort(names)
+	slices.Sort(want)
+	if !slices.Equal(names, want) {
+		t.Errorf("after prune %v, want %v", names, want)
+	}
+}
+
 func TestSameSecondNames(t *testing.T) {
 	w, _ := fake(t)
 	w.Clock = &fakeClock{now: time.Date(2026, 10, 24, 1, 0, 0, 0, time.UTC)}

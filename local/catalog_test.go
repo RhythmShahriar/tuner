@@ -6,6 +6,7 @@ package local
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -145,5 +146,33 @@ func TestFileLabel(t *testing.T) {
 		if got := fileLabel(g); got != want {
 			t.Errorf("fileLabel(%q) = %q, want %q", g, got, want)
 		}
+	}
+}
+
+// Every wp-config check counted in the summary is a catalog entry.
+func TestWPConfigChecksInCatalog(t *testing.T) {
+	cat := Catalog()
+	for _, id := range wpConfigChecks {
+		if !slices.ContainsFunc(cat, func(r RuleInfo) bool { return r.ID == id }) {
+			t.Errorf("%s is not in the catalog", id)
+		}
+	}
+	// The IDs wpConfig reports are the ones it counts.
+	src, err := os.ReadFile("wordpress.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, body, _ := strings.Cut(string(src), "func (s *scan) wpConfig()")
+	body, _, _ = strings.Cut(body, "\nfunc ")
+	var reported []string
+	for _, m := range regexp.MustCompile(`"(local-wp-[a-z-]+)"`).FindAllStringSubmatch(body, -1) {
+		if !slices.Contains(reported, m[1]) {
+			reported = append(reported, m[1])
+		}
+	}
+	slices.Sort(reported)
+	counted := slices.Sorted(slices.Values(wpConfigChecks))
+	if !slices.Equal(reported, counted) {
+		t.Errorf("wpConfig reports %v, counts %v", reported, counted)
 	}
 }

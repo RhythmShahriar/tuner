@@ -109,6 +109,30 @@ func TestNucleiSkips(t *testing.T) {
 		}
 	}
 
+	// A third-party check can't smuggle a Nuclei expression into a path or
+	// pattern: those become out-of-band callbacks or payloads in Nuclei.
+	for _, c := range []string{
+		"id: leak-x\nname: X\nseverity: low\nrequest: {path: ['/{{interactsh-url}}']}\nmatch: {all: [{status: 200}]}\n",
+		"id: leak-x\nname: X\nseverity: low\nrequest: {path: [/x]}\nmatch: {all: [{words: ['{{rand_base(3)}}']}]}\n",
+		"id: leak-x\nname: X\nseverity: low\nrequest: {path: [/x]}\nmatch: {any: [{regex: 'a{{b}}'}, {regex: c}]}\n",
+	} {
+		chk, err := engine.ParseCheck([]byte(c))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := NucleiTemplate(chk, testOpts); got.Data != nil || !strings.Contains(got.Skipped, "Nuclei would run as an expression") {
+			t.Errorf("%q: skipped %q\n%s", c, got.Skipped, got.Data)
+		}
+	}
+	// Tuner's own {{host}} still converts.
+	hostCheck, err := engine.ParseCheck([]byte("id: leak-x\nname: X\nseverity: low\nrequest: {path: ['/{{host}}.zip']}\nmatch: {all: [{status: 200}]}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := NucleiTemplate(hostCheck, testOpts); got.Skipped != "" || !bytes.Contains(got.Data, []byte("{{BaseURL}}/{{Host}}.zip")) {
+		t.Errorf("{{host}}: skipped %q\n%s", got.Skipped, got.Data)
+	}
+
 	// Words alternatives merge into one regex matcher.
 	got := NucleiTemplate(parse("match: {any: [{words: [a.b]}, {regex: 'c+'}]}"), testOpts)
 	if !bytes.Contains(got.Data, []byte("- a\\.b\n          - c+\n        condition: or")) {
@@ -153,6 +177,12 @@ func TestHeaderRegex(t *testing.T) {
 		{"X-Powered-By", "", true},
 		{"X-Empty", "", true},
 		{"X-Missing", "", false},
+		// | alternatives each tie to the header value.
+		{"Server", `x|1\.27`, true},
+		{"Server", `^apache|^nginx`, true},
+		{"Server", `^apache|^1\.27`, false},
+		{"X-Powered-By", `^nope|PHP/8`, true},
+		{"Server", `[|]|ngin(x|y)`, true},
 	} {
 		re := regexp.MustCompile(headerRegex(tc.name, tc.value))
 		if got := re.MatchString(head); got != tc.want {

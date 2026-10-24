@@ -9,6 +9,12 @@ import (
 	"strings"
 )
 
+// MaxRemotePackages is the most packages a remote scan takes from a lock
+// file a site exposes. The file comes from the site, so it decides how
+// many lookups a scan would make; a real application rarely pins more
+// than a few hundred.
+const MaxRemotePackages = 500
+
 // ParseLock lists the packages pinned in a composer.lock. It also reads
 // vendor/composer/installed.json, which is a bare array of packages in
 // Composer 1 and an object with "packages" in Composer 2. Each package is

@@ -4,12 +4,74 @@
 package main
 
 import (
+	"context"
+	"flag"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
 
+	"github.com/RhythmShahriar/tuner/engine"
+	"github.com/RhythmShahriar/tuner/report"
 	"github.com/RhythmShahriar/tuner/vulns"
+	"github.com/RhythmShahriar/tuner/vulns/osv"
 )
+
+func init() { registerScanExtension(vulnsExtension{}) }
+
+// vulnsExtension wires the vulnerability data sources into a scan: the
+// optional Wordfence Intelligence feed, --timeout for the data clients
+// and the Composer match on an exposed composer.lock.
+type vulnsExtension struct{}
+
+func (vulnsExtension) Help() string {
+	return `Vulnerability data:
+      TUNER_WORDFENCE_KEY  a free Wordfence Intelligence API key: plugins,
+                           themes and core are also matched against its feed
+                           (see rhythm tuner update --help)
+                           An exposed composer.lock or installed.json is
+                           matched against OSV.dev (up to 500 packages).`
+}
+
+func (vulnsExtension) Flags(*flag.FlagSet) {}
+
+// Plan gives the data clients the scan's --timeout, adds the Wordfence
+// feed when TUNER_WORDFENCE_KEY is set and matches an exposed Composer
+// lock file's packages. Nothing changes with --no-vulns.
+func (vulnsExtension) Plan(p *scanPlan) error {
+	if p.vulns != nil {
+		p.vulns.Timeout = p.o.timeout
+		p.vulns.Wordfence = wordfenceClient(p.engine.UserAgent, p.engine.Proxy, p.o.offline)
+	}
+	if p.osv != nil {
+		p.osv.Timeout = p.o.timeout
+		p.engine.ResponseAdvisors = append(p.engine.ResponseAdvisors,
+			selectedResponses{&osv.ComposerAdvisor{Client: p.osv}, p.sel})
+	}
+	return nil
+}
+
+func (vulnsExtension) Finished(*scanPlan, []report.Report, io.Writer) (int, error) {
+	return exitOK, nil
+}
+
+// selectedResponses drops the findings of a ResponseAdvisor that the
+// scan's selection leaves out, as engine.Filtered does for an Advisor.
+type selectedResponses struct {
+	engine.ResponseAdvisor
+	sel engine.Selector
+}
+
+func (s selectedResponses) AdviseResponse(ctx context.Context, f engine.Finding, body []byte) ([]engine.Finding, []string) {
+	found, warnings := s.ResponseAdvisor.AdviseResponse(ctx, f, body)
+	var kept []engine.Finding
+	for _, x := range found {
+		if s.sel.Keeps(x) {
+			kept = append(kept, x)
+		}
+	}
+	return kept, warnings
+}
 
 // wordfenceHelp explains the optional second vulnerability source.
 const wordfenceHelp = `With TUNER_WORDFENCE_KEY set to a free Wordfence Intelligence API key,

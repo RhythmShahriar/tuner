@@ -10,7 +10,23 @@ positive:
           <?php
           define( 'DB_NAME', 'shop' );
           define( 'DB_PASSWORD', 'tr0ub4dor-and-3' );
+  - name: a .dist copy with a real password
+    expect_secrets: true
+    routes:
+      /wp-config.php.dist:
+        body: |
+          <?php
+          define( 'DB_NAME', 'shop' );
+          define( 'DB_PASSWORD', 'tr0ub4dor-and-3' );
 negative:
+  - name: a .dist template with the sample placeholders
+    routes:
+      /wp-config.php.dist:
+        body: |
+          <?php
+          define( 'DB_NAME', 'database_name_here' );
+          define( 'DB_USER', 'username_here' );
+          define( 'DB_PASSWORD', 'password_here' );
   - name: not found
     routes: {}
   - name: soft-404 catch-all

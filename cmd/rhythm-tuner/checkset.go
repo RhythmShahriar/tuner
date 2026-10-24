@@ -12,11 +12,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"testing/fstest"
 	"time"
 
 	"github.com/RhythmShahriar/tuner/checkpack"
 	"github.com/RhythmShahriar/tuner/checks"
 	"github.com/RhythmShahriar/tuner/engine"
+	"github.com/RhythmShahriar/tuner/fingerprint"
 )
 
 // Where a scan's checks came from.
@@ -45,6 +47,27 @@ func (s *checkSet) data(name string) ([]byte, bool) {
 		return nil, false
 	}
 	return s.pack.Data(name)
+}
+
+// pluginData returns the plugin discovery data for engine.Options: the
+// pack's data files over the built-in ones, or nil for the built-in data
+// alone. A pack file that doesn't load becomes a warning.
+func (s *checkSet) pluginData() fingerprint.Data {
+	files := fstest.MapFS{}
+	for _, name := range []string{"rest-namespaces.json", "top-plugins.json"} {
+		if b, ok := s.data(name); ok {
+			files["data/"+name] = &fstest.MapFile{Data: b}
+		}
+	}
+	if len(files) == 0 {
+		return nil
+	}
+	d, err := fingerprint.Overlay(files)
+	if err != nil {
+		s.warnings = append(s.warnings, fmt.Sprintf("check pack: %v; using the built-in plugin data", err))
+		return nil
+	}
+	return d
 }
 
 // localRules returns the pack's local scan rules, or nil for the

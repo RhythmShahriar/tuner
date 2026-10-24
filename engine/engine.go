@@ -613,8 +613,7 @@ func (s *Scanner) open(ctx context.Context, target string, h Hooks) (*session, *
 			roots = tr.TLSClientConfig.RootCAs
 		}
 		if tr.Proxy != nil {
-			p, _ := tr.Proxy(&http.Request{URL: u})
-			proxied = p != nil
+			proxied = usesProxy(tr.Proxy, u)
 		}
 	}
 	ss := &session{
@@ -753,6 +752,22 @@ func RedactURL(raw string) string {
 		return u.Redacted()
 	}
 	return redactUserinfo(raw)
+}
+
+// usesProxy reports whether proxy sends requests for u through a proxy,
+// for either scheme: a scan of an http:// site usually moves to https,
+// and HTTPS_PROXY alone then proxies the rest of it. The dial guard must
+// stay off for the whole scan in that case, or it refuses the proxy's
+// own address when the proxy runs on this machine.
+func usesProxy(proxy func(*http.Request) (*url.URL, error), u *url.URL) bool {
+	for _, scheme := range []string{"http", "https"} {
+		v := *u
+		v.Scheme = scheme
+		if p, err := proxy(&http.Request{URL: &v}); err == nil && p != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // get fetches a path relative to the target once per scan; later calls

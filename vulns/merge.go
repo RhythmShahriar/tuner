@@ -136,10 +136,7 @@ func combine(a, b Vuln) Vuln {
 		a = widen(a, b)
 	}
 	a.CVEs = union(a.CVEs, b.CVEs)
-	a.References = union(a.References, b.References)
-	if len(a.References) > 6 {
-		a.References = a.References[:6]
-	}
+	a.References = capReferences(union(a.References, b.References))
 	a.Sources = union(a.Sources, b.Sources)
 	if b.CVSS > a.CVSS {
 		a.CVSS, a.Vector = b.CVSS, b.Vector
@@ -158,6 +155,28 @@ func combine(a, b Vuln) Vuln {
 		a.Published = b.Published
 	}
 	return a
+}
+
+// maxReferences is how many references a merged advisory keeps, not
+// counting Wordfence record links.
+const maxReferences = 6
+
+// capReferences keeps the first maxReferences references plus every
+// Wordfence record link: Wordfence's terms ask for a link to each record
+// whose data a finding uses, so attribution is never cut.
+func capReferences(refs []string) []string {
+	var out []string
+	n := 0
+	for _, r := range refs {
+		switch {
+		case strings.HasPrefix(r, wordfenceRecordURL):
+			out = append(out, r)
+		case n < maxReferences:
+			out = append(out, r)
+			n++
+		}
+	}
+	return out
 }
 
 // union appends b's items missing from a, keeping a's order.

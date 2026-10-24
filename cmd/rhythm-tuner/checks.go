@@ -56,7 +56,7 @@ func listChecks(args []string, stdout, stderr io.Writer) int {
 	flags.BoolVar(&noUpdates, "no-check-updates", false, "")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			fmt.Fprint(stdout, checksUsage)
+			fmt.Fprint(stdout, named(checksUsage))
 			return exitOK
 		}
 		fmt.Fprintf(stderr, "rhythm tuner: %v\n\n%s", err, checksUsage)
@@ -128,12 +128,12 @@ const checksUsage = `Usage:
   rhythm tuner checks lint [dir]       check checks against the house rules
   rhythm tuner checks export --nuclei <dir>   write checks as Nuclei templates
 
-Lists the checks a scan with the same flags would run. Unlike scan, the
-profile defaults to deep, so every check is listed. test and lint read the
+Lists the checks a scan with the same flags would run. Unlike scan, it
+lists every check unless --profile picks one. test and lint read the
 built-in checks when no directory is given; neither needs Go.
 
 Flags:
-      --profile <name>     quick, default or deep (default "deep")
+      --profile <name>     quick or default (default: every check)
       --tags <list>        only checks with these tags
       --exclude-tags <list>
       --id <list>          only these checks; globs allowed
@@ -319,7 +319,7 @@ func checksNew(args []string, stdout, stderr io.Writer) int {
 	for _, a := range args {
 		switch {
 		case a == "-h" || a == "--help":
-			fmt.Fprint(stdout, checksNewUsage)
+			fmt.Fprint(stdout, named(checksNewUsage))
 			return exitOK
 		case strings.HasPrefix(a, "-"):
 			fmt.Fprintf(stderr, "rhythm tuner: checks new: unknown flag %s\n\n%s", a, checksNewUsage)
@@ -351,27 +351,44 @@ func checksNew(args []string, stdout, stderr io.Writer) int {
 			return exitError
 		}
 	}
+	// A check without its fixtures fails checks test, so a failed write
+	// removes what this run wrote: both files or neither.
+	var written []string
 	for _, f := range []struct {
 		path string
 		data []byte
 	}{{checkPath, check}, {fixturePath, fixture}} {
-		// O_EXCL: never replace a file that appeared since the check above.
-		out, err := os.OpenFile(f.path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644) //nolint:gosec // as for MkdirAll
-		if err == nil {
-			_, err = out.Write(f.data)
-			if cerr := out.Close(); err == nil {
-				err = cerr
+		if err := writeNew(f.path, f.data, &written); err != nil {
+			for _, p := range written {
+				_ = os.Remove(p)
 			}
-		}
-		if err != nil {
 			fmt.Fprintln(stderr, "rhythm tuner:", err)
 			return exitError
 		}
 	}
-	fmt.Fprintf(stdout, "Wrote %s and %s.\nReplace the TODOs, then run:\n  rhythm tuner checks test %s\n  rhythm tuner checks lint %s\n",
-		checkPath, fixturePath, dir, dir)
+	fmt.Fprintf(stdout, "Wrote %s and %s.\nReplace the TODOs, then run:\n  %s checks test %s\n  %s checks lint %s\n",
+		checkPath, fixturePath, cmdName(), dir, cmdName(), dir)
 	return exitOK
 }
+
+// writeNew creates path with data, never replacing a file (O_EXCL: one
+// may have appeared since checksNew looked). Once the file exists its
+// path goes in written, so a failure can remove it.
+func writeNew(path string, data []byte, written *[]string) error {
+	out, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644) //nolint:gosec // checks are source files, readable like the rest of a repository
+	if err != nil {
+		return err
+	}
+	*written = append(*written, path)
+	_, err = writeChunk(out, data)
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	return err
+}
+
+// writeChunk writes the file's data. Tests replace it to play a full disk.
+var writeChunk = func(f *os.File, data []byte) (int, error) { return f.Write(data) }
 
 const checksNewUsage = `Usage:
   rhythm tuner checks new <id> [dir]
@@ -402,7 +419,7 @@ func checksExport(args []string, stdout, stderr io.Writer) int {
 	flags.BoolVar(&noUpdates, "no-check-updates", false, "")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			fmt.Fprint(stdout, checksExportUsage)
+			fmt.Fprint(stdout, named(checksExportUsage))
 			return exitOK
 		}
 		fmt.Fprintf(stderr, "rhythm tuner: checks export: %v\n\n%s", err, checksExportUsage)

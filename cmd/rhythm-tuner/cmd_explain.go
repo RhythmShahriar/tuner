@@ -20,7 +20,7 @@ import (
 const findingReference = "https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Finding-Reference"
 
 func init() {
-	registerCommand(command{Name: "explain", Summary: "show a check's full fix offline", Run: cmdExplain})
+	registerCommand(command{Name: "explain", Args: "<id>", Summary: "show a check's full fix offline", Run: cmdExplain})
 }
 
 // cmdExplain runs `rhythm tuner explain <id>`: everything Tuner knows about
@@ -46,7 +46,7 @@ func cmdExplain(args []string, stdout, stderr io.Writer) int {
 	pos, err := cli.ParseInterspersed(flags, args)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			fmt.Fprint(stdout, explainUsage)
+			fmt.Fprint(stdout, named(explainUsage))
 			return exitOK
 		}
 		fmt.Fprintf(stderr, "rhythm tuner: %v\n\n%s", err, explainUsage)

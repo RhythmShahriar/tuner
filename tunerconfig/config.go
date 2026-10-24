@@ -35,7 +35,9 @@
 // current folder, so a cloned repository or a pull request can bring its
 // own file, with targets of its choosing. If it could name any variable,
 // it could send a CI runner's GITHUB_TOKEN or cloud keys to its own host.
-// A TUNER_ variable is one the user set for Tuner on purpose.
+// A TUNER_ variable is one the user set for Tuner on purpose. Even so a
+// scan sends such a header only to targets the command line named: when
+// the file chooses the targets, Config.EnvHeaders makes it refuse.
 package tunerconfig
 
 import (
@@ -76,7 +78,11 @@ type Config struct {
 	Baseline string
 	// Headers are "Name: value" lines with ${TUNER_NAME} already expanded,
 	// sorted by name. Never print them: they hold credentials.
-	Headers     []string
+	Headers []string
+	// EnvHeaders names the headers whose values read a ${TUNER_NAME}
+	// variable, sorted. A scan sends those only to targets the command
+	// line named, as the variables are often CI secrets.
+	EnvHeaders  []string
 	Tags        []string
 	ExcludeTags []string
 	IDs         []string
@@ -219,6 +225,9 @@ func Parse(data []byte, name string, env func(string) (string, bool)) (*Config, 
 			return nil, bad("headers", "the value of %s has a line break or control character", n)
 		}
 		c.Headers = append(c.Headers, n+": "+v)
+		if envRef.MatchString(f.Headers[n]) {
+			c.EnvHeaders = append(c.EnvHeaders, n)
+		}
 	}
 
 	for i, ig := range f.Ignore {
@@ -353,7 +362,6 @@ func token(s string) bool {
 // unknownKey matches yaml.v3's message for a key KnownFields rejects.
 var unknownKey = regexp.MustCompile(`line (\d+): field (\S+) not found in type`)
 
-// yamlError rewords yaml.v3's errors to name the file and the key.
 // quotedValue is the value yaml.v3 quotes in a type error, such as the
 // " `Bearer ...`" in "cannot unmarshal !!str `Bearer ...` into ...".
 var quotedValue = regexp.MustCompile(" `[^`]*`")
@@ -367,6 +375,7 @@ func empty(n *yaml.Node) bool {
 	return n.Kind == 0 || (n.Kind == yaml.ScalarNode && n.Tag == "!!null")
 }
 
+// yamlError rewords yaml.v3's errors to name the file and the key.
 func yamlError(name string, err error) error {
 	var te *yaml.TypeError
 	if errors.As(err, &te) {

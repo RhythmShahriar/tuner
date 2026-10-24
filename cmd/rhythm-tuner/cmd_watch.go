@@ -85,7 +85,7 @@ const watchKeep = 30
 var watchOwned = []string{"o", "output", "json", "jsonl", "sarif", "md", "l", "list", "stdin", "since"}
 
 func init() {
-	registerCommand(command{Name: "watch", Summary: "scan a site list on a schedule and say what changed", Run: cmdWatch})
+	registerCommand(command{Name: "watch", Args: "-l <file> --every <interval>", Summary: "scan a site list on a schedule and say what changed", Run: cmdWatch})
 }
 
 // cmdWatch runs scans on a schedule; see watchUsage.
@@ -93,7 +93,7 @@ func cmdWatch(args []string, stdout, stderr io.Writer) int {
 	w, once, err := planWatch(args)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			fmt.Fprint(stdout, watchUsage)
+			fmt.Fprint(stdout, named(watchUsage))
 			return exitOK
 		}
 		fmt.Fprintf(stderr, "rhythm tuner: %v\nrun 'rhythm tuner watch --help' for its flags\n", err)
@@ -257,7 +257,7 @@ func planWatch(args []string) (w *watch.Watcher, once bool, err error) {
 		if err := os.MkdirAll(dir, 0o700); err != nil { //nolint:gosec // the user's own --dir
 			return nil, false, err
 		}
-		list = filepath.Join(dir, "sites.txt")
+		list = filepath.Join(dir, watchSitesName)
 		if err := os.WriteFile(list, []byte(strings.Join(targets, "\n")+"\n"), 0o600); err != nil { //nolint:gosec // inside the user's own --dir
 			return nil, false, err
 		}
@@ -292,13 +292,25 @@ func defaultWatchName(list string, targets []string) string {
 	return "watch"
 }
 
+// watchSitesName is the list file a watch writes in its folder for the
+// sites given on its command line. The name is the watch's own, so it
+// never replaces a sites.txt the user keeps there.
+const watchSitesName = "watch-sites.txt"
+
 var unsafeName = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
+
+// windowsDevice matches the names Windows keeps for devices, such as CON
+// or com1.txt, which can't name a folder there.
+var windowsDevice = regexp.MustCompile(`(?i)^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$`)
 
 // safeWatchName keeps a watch name usable as one folder name everywhere.
 func safeWatchName(name string) string {
-	name = strings.TrimLeft(unsafeName.ReplaceAllString(name, "-"), ".-")
+	name = strings.TrimRight(strings.TrimLeft(unsafeName.ReplaceAllString(name, "-"), ".-"), ". ")
 	if name == "" {
 		return "watch"
+	}
+	if windowsDevice.MatchString(name) {
+		name += "-watch"
 	}
 	return name
 }

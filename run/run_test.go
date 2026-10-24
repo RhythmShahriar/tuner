@@ -189,7 +189,7 @@ func TestRunPartialAndFailedTargets(t *testing.T) {
 }
 
 // A firewall stop the engine saw reaches the target's Status and the
-// report, and every finding gets its fingerprint before the baseline runs.
+// report. Every finding gets its fingerprint before the baseline runs.
 func TestRunEngineStopReachesReport(t *testing.T) {
 	p := &Plan{Targets: []string{"https://example.com"}, Scan: func(context.Context, *engine.Scanner, string, engine.Hooks) (*engine.Result, error) {
 		return &engine.Result{

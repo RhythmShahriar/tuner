@@ -139,6 +139,8 @@ func TestOldReportFallsBackToChecks(t *testing.T) {
 }
 
 func TestPlan(t *testing.T) {
+	// Without Tuner's checks every snippet comes from the report, and
+	// the plan says so for each block.
 	b, err := Build(load(t, "batch.json"), "apache", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -149,12 +151,25 @@ func TestPlan(t *testing.T) {
 	}
 	for _, want := range []string{
 		"apache bundle: 5 snippets for 9 findings\n",
-		"  leak-dotenv, leak-ds-store (3 URLs)\n",
+		"  leak-dotenv, leak-ds-store (3 URLs) (from the report)\n",
 		"no apache snippet: hdr-server-version, vuln-plugin-akismet, wp-user-enum-rest\n",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("missing %q in:\n%s", want, out.String())
 		}
+	}
+
+	// With them, only snippets no check has are marked.
+	b, err = Build(load(t, "batch.json"), "apache", builtIn(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := b.WritePlan(&out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "  leak-dotenv, leak-ds-store (3 URLs)\n") {
+		t.Errorf("a check's snippet is marked as from the report:\n%s", out.String())
 	}
 }
 
@@ -193,7 +208,7 @@ func TestPlanIsInert(t *testing.T) {
 	if err := b.WritePlan(&out); err != nil {
 		t.Fatal(err)
 	}
-	if strings.ContainsAny(out.String(), "\x1b\x07") || !strings.Contains(out.String(), "  leak-x[2J (1 URL)\n") {
+	if strings.ContainsAny(out.String(), "\x1b\x07") || !strings.Contains(out.String(), "  leak-x[2J (1 URL) (from the report)\n") {
 		t.Errorf("control bytes in plan: %q", out.String())
 	}
 }

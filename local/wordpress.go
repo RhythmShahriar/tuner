@@ -230,6 +230,13 @@ func (s *scan) muPlugins() []engine.Finding {
 		"Make sure each one is expected and kept up to date.", "wordpress")}
 }
 
+// wpConfigChecks are the findings wpConfig can report, one check each,
+// for the summary's check count.
+var wpConfigChecks = []string{
+	"local-wp-salts", "local-wp-debug", "local-wp-file-edit",
+	"local-wp-table-prefix", "local-wp-force-ssl-admin", "local-wp-config-perms",
+}
+
 // wpConfig reviews wp-config.php without running it.
 func (s *scan) wpConfig() []engine.Finding {
 	path := filepath.Join(s.root, "wp-config.php")
@@ -252,7 +259,7 @@ func (s *scan) wpConfig() []engine.Finding {
 	}
 	cfg := parseConfig(string(b))
 	var out []engine.Finding
-	s.checks += 6
+	s.checks += len(wpConfigChecks)
 
 	// Keys and salts.
 	var weak []string

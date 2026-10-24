@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -219,5 +220,25 @@ func TestChecksExportUsage(t *testing.T) {
 	}
 	if code, out, _ := checksCmd("export", "--help"); code != exitOK || !strings.HasPrefix(out, "Usage:\n  rhythm tuner checks export --nuclei <dir>") {
 		t.Errorf("help: exit %d:\n%s", code, out)
+	}
+}
+
+// When writing the fixture fails, checks new leaves nothing behind.
+func TestChecksNewLeavesNothingOnFailure(t *testing.T) {
+	dir := t.TempDir()
+	calls := 0
+	defer func(f func(*os.File, []byte) (int, error)) { writeChunk = f }(writeChunk)
+	writeChunk = func(f *os.File, data []byte) (int, error) {
+		if calls++; calls == 2 {
+			return 0, errors.New("no space left on device")
+		}
+		return f.Write(data)
+	}
+	code, _, errs := tuner(t, "checks", "new", "leak-thing", dir)
+	if code != exitError || !strings.Contains(errs, "no space left on device") {
+		t.Errorf("exit %d, stderr %q", code, errs)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Errorf("left behind: %v", entries)
 	}
 }

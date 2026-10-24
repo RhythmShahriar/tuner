@@ -289,7 +289,7 @@ func TestVulnScan(t *testing.T) {
 		t.Fatalf("exit %d, stderr %s\n%s", code, errs, out)
 	}
 
-	// Cached now: offline works with the API down, and makes no requests.
+	// Cached now: offline works with the API down and makes no requests.
 	apiDown.Store(true)
 	hits := apiHits.Load()
 	code, out, _ = tuner(t, "scan", site.URL, "--json", "--offline", "--id", "vuln-*")
@@ -300,7 +300,7 @@ func TestVulnScan(t *testing.T) {
 		t.Error("--offline made requests")
 	}
 
-	// update keeps cached copies when the API fails, and says so.
+	// update keeps cached copies when the API fails and says so.
 	if code, out, _ := tuner(t, "update"); code != exitError || !strings.Contains(out, "failed; cached copies kept") {
 		t.Errorf("update with API down: exit %d\n%s", code, out)
 	}
@@ -337,7 +337,7 @@ func TestUpdateNotice(t *testing.T) {
 
 func TestChecksHelpAndFooter(t *testing.T) {
 	code, out, _ := tuner(t, "checks", "--help")
-	if code != exitOK || !strings.Contains(out, `--profile <name>     quick, default or deep (default "deep")`) {
+	if code != exitOK || !strings.Contains(out, `--profile <name>     quick or default (default: every check)`) {
 		t.Errorf("checks --help: exit %d\n%s", code, out)
 	}
 	if code, _, errs := tuner(t, "checks", "--bogus"); code != exitUsage || !strings.Contains(errs, "Usage:") {
@@ -1124,15 +1124,15 @@ func TestHelpAndReadmeClaims(t *testing.T) {
 		with    []string
 	}{
 		"help": {help.String(),
-			[]string{"refresh the check pack and vulnerability data now"},
-			[]string{"also after\n                           the home page redirects to another host", "(checksummed, not signed;",
-				"Never runs\n                           site code", "--allow-missing-vulns", "--allow-partial"}},
+			[]string{"refresh the check pack and vulnerability data now", "redirects to another host", "checksummed, not signed",
+				"plugins with known\n                           advisories"},
+			[]string{"-H and --cookie go only to the site you named,\n                           never to another host a redirect leads to",
+				"signed with Ed25519", "Never runs\n                           site code", "--allow-missing-vulns", "--allow-partial"}},
 		"README": {string(readme),
 			[]string{"always masked", "which are [signed with cosign]", "Tuner is non-intrusive (plain GET requests",
-				"Tuner sends ordinary, rate-limited GET requests"},
-			[]string{"Nothing checks the signature for you yet", "also after the home page redirects to another host",
-				"Tuner does not yet refuse other methods", "The check pack is checksummed, not signed",
-				"echo \"$HOME/.local/bin\" >> \"$GITHUB_PATH\""}},
+				"Tuner sends ordinary, rate-limited GET requests", "also after the home page redirects to another host",
+				"Tuner does not yet refuse other methods", "The check pack is checksummed, not signed"},
+			[]string{"Nothing checks the signature for you yet", "echo \"$HOME/.local/bin\" >> \"$GITHUB_PATH\""}},
 	} {
 		for _, s := range c.without {
 			if strings.Contains(c.text, s) {
@@ -1194,12 +1194,13 @@ func TestCommandName(t *testing.T) {
 	if !strings.Contains(out, "  rhythm tuner scan <url>... [flags] scan one or more sites\n") || strings.Contains(out, "rhythm-tuner scan") {
 		t.Errorf("router name:\n%s", out)
 	}
-	// A long alias keeps the descriptions lined up after it.
+	// With a long alias the descriptions keep their column: a command
+	// too long for it gets a line of its own.
 	t.Setenv(invokedAsEnv, "rhythm a-very-long-tool-name")
 	_, out, _ = tuner(t, "--help")
-	if !strings.Contains(out, "  rhythm a-very-long-tool-name scan <url>... [flags] scan one or more sites\n"+
-		"  rhythm a-very-long-tool-name scan <dir> [flags]    scan a site's files on the server\n") ||
-		!strings.Contains(out, "\n"+strings.Repeat(" ", 53)+"PHP vulnerability data now\n") {
+	indent := strings.Repeat(" ", usageCmdWidth+3)
+	if !strings.Contains(out, "  rhythm a-very-long-tool-name scan <url>... [flags]\n"+indent+"scan one or more sites\n") ||
+		!strings.Contains(out, "\n"+indent+"and PHP vulnerability data now\n") {
 		t.Errorf("long name:\n%s", out)
 	}
 }
@@ -1489,14 +1490,68 @@ func TestConfigTargetsGetNoCommandLineCredentials(t *testing.T) {
 		t.Errorf("command line target got %q", v)
 	}
 
-	// Headers from the file itself go to the targets it chose.
+	// A header that reads a TUNER_ variable is a secret too: it goes
+	// only to targets the command line named.
+	leaked.Store("")
+	before := hits.Load()
 	writeConfig(t, "targets: ["+srv.URL+"]\nheaders:\n  Cookie: ${TUNER_TEST_COOKIE}\n")
-	t.Setenv("TUNER_TEST_COOKIE", "from-config")
-	if code, _, errs := tuner(t, "scan", "-q", "--json", "--no-vulns"); code != exitOK {
-		t.Fatalf("config headers: exit %d: %s", code, errs)
+	t.Setenv("TUNER_TEST_COOKIE", "from-config-s3cr3t")
+	code, out, errs := tuner(t, "scan", "-q", "--json", "--no-vulns")
+	want = "rhythm tuner scan: .tuner.yml chooses the targets, so its headers can't read ${TUNER_...} variables (Cookie): name the targets on the command line or use --no-config\n"
+	if code != exitUsage || out != "" || errs != want || strings.Contains(errs, "s3cr3t") {
+		t.Errorf("config env header: exit %d, stdout %q, stderr %q", code, out, errs)
 	}
-	if v, _ := leaked.Load().(string); v != "from-config" {
+	if hits.Load() != before {
+		t.Errorf("the config's own target got requests")
+	}
+	if code, _, errs := tuner(t, "scan", srv.URL, "-q", "--json", "--no-vulns"); code != exitOK {
+		t.Fatalf("config headers, target on the command line: exit %d: %s", code, errs)
+	}
+	if v, _ := leaked.Load().(string); v != "from-config-s3cr3t" {
 		t.Errorf("config header sent as %q", v)
+	}
+
+	// A header written out in the file holds nothing secret and still
+	// goes to the targets it chose.
+	leaked.Store("")
+	writeConfig(t, "targets: ["+srv.URL+"]\nheaders:\n  Cookie: plain=1\n")
+	if code, _, errs := tuner(t, "scan", "-q", "--json", "--no-vulns"); code != exitOK {
+		t.Fatalf("config literal header: exit %d: %s", code, errs)
+	}
+	if v, _ := leaked.Load().(string); v != "plain=1" {
+		t.Errorf("config header sent as %q", v)
+	}
+}
+
+// A .tuner.yml found in the current folder can't send a scan outside its
+// folder. The request limits it sets are named even under -q.
+func TestConfigStaysInItsFolder(t *testing.T) {
+	writeConfig(t, "targets: [../site]\n")
+	code, _, errs := tuner(t, "scan", "-q", "--no-vulns")
+	if want := "rhythm tuner scan: .tuner.yml: targets: ../site is outside the folder that holds .tuner.yml; name it on the command line or pass --config\n"; code != exitUsage || errs != want {
+		t.Errorf("../ target: exit %d, stderr %q", code, errs)
+	}
+	for _, body := range []string{"targets: [/etc]\n", "targets: [sub/../../x]\n"} {
+		writeConfig(t, body)
+		if code, _, errs := tuner(t, "scan", "-q", "--no-vulns"); code != exitUsage || !strings.Contains(errs, "is outside the folder") {
+			t.Errorf("%q: exit %d, stderr %q", body, code, errs)
+		}
+	}
+	writeConfig(t, "baseline: ../old.json\n")
+	if code, _, errs := tuner(t, "scan", "./x", "-q", "--no-vulns"); code != exitUsage || !strings.Contains(errs, "baseline: ../old.json is outside the folder") {
+		t.Errorf("../ baseline: exit %d, stderr %q", code, errs)
+	}
+	// Named with --config, the file is the user's choice.
+	writeConfig(t, "targets: [../site]\n")
+	if code, _, errs := tuner(t, "scan", "--config", ".tuner.yml", "-q", "--no-vulns"); strings.Contains(errs, "outside the folder") {
+		t.Errorf("--config: exit %d, stderr %q", code, errs)
+	}
+
+	srv := leakySite(t)
+	writeConfig(t, "targets: ["+srv.URL+"]\nrate: 0\nconcurrency: 500\n")
+	_, _, errs = tunerExact(t, "scan", "-q", "--no-vulns", "--json")
+	if want := "using .tuner.yml, which chose the target: " + srv.URL + "; it sets --rate 0 (no limit) and --concurrency 500\n"; !strings.Contains(errs, want) {
+		t.Errorf("limits note: stderr %q", errs)
 	}
 }
 

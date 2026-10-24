@@ -43,7 +43,7 @@ type PrettyOptions struct {
 //
 // In plain mode findings stream as they are found, one per line, for logs
 // and screen readers. Otherwise a live progress line keeps a running tally
-// while the scan runs, and Summary prints the findings grouped by severity
+// while the scan runs; Summary prints the findings grouped by severity
 // once the scan (and any baseline filtering) is done.
 type Pretty struct {
 	w, errw io.Writer
@@ -209,7 +209,7 @@ func (p *Pretty) Request(l engine.RequestLog) {
 }
 
 // Finding streams a line in plain mode; otherwise it only updates the
-// running tally, and Summary renders the grouped report.
+// running tally. Summary renders the grouped report.
 func (p *Pretty) Finding(f engine.Finding) {
 	f = sanitized(f)
 	p.tally[f.Severity]++

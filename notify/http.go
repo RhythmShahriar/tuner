@@ -109,11 +109,21 @@ func discordEscape(line string) string {
 	return strings.Join(words, " ")
 }
 
+// cutEscape drops a backslash left at the end of a cut, whose escaped
+// character was cut off; an escaped backslash (an even run) stays.
+func cutEscape(s string) string {
+	n := len(s) - len(strings.TrimRight(s, `\`))
+	if n%2 == 1 {
+		return s[:len(s)-1]
+	}
+	return s
+}
+
 func discordBody(m Message) any {
 	text := m.Text(discordEscape)
 	if utf8.RuneCountInString(text) > discordLimit {
 		r := []rune(text)
-		text = string(r[:discordLimit-1]) + "…"
+		text = cutEscape(string(r[:discordLimit-1])) + "…"
 	}
 	return map[string]any{
 		"username": "Rhythm Tuner",

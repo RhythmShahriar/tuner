@@ -104,13 +104,14 @@ const fingerprintKey = "tunerFinding/v1"
 // Finding Reference on the wiki: every ID with its meaning and fix.
 const findingReference = "https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Finding-Reference"
 
-// helpURI links a rule to its entry in the Finding Reference. Checks link
-// to their own ID; advisor and local findings, whose IDs carry a slug, to
-// their section.
-//
-// Once advisors register rules with a help URL (engine.Rules), that URL
-// wins for their IDs.
+// helpURI links a rule to its entry in the Finding Reference. A rule a
+// source registered (engine.RegisterRules) with a help URL uses it;
+// checks link to their own ID; other advisor and local findings, whose
+// IDs carry a slug, to their section.
 func helpURI(id string) string {
+	if r, ok := engine.RuleFor(id); ok && r.HelpURI != "" {
+		return r.HelpURI
+	}
 	switch {
 	case strings.HasPrefix(id, "local-"):
 		return findingReference + "#local-findings"

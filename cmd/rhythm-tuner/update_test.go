@@ -4,6 +4,7 @@
 package main
 
 import (
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -228,5 +229,27 @@ func TestClosestFlag(t *testing.T) {
 		if got := closestFlag(in, known); got != want {
 			t.Errorf("closestFlag(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// A build that trusts no pack signing key (forks and dev builds) uses its
+// built-in checks; update says so and still succeeds.
+func TestUpdateWithoutTrustedKeys(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := "http://" + ln.Addr().String()
+	ln.Close()
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	for _, env := range []string{"TUNER_CHECKS_URL", "TUNER_VULN_API", "TUNER_WPORG_API", "TUNER_PHPNET_API", "TUNER_OSV_API"} {
+		t.Setenv(env, closed)
+	}
+	old := packKeys
+	packKeys = nil
+	defer func() { packKeys = old }()
+	code, out, errs := tuner(t, "update")
+	if code != exitOK || !strings.Contains(out, "Checks: built-in (rhythm-tuner "+version+")\n") || strings.Contains(errs, "check pack") {
+		t.Errorf("exit %d\nstdout %q\nstderr %q", code, out, errs)
 	}
 }

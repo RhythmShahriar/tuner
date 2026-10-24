@@ -56,26 +56,6 @@ func Rules() []Rule {
 	return out
 }
 
-// fallbackRules cover what vulns and local emit until they register their
-// own rules (vulns-service V7, local-server L10); delete them then. They
-// match IDs and tags but are left out of Rules, so listings only show
-// rules a source declared.
-var fallbackRules = []Rule{
-	{ID: "vuln", Prefix: true, Tags: []string{"vuln", "wordpress", "php", "core", "plugin", "theme", "composer", "known-exploited"}},
-	{ID: "local-", Prefix: true},
-	{ID: "wp-core-", Prefix: true, Tags: []string{"wordpress", "core", "outdated"}},
-	{ID: "wp-components-", Prefix: true, Tags: []string{"wordpress", "plugin", "theme", "outdated"}},
-	{ID: "wp-plugin-closed", Prefix: true, Tags: []string{"wordpress", "plugin", "abandoned"}},
-	{ID: "wp-theme-closed", Prefix: true, Tags: []string{"wordpress", "theme", "abandoned"}},
-	{ID: "php-eol", Prefix: true, Tags: []string{"php", "outdated"}},
-	{ID: "php-version-hidden", Prefix: true, Tags: []string{"php"}},
-	{ID: "nginx-eol", Prefix: true, Tags: []string{"nginx", "outdated"}},
-	{ID: "apache-eol", Prefix: true, Tags: []string{"apache", "outdated"}},
-}
-
-// allRules is Rules plus the fallback list.
-func allRules() []Rule { return append(Rules(), fallbackRules...) }
-
 // Matches reports whether finding ID id belongs to r.
 func (r Rule) Matches(id string) bool {
 	if r.Prefix {
@@ -108,7 +88,7 @@ func (r Rule) mayMatch(pattern string) bool {
 func RuleFor(id string) (Rule, bool) {
 	var best Rule
 	found := false
-	for _, r := range allRules() {
+	for _, r := range Rules() {
 		switch {
 		case !r.Matches(id):
 		case !r.Prefix:
@@ -124,7 +104,7 @@ func RuleFor(id string) (Rule, bool) {
 // can select advisor findings by.
 func AdvisorTags() []string {
 	var tags []string
-	for _, r := range allRules() {
+	for _, r := range Rules() {
 		for _, t := range r.Tags {
 			if !slices.Contains(tags, t) {
 				tags = append(tags, t)

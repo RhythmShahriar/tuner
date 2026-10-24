@@ -360,7 +360,7 @@ func TestInternal(t *testing.T) {
 	for addr, want := range map[string]bool{
 		"127.0.0.1": true, "10.1.2.3": true, "192.168.0.1": true, "172.16.0.1": true, "169.254.169.254": true,
 		"::1": true, "fe80::1": true, "fd00::1": true, "0.0.0.0": true, "::ffff:127.0.0.1": true, "64:ff9b::a9fe:a9fe": true,
-		"100.100.100.200": true, "100.64.0.1": true, "0.1.2.3": true, "192.0.0.192": true, "198.18.0.1": true,
+		"100.100.100.200": true, "100.64.0.1": true, "0.1.2.3": true, "192.0.0.192": true, "198.18.0.1": true, "240.0.0.1": true, "255.255.255.255": true, "224.0.0.251": true,
 		"::127.0.0.1": true, "2002:7f00:1::": true, "2002:a9fe:a9fe::1": true, "2002:6464:64c8::": true,
 		// Teredo with client 127.0.0.1, then local-use NAT64.
 		"2001:0:4136:e378:8000:63bf:80ff:fffe": true, "64:ff9b:1::a9fe:a9fe": true,
@@ -370,5 +370,28 @@ func TestInternal(t *testing.T) {
 		if got := internal(netip.MustParseAddr(addr)); got != want {
 			t.Errorf("internal(%s) = %v", addr, got)
 		}
+	}
+}
+
+// HTTPS_PROXY alone still counts for an http:// target, which moves to
+// https: the dial guard would otherwise refuse a proxy on this machine.
+func TestUsesProxyEitherScheme(t *testing.T) {
+	proxy, _ := url.Parse("http://127.0.0.1:8080")
+	httpsOnly := func(r *http.Request) (*url.URL, error) {
+		if r.URL.Scheme == "https" {
+			return proxy, nil
+		}
+		return nil, nil
+	}
+	target, _ := url.Parse("http://example.com/")
+	if !usesProxy(httpsOnly, target) {
+		t.Error("an https-only proxy should count for an http target")
+	}
+	none := func(*http.Request) (*url.URL, error) { return nil, nil }
+	if usesProxy(none, target) {
+		t.Error("no proxy")
+	}
+	if target.Scheme != "http" {
+		t.Error("usesProxy changed the target")
 	}
 }

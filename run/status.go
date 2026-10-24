@@ -93,6 +93,15 @@ func TrackVulns(a engine.Advisor) engine.Advisor { return vulnTracker{a} }
 // context carries.
 type vulnTracker struct{ engine.Advisor }
 
+// PluginSlugs passes engine.PluginLister through the tracker, so deep
+// plugin discovery still sees the advisor's slugs.
+func (v vulnTracker) PluginSlugs(ctx context.Context) []string {
+	if l, ok := v.Advisor.(engine.PluginLister); ok {
+		return l.PluginSlugs(ctx)
+	}
+	return nil
+}
+
 // statusAdvisor is the optional advisor method that reports the data
 // status itself, rather than leaving it to be read from warnings.
 type statusAdvisor interface {
@@ -100,6 +109,13 @@ type statusAdvisor interface {
 }
 
 func (v vulnTracker) Advise(ctx context.Context, base *url.URL, fp fingerprint.Result) ([]engine.Finding, []string) {
+	findings, warnings, _ := v.AdviseStatus(ctx, base, fp)
+	return findings, warnings
+}
+
+// AdviseStatus implements engine.StatusAdvisor, so a local scan, which
+// asks its advisor for the status itself, gets the same one Run records.
+func (v vulnTracker) AdviseStatus(ctx context.Context, base *url.URL, fp fingerprint.Result) ([]engine.Finding, []string, string) {
 	var findings []engine.Finding
 	var warnings []string
 	var status string
@@ -112,7 +128,7 @@ func (v vulnTracker) Advise(ctx context.Context, base *url.URL, fp fingerprint.R
 	if slot, ok := ctx.Value(vulnSlotKey{}).(*vulnSlot); ok {
 		slot.set(status)
 	}
-	return findings, warnings
+	return findings, warnings, status
 }
 
 // vulnStatusFromWarnings reads the status from vulns.Advisor's warnings,

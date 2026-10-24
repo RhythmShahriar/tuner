@@ -45,11 +45,13 @@ type reportExtension struct {
 	brandName string
 	brandLogo string
 
-	level     engine.Severity
-	before    []report.Report
-	firstRun  bool // --notify-all-first and no earlier report: all findings are new
-	minLevel  engine.Severity
-	notifiers []notify.Notifier
+	level  engine.Severity
+	before []report.Report
+	// beforeFailed are the targets the --since report could not scan.
+	beforeFailed []report.TargetError
+	firstRun     bool // --notify-all-first and no earlier report: all findings are new
+	minLevel     engine.Severity
+	notifiers    []notify.Notifier
 	// notifyOptions is for tests, which point the backends at local servers.
 	notifyOptions notify.Options
 }
@@ -117,7 +119,7 @@ func (e *reportExtension) Plan(p *scanPlan) error {
 		e.firstRun = len(e.notifiers) > 0
 		return nil
 	}
-	e.before, err = loadReports(e.since)
+	e.before, e.beforeFailed, err = readSaved(e.since)
 	if err != nil && e.notifyAllFirst && errors.Is(err, fs.ErrNotExist) {
 		// The first scheduled run: the report it will compare with next
 		// time doesn't exist yet.
@@ -183,7 +185,7 @@ func (e *reportExtension) Finished(p *scanPlan, reports []report.Report, stderr 
 		o := p.write // the scan's failed targets and version reach the HTML file too
 		o.Brand = report.Brand{Name: e.brandName, LogoPath: e.brandLogo}
 		if !e.firstRun {
-			o.Since, o.SinceName = e.before, sinceName(e.since)
+			o.Since, o.SinceFailed, o.SinceName = e.before, e.beforeFailed, sinceName(e.since)
 		}
 		if err := writeFile(e.html, "html", reports, o); err != nil {
 			return exitError, err
@@ -195,7 +197,7 @@ func (e *reportExtension) Finished(p *scanPlan, reports []report.Report, stderr 
 	if e.since == "" && !e.firstRun {
 		return exitOK, nil
 	}
-	res := diff.Compare(e.before, reports)
+	res := diff.CompareScans(diff.Scan{Reports: e.before, Failed: e.beforeFailed}, diff.Scan{Reports: reports, Failed: p.write.Failed})
 	since := e.since
 	if e.firstRun {
 		since = ""

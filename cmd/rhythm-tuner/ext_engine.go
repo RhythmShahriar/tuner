@@ -26,10 +26,9 @@ func (e *engineExtension) Help() string {
                            page does not load: passive (default) reads the
                            REST API index, one request; deep also checks
                            readme.txt of the 1,500 most installed plugins
-      --request-budget N   most requests plugin discovery may send; the
-                           default 2000 probes as many plugins with known
-                           advisories as fit, a budget you set makes the
-                           scan partial when it runs out
+      --request-budget N   most requests plugin discovery may send (default
+                           2000); a budget you set makes the scan partial
+                           when it runs out
 
 Redirects:
       --follow-host        keep scanning when the site redirects to another

@@ -73,7 +73,7 @@ func TestLocalScan(t *testing.T) {
 		t.Error("report leaks the secret")
 	}
 
-	// Only local findings, and a baseline hides them all.
+	// Only local findings; a baseline hides them all.
 	base := filepath.Join(t.TempDir(), "base.json")
 	os.WriteFile(base, []byte(out), 0o600)
 	code, out, errs = tuner(t, "scan", root, "--json", "--php", php, "--no-vulns", "--id", "local-*", "--baseline", base, "--fail-on", "info")

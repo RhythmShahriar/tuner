@@ -11,6 +11,8 @@ import (
 
 	"github.com/RhythmShahriar/tuner/engine"
 	"github.com/RhythmShahriar/tuner/report"
+	// Registers the vulnerability rules, so vuln-* IDs are advisor IDs.
+	_ "github.com/RhythmShahriar/tuner/vulns"
 )
 
 func rep(target string, fs ...engine.Finding) report.Report {
@@ -253,5 +255,78 @@ Not seen, scan incomplete:
 	}
 	if len(res.Incomplete) != 1 || !strings.Contains(res.Incomplete[0], "vulnerability data missing") {
 		t.Errorf("incomplete %q", res.Incomplete)
+	}
+}
+
+// A batch with a failed target is not one site: its one report pairs
+// with the old report of the same target, not with whatever the other
+// side's single report is.
+func TestCompareScansWithFailedTargets(t *testing.T) {
+	before := Scan{
+		Reports: []report.Report{rep("http://127.0.0.1:21100", remote("hdr-hsts-missing", "/", engine.Medium))},
+		Failed:  []report.TargetError{{Target: "http://127.0.0.1:21131", Error: "can't reach"}},
+	}
+	after := Scan{Reports: []report.Report{rep("http://127.0.0.1:21131", remote("leak-dotenv", "/.env", engine.Critical))}}
+	res := CompareScans(before, after)
+	if got := ids(res.New); len(got) != 1 || got[0] != "leak-dotenv" {
+		t.Errorf("new %v", got)
+	}
+	if len(res.Fixed) != 0 || len(res.Unchanged) != 0 {
+		t.Errorf("fixed %v, unchanged %v", ids(res.Fixed), ids(res.Unchanged))
+	}
+	if len(res.NotScanned) != 1 || res.NotScanned[0] != "http://127.0.0.1:21100" {
+		t.Errorf("not scanned %v", res.NotScanned)
+	}
+	if !res.NewAtOrAbove(engine.Critical) {
+		t.Error("--fail-on-new critical would pass")
+	}
+
+	// A failed target on the new side counts too.
+	res = CompareScans(Scan{Reports: before.Reports}, Scan{Reports: after.Reports, Failed: []report.TargetError{{Target: "http://127.0.0.1:21100"}}})
+	if len(res.New) != 1 || len(res.NotScanned) != 1 {
+		t.Errorf("new %v, not scanned %v", ids(res.New), res.NotScanned)
+	}
+
+	// Without failed targets one report still pairs with one report.
+	res = CompareScans(Scan{Reports: before.Reports}, Scan{Reports: after.Reports})
+	if len(res.New) != 1 || len(res.Fixed) != 1 || len(res.NotScanned) != 0 {
+		t.Errorf("1v1: new %v, fixed %v, not scanned %v", ids(res.New), ids(res.Fixed), res.NotScanned)
+	}
+}
+
+// A finding whose check the new scan did not run is not seen, not fixed.
+func TestCompareChecksThatDidNotRun(t *testing.T) {
+	before := rep("https://a.test",
+		remote("leak-dotenv", "/.env", engine.Critical),
+		remote("hdr-hsts-missing", "/", engine.Medium),
+		remote("vuln-plugin-gallery", "/wp-content/plugins/gallery/", engine.High, "A1"),
+	)
+	after := rep("https://a.test")
+	after.VulnData = "ok"
+	all := []*engine.Check{{ID: "leak-dotenv"}, {ID: "leak-git-config"}, {ID: "hdr-hsts-missing"}}
+	after.Selection = report.NewSelection(all, all[:2], engine.Selector{IDs: []string{"leak-*"}})
+	if report.NewSelection(all, all, engine.Selector{}) != nil {
+		t.Error("a scan that ran every check left nothing out")
+	}
+	res := Compare([]report.Report{before}, []report.Report{after})
+	if got := ids(res.Fixed); len(got) != 1 || got[0] != "leak-dotenv" {
+		t.Errorf("fixed %v", got)
+	}
+	if got := ids(res.NotSeen); len(got) != 2 {
+		t.Errorf("not seen %v", got)
+	}
+	for _, e := range res.NotSeen {
+		if e.Why != WhyNotChecked {
+			t.Errorf("%s: why %q", e.Finding.ID, e.Why)
+		}
+	}
+	if got := res.Summary("a.json"); got != "0 new, 1 fixed since a.json; 2 not seen (not checked this time)" {
+		t.Errorf("summary %q", got)
+	}
+
+	// A report saved before selections existed looked for everything.
+	after.Selection = nil
+	if res := Compare([]report.Report{before}, []report.Report{after}); len(res.Fixed) != 3 {
+		t.Errorf("no selection: fixed %v", ids(res.Fixed))
 	}
 }

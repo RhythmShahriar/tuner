@@ -20,6 +20,7 @@ import (
 type command struct {
 	Name    string // what users type: rhythm tuner <Name>
 	Alias   string // optional short form, like "s" for scan
+	Args    string // what follows the name in the usage list, e.g. "<old.json> <new.json>"
 	Summary string // one line for the usage list, e.g. "compare two JSON reports"
 	Run     func(args []string, stdout, stderr io.Writer) int
 }
@@ -86,7 +87,11 @@ func builtinCommand(name string) bool {
 func commandUsage(name string) []usageLine {
 	var lines []usageLine
 	for _, c := range commands {
-		lines = append(lines, usageLine{cmd: name + " " + c.Name, summary: c.Summary})
+		cmd := name + " " + c.Name
+		if c.Args != "" {
+			cmd += " " + c.Args
+		}
+		lines = append(lines, usageLine{cmd: cmd, summary: c.Summary})
 	}
 	return lines
 }

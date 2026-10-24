@@ -40,7 +40,7 @@ var ErrNoChecks = errors.New("no checks match the selection; list them with: rhy
 // asks the rule registry (RegisterRules), so a new provider's IDs work
 // once it registers them.
 func IsAdvisorID(pattern string) bool {
-	return slices.ContainsFunc(allRules(), func(r Rule) bool { return r.mayMatch(pattern) })
+	return slices.ContainsFunc(Rules(), func(r Rule) bool { return r.mayMatch(pattern) })
 }
 
 // Selector narrows the checks a scan runs. Zero values select everything
@@ -228,18 +228,49 @@ func (f filtered) PluginSlugs(ctx context.Context) []string {
 
 func (f filtered) Advise(ctx context.Context, base *url.URL, fp fingerprint.Result) ([]Finding, []string) {
 	findings, warnings := f.Advisor.Advise(ctx, base, fp)
-	sel := f.sel.normalize()
+	return f.keep(findings), warnings
+}
+
+// AdviseStatus implements StatusAdvisor: it forwards the wrapped
+// advisor's data status, so a filter never hides how complete the
+// vulnerability data was. An advisor without one is judged by its
+// warnings: none means ok, any means partial.
+func (f filtered) AdviseStatus(ctx context.Context, base *url.URL, fp fingerprint.Result) ([]Finding, []string, string) {
+	if sa, ok := f.Advisor.(StatusAdvisor); ok {
+		findings, warnings, status := sa.AdviseStatus(ctx, base, fp)
+		return f.keep(findings), warnings, status
+	}
+	findings, warnings := f.Advise(ctx, base, fp)
+	if len(warnings) > 0 {
+		return findings, warnings, "partial"
+	}
+	return findings, warnings, "ok"
+}
+
+// keep drops the findings the selection leaves out.
+func (f filtered) keep(findings []Finding) []Finding {
 	var kept []Finding
 	for _, x := range findings {
-		switch {
-		case sel.MinSeverity != "" && x.Severity.Rank() > sel.MinSeverity.Rank():
-		case len(sel.IDs) > 0 && !slices.ContainsFunc(sel.IDs, func(id string) bool { return globMatch(id, x.ID) }):
-		case slices.ContainsFunc(sel.ExcludeIDs, func(id string) bool { return globMatch(id, x.ID) }):
-		case len(sel.Tags) > 0 && !hasAny(x.Tags, sel.Tags):
-		case hasAny(x.Tags, sel.ExcludeTags):
-		default:
+		if f.sel.Keeps(x) {
 			kept = append(kept, x)
 		}
 	}
-	return kept, warnings
+	return kept
+}
+
+// Keeps reports whether a finding passes the parts of s that apply to
+// findings: IDs, tags and minimum severity. A profile says nothing about
+// a finding, so it is not checked.
+func (s Selector) Keeps(x Finding) bool {
+	sel := s.normalize()
+	switch {
+	case sel.MinSeverity != "" && x.Severity.Rank() > sel.MinSeverity.Rank():
+	case len(sel.IDs) > 0 && !slices.ContainsFunc(sel.IDs, func(id string) bool { return globMatch(id, x.ID) }):
+	case slices.ContainsFunc(sel.ExcludeIDs, func(id string) bool { return globMatch(id, x.ID) }):
+	case len(sel.Tags) > 0 && !hasAny(x.Tags, sel.Tags):
+	case hasAny(x.Tags, sel.ExcludeTags):
+	default:
+		return true
+	}
+	return false
 }

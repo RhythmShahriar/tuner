@@ -209,8 +209,10 @@ func scanStatus(ctx context.Context, root string, opts Options, h engine.Hooks) 
 var observe func(Options, *engine.Result)
 
 // Root resolves a local target to an absolute directory, expanding a
-// leading ~, ~/ or ~\ to the home folder on every OS. It errors if the
-// target isn't a directory.
+// leading ~, ~/ or ~\ to the home folder on every OS. Symlinks are
+// resolved, so a deploy's "current" link scans the release it points to
+// (a walk does not descend into a linked root). It errors if the target
+// isn't a directory.
 func Root(target string) (string, error) {
 	p, err := expandHome(target, os.UserHomeDir)
 	if err != nil {
@@ -229,7 +231,11 @@ func Root(target string) (string, error) {
 	case !fi.IsDir():
 		return "", fmt.Errorf("%s: not a directory; point Tuner at the site's root folder", target)
 	}
-	return abs, nil
+	real, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", err
+	}
+	return real, nil
 }
 
 // expandHome replaces a leading ~ with the home folder. Both separators

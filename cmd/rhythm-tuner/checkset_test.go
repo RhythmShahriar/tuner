@@ -371,3 +371,47 @@ func TestPackDataAndLocalRules(t *testing.T) {
 		t.Error("built-in check set should use the binary's data and rules")
 	}
 }
+
+// Under -q the pack alerts still show, so a scan that waited on a dead
+// pack host says why; other warnings stay hidden.
+func TestPackAlertsUnderQuiet(t *testing.T) {
+	trustTestKey(t)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	pack := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, _, _ := w.(http.Hijacker).Hijack()
+		conn.Close()
+	}))
+	t.Cleanup(pack.Close)
+	t.Setenv("TUNER_CHECKS_URL", pack.URL)
+	site := leakySite(t)
+	code, _, errs := tunerExact(t, "scan", site.URL, "-q", "--no-vulns", "--rate", "0")
+	if code != exitOK || !strings.Contains(errs, "rhythm tuner scan: check pack host unreachable, using built-in checks\n") {
+		t.Errorf("exit %d, stderr %q", code, errs)
+	}
+}
+
+// The pack's data files and local rules reach the scan's options.
+func TestPackDataReachesScans(t *testing.T) {
+	retired, _ := json.Marshal(builtInIDs())
+	servePackWith(t, `{"min_tuner": "0.2.0", "retired": `+string(retired)+`}`, packCheck, checkpack.Extras{
+		Data:  fstest.MapFS{"rest-namespaces.json": {Data: []byte(`{"namespaces": {"acme-forms/v1": "acme-forms"}}`)}},
+		Local: fstest.MapFS{"acme-backdoor.yaml": {Data: []byte("id: local-acme-backdoor\n")}},
+	}, testPackKey)
+	p, err := planScan([]string{"https://example.com", "--no-vulns", "--no-config"}, strings.NewReader(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.engine.PluginData == nil || p.engine.PluginData.RESTNamespaces()["acme-forms/v1"] != "acme-forms" {
+		t.Errorf("plugin data not from the pack: %+v", p.engine.PluginData)
+	}
+	if len(p.engine.PluginData.TopPlugins()) == 0 {
+		t.Error("top plugins the pack lacks should come from the built-in copy")
+	}
+	if p.local.Rules == nil {
+		t.Error("local rules not from the pack")
+	}
+	p, err = planScan([]string{"https://example.com", "--no-vulns", "--no-config", "--no-check-updates"}, strings.NewReader(""))
+	if err != nil || p.engine.PluginData != nil || p.local.Rules != nil {
+		t.Errorf("built-in checks: %v, data %v, rules %v", err, p.engine.PluginData, p.local.Rules)
+	}
+}

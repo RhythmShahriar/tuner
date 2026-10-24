@@ -4,9 +4,13 @@
 package engine
 
 import (
+	"context"
 	"errors"
+	"net/url"
 	"slices"
 	"testing"
+
+	"github.com/RhythmShahriar/tuner/fingerprint"
 )
 
 // A provider that registers its rules gets its IDs and tags accepted
@@ -56,11 +60,38 @@ func TestRegistryDrivesSelection(t *testing.T) {
 	if _, ok := RuleFor("leak-dotenv"); ok {
 		t.Error("a YAML check ID has no rule")
 	}
-	// Fallback rules stand in for vulns and local until they register.
-	if r, ok := RuleFor("vuln-plugin-akismet"); !ok || r.ID != "vuln" {
-		t.Errorf("fallback: %+v %v", r, ok)
+	// Only registered rules exist: no built-in fallback list.
+	if r, ok := RuleFor("vuln-plugin-akismet"); !ok || r.ID != "vuln-plugin-" {
+		t.Errorf("registered prefix: %+v %v", r, ok)
 	}
-	if slices.ContainsFunc(Rules(), func(r Rule) bool { return r.ID == "wp-core-" }) {
-		t.Error("fallback rules must stay out of Rules")
+	if _, ok := RuleFor("nginx-eol"); ok {
+		t.Error("a rule nobody registered matched")
+	}
+}
+
+type statusOnly struct{ status string }
+
+func (s statusOnly) Advise(ctx context.Context, base *url.URL, fp fingerprint.Result) ([]Finding, []string) {
+	f, w, _ := s.AdviseStatus(ctx, base, fp)
+	return f, w
+}
+
+func (s statusOnly) AdviseStatus(context.Context, *url.URL, fingerprint.Result) ([]Finding, []string, string) {
+	return []Finding{{ID: "vuln-core", Severity: High}, {ID: "php-eol", Severity: Low}}, []string{"w"}, s.status
+}
+
+// Filtered keeps the advisor's data status visible through the filter.
+func TestFilteredForwardsStatus(t *testing.T) {
+	a := Filtered(statusOnly{"partial"}, Selector{MinSeverity: High})
+	sa, ok := a.(StatusAdvisor)
+	if !ok {
+		t.Fatal("Filtered hides AdviseStatus")
+	}
+	findings, warnings, status := sa.AdviseStatus(context.Background(), &url.URL{}, fingerprint.Result{})
+	if len(findings) != 1 || findings[0].ID != "vuln-core" || len(warnings) != 1 || status != "partial" {
+		t.Errorf("%v %v %q", findings, warnings, status)
+	}
+	if !(Selector{IDs: []string{"vuln-*"}}).Keeps(Finding{ID: "vuln-core"}) || (Selector{ExcludeTags: []string{"x"}}).Keeps(Finding{ID: "a", Tags: []string{"x"}}) {
+		t.Error("Keeps")
 	}
 }

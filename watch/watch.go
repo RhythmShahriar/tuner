@@ -19,7 +19,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -325,8 +327,14 @@ func (w *Watcher) freeName(t time.Time) string {
 	return name
 }
 
+// runName matches the base name freeName gives a run: its UTC start time,
+// with a -N suffix for a second run in the same second. prune only ever
+// counts and deletes files with such a name, so anything else in Dir,
+// such as a user's own notes or reports, is left alone.
+var runName = regexp.MustCompile(`^\d{8}T\d{6}Z(-\d+)?$`)
+
 // prune deletes all but the newest Keep runs' files, never the ones
-// named in keep.
+// named in keep. Only files whose base name is a run stamp count.
 func (w *Watcher) prune(keep ...string) {
 	if w.Keep <= 0 {
 		return
@@ -343,14 +351,18 @@ func (w *Watcher) prune(keep ...string) {
 			continue
 		}
 		base := strings.TrimSuffix(name, ext)
+		if !runName.MatchString(base) {
+			continue
+		}
 		runs[base] = append(runs[base], filepath.Join(w.Dir, name))
 	}
 	bases := make([]string, 0, len(runs))
 	for b := range runs {
 		bases = append(bases, b)
 	}
-	// Names start with the UTC time, so they sort oldest first.
-	slices.Sort(bases)
+	// Names start with the UTC time, so they sort oldest first; runs in
+	// one second sort by their numeric suffix (-2 before -10).
+	slices.SortFunc(bases, compareRuns)
 	for _, b := range bases[:max(0, len(bases)-w.Keep)] {
 		if slices.ContainsFunc(keep, func(k string) bool { return k != "" && strings.TrimSuffix(filepath.Base(k), ".json") == b }) {
 			continue
@@ -359,6 +371,27 @@ func (w *Watcher) prune(keep ...string) {
 			_ = os.Remove(f)
 		}
 	}
+}
+
+// compareRuns orders two run names by start time, then by suffix.
+func compareRuns(a, b string) int {
+	at, an := splitRun(a)
+	bt, bn := splitRun(b)
+	if c := strings.Compare(at, bt); c != 0 {
+		return c
+	}
+	return an - bn
+}
+
+// splitRun splits a run name into its time stamp and suffix number; a
+// name without a suffix is run 1 of its second.
+func splitRun(name string) (stamp string, n int) {
+	stamp, suffix, ok := strings.Cut(name, "-")
+	if !ok {
+		return stamp, 1
+	}
+	n, _ = strconv.Atoi(suffix)
+	return stamp, n
 }
 
 func fileExists(p string) bool {

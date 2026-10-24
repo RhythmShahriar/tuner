@@ -83,7 +83,7 @@ func writeMarkdown(w io.Writer, reports []Report, o WriteOptions) error {
 					if a.KEV {
 						title += " ⚠️ actively exploited"
 					}
-					fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", MDText(or(string(a.Severity), "unrated")), MDText(or(cve, "—")), title, MDText(or(a.FixedIn, "—")))
+					fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", MDText(or(string(a.Severity), "unrated")), MDText(or(cve, "none")), title, MDText(or(a.FixedIn, "no fix yet")))
 				}
 			}
 			if f.Source != "" {

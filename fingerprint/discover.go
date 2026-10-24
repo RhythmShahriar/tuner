@@ -56,6 +56,20 @@ var Embedded = sync.OnceValue(func() Data {
 	return d
 })
 
+// Overlay is LoadData for a check pack that may ship only some of the
+// files: each one fsys lacks comes from the copy built into the binary.
+func Overlay(fsys fs.FS) (Data, error) { return LoadData(overlayFS{fsys, embedded}) }
+
+// overlayFS opens a file from top, else from base.
+type overlayFS struct{ top, base fs.FS }
+
+func (o overlayFS) Open(name string) (fs.File, error) {
+	if f, err := o.top.Open(name); err == nil {
+		return f, nil
+	}
+	return o.base.Open(name)
+}
+
 // LoadData reads data/rest-namespaces.json and data/top-plugins.json from
 // fsys, the layout of this package and of a check pack.
 func LoadData(fsys fs.FS) (Data, error) {

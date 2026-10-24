@@ -5,6 +5,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -46,12 +47,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "scan", "s":
 		return scan(args[1:], stdout, stderr)
 	case "checks", "ls":
-		return listChecks(args[1:], stdout, stderr)
+		return listChecks(args[1:], stdout, renamed(stderr))
 	case "update":
-		return cmdUpdate(args[1:], stdout, stderr)
+		return cmdUpdate(args[1:], stdout, renamed(stderr))
 	}
 	if c := lookupCommand(args[0]); c != nil {
-		return c.Run(args[1:], stdout, stderr)
+		return c.Run(args[1:], stdout, renamed(stderr))
 	}
 	printErr(stderr, "", unknownCommand(args[0]))
 	return exitUsage
@@ -82,34 +83,95 @@ func cmdName() string {
 	return base
 }
 
+// named replaces every "rhythm tuner" in a help or hint text with the
+// name Tuner was started as, so a command it suggests works as typed.
+func named(s string) string {
+	if n := cmdName(); n != "rhythm tuner" {
+		return strings.ReplaceAll(s, "rhythm tuner", n)
+	}
+	return s
+}
+
+// renamed wraps a subcommand's stderr so its messages, written as
+// "rhythm tuner: ...", name the command Tuner was started as.
+func renamed(w io.Writer) io.Writer {
+	if n := cmdName(); n != "rhythm tuner" {
+		return renamer{w, n}
+	}
+	return w
+}
+
+// renamer is renamed's writer. Each message is one Write, so a name is
+// never split across two.
+type renamer struct {
+	w    io.Writer
+	name string
+}
+
+func (r renamer) Write(p []byte) (int, error) {
+	if _, err := r.w.Write(bytes.ReplaceAll(p, []byte("rhythm tuner"), []byte(r.name))); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
 // printable reports whether s has no control characters, so it can go in
 // help text without moving the cursor or ringing the bell.
 func printable(s string) bool {
 	return !strings.ContainsFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f })
 }
 
-// usageLine is one command in the Usage list: what to type, a summary
-// and any more summary lines.
+// usageLine is one command in the Usage list: what to type and a
+// summary.
 type usageLine struct {
 	cmd, summary string
-	more         []string
 }
 
-// formatUsage lines up the summaries one column after the longest command,
-// and no earlier than the flag descriptions below them.
+// The Usage list's layout: summaries start in the column of the flag
+// descriptions below them. No line runs past usageWidth.
+const (
+	usageCmdWidth = 34
+	usageWidth    = 80
+)
+
+// formatUsage lines up the summaries in one column and wraps them at
+// usageWidth. A command too long for its column gets a line of its own,
+// with the summary below it.
 func formatUsage(lines []usageLine) string {
-	width := 34
-	for _, l := range lines {
-		width = max(width, len(l.cmd))
-	}
+	indent := strings.Repeat(" ", usageCmdWidth+3)
 	var b strings.Builder
 	for _, l := range lines {
-		fmt.Fprintf(&b, "  %-*s %s\n", width, l.cmd, l.summary)
-		for _, m := range l.more {
-			fmt.Fprintf(&b, "%s%s\n", strings.Repeat(" ", width+3), m)
+		summary := wrapWords(l.summary, usageWidth-len(indent))
+		if len(l.cmd) > usageCmdWidth {
+			fmt.Fprintf(&b, "  %s\n", l.cmd)
+		} else {
+			fmt.Fprintf(&b, "  %-*s %s\n", usageCmdWidth, l.cmd, summary[0])
+			summary = summary[1:]
+		}
+		for _, s := range summary {
+			fmt.Fprintf(&b, "%s%s\n", indent, s)
 		}
 	}
 	return b.String()
+}
+
+// wrapWords breaks text into lines of at most width bytes, between words.
+// A word longer than width gets a line of its own.
+func wrapWords(text string, width int) []string {
+	var lines []string
+	line := ""
+	for _, w := range strings.Fields(text) {
+		switch {
+		case line == "":
+			line = w
+		case len(line)+1+len(w) <= width:
+			line += " " + w
+		default:
+			lines = append(lines, line)
+			line = w
+		}
+	}
+	return append(lines, line)
 }
 
 func usage(w io.Writer) {
@@ -119,7 +181,7 @@ func usage(w io.Writer) {
 		{cmd: name + " scan <url>... [flags]", summary: "scan one or more sites"},
 		{cmd: name + " scan <dir> [flags]", summary: "scan a site's files on the server"},
 		{cmd: name + " checks [flags]", summary: "list the checks (" + name + " checks --help)"},
-		{cmd: name + " update [--clear]", summary: "refresh the check pack and the WordPress and", more: []string{"PHP vulnerability data now"}},
+		{cmd: name + " update [--clear | --prefetch <dir|url>...]", summary: "refresh the check pack and the WordPress and PHP vulnerability data now"},
 	}
 	fmt.Fprintln(w, kit.Banner("rhythm tuner", version))
 	fmt.Fprint(w, "Find what's out of tune in your WordPress & PHP sites.\n\nUsage:\n"+
@@ -183,8 +245,8 @@ Requests:
   -A, --user-agent <ua>    User-Agent header
   -H, --header <h>         extra header, "Name: value" (repeatable)
       --cookie <c>         Cookie header, e.g. "session=abc"
-                           -H and --cookie go with every request, also after
-                           the home page redirects to another host
+                           -H and --cookie go only to the site you named,
+                           never to another host a redirect leads to
       --proxy <url>        http, https or socks5 proxy (HTTPS_PROXY also works)
   -k, --insecure           don't verify TLS certificates
 
@@ -217,8 +279,9 @@ Batch and CI:
                            min_confidence, baseline, headers (${TUNER_VAR}
                            reads the environment; only TUNER_ names), tags,
                            ids and ignore entries (id, path, reason, until).
-                           Flags win over it. When it sets the targets, -H
-                           and --cookie need targets on the command line.
+                           Flags win over it. When it sets the targets, -H,
+                           --cookie and ${TUNER_VAR} headers need targets on
+                           the command line.
 
 ` + extensionHelp()
 }
@@ -226,12 +289,16 @@ Batch and CI:
 // helpFooter explains where data comes from, the exit codes and examples.
 func helpFooter() string {
 	return `Vulnerability data comes from WPVulnerability (CC0), api.wordpress.org and
-php.net; Composer packages are matched with OSV.dev. New checks arrive as a
-check pack from Tuner's GitHub releases (checksummed, not signed; built-in
-checks only with --no-check-updates). Both are cached under your user cache
-directory and refreshed automatically once a day; TUNER_VULN_API,
-TUNER_WPORG_API, TUNER_PHPNET_API, TUNER_OSV_API and TUNER_CHECKS_URL point
-Tuner at mirrors.
+php.net, plus Wordfence Intelligence when TUNER_WORDFENCE_KEY holds an API
+key; Composer packages are matched with OSV.dev. New checks arrive as a
+check pack from Tuner's GitHub releases, signed with Ed25519; a build
+without the signing key uses its built-in checks, as --no-check-updates
+does. Both are cached under your user cache directory and refreshed
+automatically once a day; TUNER_VULN_API, TUNER_WPORG_API, TUNER_WPDL_API,
+TUNER_PHPNET_API, TUNER_OSV_API, TUNER_WORDFENCE_API and TUNER_CHECKS_URL
+point Tuner at mirrors.
+TUNER_SMTP_PASSWORD is the --notify email password; TUNER_SERVE_TOKEN and
+TUNER_WEBHOOK_SECRET are serve's API token and webhook signing secret.
 
 Exit codes: 0 ok · 1 findings at --fail-on · 2 usage error · 130 interrupted ·
 3 scan error, or --fail-on with missing vulnerability data or a partial scan

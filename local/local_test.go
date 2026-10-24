@@ -564,6 +564,26 @@ func TestRoot(t *testing.T) {
 	}
 }
 
+// A root that is a symlink, like a deploy's "current" link, scans the
+// folder it points to: the walk does not stop at the link.
+func TestLinkedRoot(t *testing.T) {
+	root := tree(t, map[string]string{".env": "DB_PASSWORD=hunter2hunter2\n", "index.php": "<?php echo 1;"})
+	link := filepath.Join(t.TempDir(), "current")
+	if err := os.Symlink(root, link); err != nil {
+		t.Skip("no symlinks:", err)
+	}
+	if got, err := Root(link); err != nil || got != root {
+		t.Errorf("Root(link) = %q, %v; want %q", got, err, root)
+	}
+	direct, linked := scanTree(t, root, Options{}), scanTree(t, link, Options{})
+	if find(linked, "local-dotenv") == nil {
+		t.Errorf("linked root: no local-dotenv in %v", linked.Findings)
+	}
+	if len(direct.Findings) != len(linked.Findings) {
+		t.Errorf("linked root found %d findings, the folder itself %d", len(linked.Findings), len(direct.Findings))
+	}
+}
+
 func TestMaxEntries(t *testing.T) {
 	root := tree(t, map[string]string{"a/b/c/d.txt": "", "e/f.txt": "", "g.txt": ""})
 	res := scanTree(t, root, Options{MaxEntries: 2})

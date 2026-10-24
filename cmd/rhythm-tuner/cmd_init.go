@@ -19,7 +19,7 @@ import (
 )
 
 func init() {
-	registerCommand(command{Name: "init", Summary: "write a CI workflow that runs Tuner", Run: cmdInit})
+	registerCommand(command{Name: "init", Args: "ci --target <url>", Summary: "write a CI workflow that runs Tuner", Run: cmdInit})
 }
 
 // cmdInit runs `rhythm tuner init`. Its one subcommand, ci, writes a GitHub
@@ -34,7 +34,7 @@ func cmdInit(args []string, stdout, stderr io.Writer) int {
 	}
 	switch args[0] {
 	case "-h", "--help", "help":
-		fmt.Fprint(stdout, initUsage)
+		fmt.Fprint(stdout, named(initUsage))
 		return exitOK
 	case "ci":
 		wd, err := os.Getwd()
@@ -81,7 +81,7 @@ func initCI(args []string, dir string, stdout, stderr io.Writer) int {
 	flags.BoolVar(&o.force, "force", false, "")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			fmt.Fprint(stdout, initUsage)
+			fmt.Fprint(stdout, named(initUsage))
 			return exitOK
 		}
 		fmt.Fprintf(stderr, "rhythm tuner: %v\n\n%s", err, initUsage)

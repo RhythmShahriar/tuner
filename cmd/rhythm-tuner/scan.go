@@ -149,6 +149,7 @@ type scanPlan struct {
 	checkSet *checkSet
 	engine   engine.Options
 	sel      engine.Selector
+	vulns    *vulns.Client // the vulnerability data client, nil with --no-vulns
 	osv      *local.OSV
 	format   string // json, jsonl, sarif, md, or "" for the terminal view only
 	failOn   engine.Severity
@@ -288,7 +289,7 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 	if o.proxy != "" {
 		u, err := url.Parse(o.proxy)
 		if err != nil || u.Host == "" || !slices.Contains([]string{"http", "https", "socks5", "socks5h"}, u.Scheme) {
-			return nil, usagef("bad --proxy %q, use e.g. http://127.0.0.1:8080 or socks5://127.0.0.1:1080", o.proxy)
+			return nil, usagef("bad --proxy %q, use e.g. http://127.0.0.1:8080 or socks5://127.0.0.1:1080", redactProxy(o.proxy))
 		}
 		proxy = u
 	}
@@ -323,8 +324,10 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 
 	// CI.
 	if o.baseline != "" {
-		if p.baseline, err = report.LoadBaseline(o.baseline); err != nil {
-			return nil, err
+		if p.baseline, err = report.LoadBaseline(o.baseline); errors.Is(err, os.ErrNotExist) {
+			return nil, usagef("--baseline %s: no such file", o.baseline)
+		} else if err != nil {
+			return nil, usagef("--baseline %s: %v", o.baseline, unwrapPath(err))
 		}
 	}
 
@@ -366,10 +369,14 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 		Profile:     engine.Profile(o.profile),
 		Proxy:       proxy,
 	}
+	// A check pack can bring newer plugin discovery data and local rules.
+	p.engine.PluginData = p.checkSet.pluginData()
+	p.local.Rules = p.checkSet.localRules()
 	if vulnsOn {
 		// The tracker sits inside the filter so it sees every lookup,
 		// including ones whose findings the selection drops.
-		p.engine.Advisor = engine.Filtered(scanrun.TrackVulns(&vulns.Advisor{Client: vulnClient(ua, p.engine.Proxy, o.offline)}), sel)
+		p.vulns = vulnClient(ua, p.engine.Proxy, o.offline)
+		p.engine.Advisor = engine.Filtered(scanrun.TrackVulns(&vulns.Advisor{Client: p.vulns}), sel)
 	}
 	p.sel = sel
 	if vulnsOn {
@@ -521,6 +528,14 @@ func (p *scanPlan) applyConfig(set map[string]bool, haveTargets bool) error {
 		return usageError{Msg: err.Error()}
 	}
 	p.config = c
+	// A .tuner.yml found in the current folder may have come with the
+	// code, so it may only point at files inside its own folder. One
+	// named with --config is the user's choice.
+	if o.config == "" {
+		if err := insideConfigDir(c, haveTargets); err != nil {
+			return err
+		}
+	}
 
 	str := func(flagName string, dst *string, v string) {
 		if !set[flagName] && v != "" {
@@ -574,12 +589,44 @@ func (p *scanPlan) applyConfig(set map[string]bool, haveTargets bool) error {
 		}
 		// A .tuner.yml can come with a pull request, which could point
 		// targets at a host it controls. Credentials from the command line
-		// (often CI secrets) must never go to a host only the file chose.
+		// or the environment (often CI secrets) must never go to a host
+		// only the file chose.
 		if len(p.configTargets) > 0 && (set["H"] || set["header"] || set["cookie"]) {
 			return usagef("-H and --cookie need targets on the command line when %s chooses them: name the targets or use --no-config", c.Path)
 		}
+		if len(p.configTargets) > 0 && len(c.EnvHeaders) > 0 {
+			return usagef("%s chooses the targets, so its headers can't read ${TUNER_...} variables (%s): name the targets on the command line or use --no-config", c.Path, strings.Join(c.EnvHeaders, ", "))
+		}
 	}
 	p.ignores, p.expired = c.Ignores(today())
+	return nil
+}
+
+// insideConfigDir refuses folder targets and a baseline that a found
+// .tuner.yml names outside its own folder, such as ../site or /etc: a
+// file that came with a pull request must not pick what on the runner
+// gets read. Targets are only checked when the file chooses them.
+func insideConfigDir(c *tunerconfig.Config, haveTargets bool) error {
+	outside := func(p string) bool {
+		if filepath.IsAbs(p) || strings.HasPrefix(p, "~") || isDrivePath(p) || strings.HasPrefix(p, `\`) {
+			return true
+		}
+		clean := filepath.Clean(filepath.FromSlash(strings.ReplaceAll(p, `\`, "/")))
+		return clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator))
+	}
+	if !haveTargets {
+		for _, t := range c.Targets {
+			if isLocal, err := classifyTarget(t); err == nil && isLocal && outside(t) {
+				return usagef("%s: targets: %s is outside the folder that holds %s; name it on the command line or pass --config", c.Path, t, filepath.Base(c.Path))
+			}
+		}
+	}
+	if c.Baseline != "" {
+		rel, err := filepath.Rel(filepath.Dir(c.Path), c.Baseline)
+		if err != nil || outside(rel) {
+			return usagef("%s: baseline: %s is outside the folder that holds %s; name it with --baseline or pass --config", c.Path, c.Baseline, filepath.Base(c.Path))
+		}
+	}
 	return nil
 }
 
@@ -707,7 +754,13 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 	}
 	live := p.format == "" || o.output != ""
 
-	if !o.quiet {
+	// Under -q only the check pack alerts show: an unreachable pack host
+	// or a disabled signature check would otherwise go unexplained.
+	if o.quiet {
+		for _, w := range p.checkSet.alerts {
+			printErr(stderr, "scan", w)
+		}
+	} else {
 		for _, w := range p.checkSet.warnings {
 			printErr(stderr, "scan", w)
 		}
@@ -809,7 +862,7 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 		Done: func(i int, t *scanrun.Target) {
 			if t.Result != nil && live {
 				views[i].SetStatus(report.Status(t.Status)) // a partial scan says so above its score
-				views[i].Summary(t.Result, t.Target, t.Suppressed)
+				views[i].Summary(t.Result, shownTarget(t.Target), t.Suppressed)
 			}
 			outMu.Lock()
 			defer outMu.Unlock()
@@ -818,7 +871,7 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 			}
 			if t.Failed() {
 				failed[i] = describe(t, o)
-				printErr(stderr, "scan", t.Target+":", failed[i])
+				printErr(stderr, "scan", shownTarget(t.Target)+":", failed[i])
 				if ie := (scanrun.InternalError{}); errors.As(t.Err, &ie) && o.verbose {
 					_, _ = stderr.Write(ie.Stack)
 				}
@@ -834,7 +887,10 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 	// listed as failed.
 	for i, why := range failed {
 		if why != "" && outcome.Targets[i].Result == nil {
-			p.write.Failed = append(p.write.Failed, report.TargetError{Target: p.targets[i], Error: why})
+			// The report holds the reason alone; the hint after it is for
+			// people reading stderr.
+			why, _, _ = strings.Cut(why, "\n")
+			p.write.Failed = append(p.write.Failed, report.TargetError{Target: shownTarget(p.targets[i]), Error: why})
 		}
 	}
 	// A file keeps its previous report unless this run has a better one.
@@ -901,9 +957,12 @@ func (p *scanPlan) configNote() string {
 		return ""
 	}
 	if len(p.configTargets) == 0 {
-		return "using " + p.config.Path
+		return "using " + p.config.Path + p.configLimits()
 	}
-	shown := p.configTargets[:min(len(p.configTargets), 3)]
+	var shown []string
+	for _, t := range p.configTargets[:min(len(p.configTargets), 3)] {
+		shown = append(shown, shownTarget(t))
+	}
 	list := strings.Join(shown, ", ")
 	if more := len(p.configTargets) - len(shown); more > 0 {
 		list += fmt.Sprintf(" and %d more", more)
@@ -912,7 +971,30 @@ func (p *scanPlan) configNote() string {
 	if len(p.configTargets) > 1 {
 		what = "targets"
 	}
-	return fmt.Sprintf("using %s, which chose the %s: %s", p.config.Path, what, list)
+	return fmt.Sprintf("using %s, which chose the %s: %s", p.config.Path, what, list) + p.configLimits()
+}
+
+// configLimits names the request limits the settings file set, such as
+// "; it sets --rate 0 (no limit) and --concurrency 500", or "". They go
+// in the config note, which -q keeps, so a file can't quietly lift the
+// limits that keep a scan polite.
+func (p *scanPlan) configLimits() string {
+	c := p.config
+	var parts []string
+	if c.Rate != nil && p.o.rate == *c.Rate {
+		r := "--rate " + strconv.FormatFloat(*c.Rate, 'g', -1, 64)
+		if *c.Rate == 0 {
+			r += " (no limit)"
+		}
+		parts = append(parts, r)
+	}
+	if c.Concurrency != nil && p.o.concurrency == *c.Concurrency {
+		parts = append(parts, "--concurrency "+strconv.Itoa(*c.Concurrency))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "; it sets " + strings.Join(parts, " and ")
 }
 
 // hiddenNote says how many findings the config's ignore entries and the
@@ -956,9 +1038,35 @@ func (p *scanPlan) header(target string) string {
 		notes = append(notes, fmt.Sprintf("local address: %g req/s", p.rateFor(target)))
 	}
 	if len(notes) == 0 {
-		return target
+		return shownTarget(target)
 	}
-	return target + " (" + strings.Join(notes, "; ") + ")"
+	return shownTarget(target) + " (" + strings.Join(notes, "; ") + ")"
+}
+
+// shownTarget is a target as Tuner prints it: a URL's password, which
+// the scan sends as an Authorization header, is masked as xxxxx.
+func shownTarget(t string) string {
+	if isLocalPath(t) || !strings.Contains(t, "@") {
+		return t
+	}
+	if strings.Contains(t, "://") {
+		return engine.RedactURL(t)
+	}
+	return strings.TrimPrefix(engine.RedactURL("https://"+t), "https://")
+}
+
+// redactProxy masks the user and password of a --proxy value that did
+// not parse, so the error can quote the rest of it.
+func redactProxy(raw string) string {
+	at := strings.LastIndex(raw, "@")
+	if at < 0 {
+		return raw
+	}
+	start := 0
+	if i := strings.Index(raw[:at], "://"); i >= 0 {
+		start = i + 3
+	}
+	return raw[:start] + "xxxxx" + raw[at:]
 }
 
 // scanOne scans one target. Tests swap it to make a target hang or panic.
@@ -984,6 +1092,7 @@ func (p *scanPlan) runPlan() *scanrun.Plan {
 		AllowPartial:      p.o.allowPartial,
 		Version:           version,
 		CheckSet:          p.checkSet.source,
+		Selection:         report.NewSelection(p.checkSet.checks, p.checks, p.sel),
 		Scan: func(ctx context.Context, s *engine.Scanner, target string, h engine.Hooks) (*engine.Result, error) {
 			return scanOne(p, ctx, s, target, h)
 		},
@@ -1009,9 +1118,10 @@ const (
 //
 // The report is written in the destination's folder, so that folder must
 // be writable, not just the file. A symlink is followed: the file it
-// points to is replaced and the link stays. A run killed with SIGKILL
-// leaves its .<name>.*.tmp file behind; the next run removes ones older
-// than a day.
+// points to is replaced and the link stays. A link another user made in
+// a shared folder such as /tmp is refused, as the kernel refuses to open
+// it (fs.protected_symlinks). A run killed with SIGKILL leaves its
+// .<name>.*.tmp file behind; the next run removes ones older than a day.
 type reportFile struct {
 	*os.File
 	dest    string
@@ -1026,7 +1136,10 @@ const staleReportAge = 24 * time.Hour
 
 func createReport(dest string) (*reportFile, error) {
 	shown := dest
-	dest = followLinks(dest)
+	dest, err := followLinks(dest)
+	if err != nil {
+		return nil, fmt.Errorf("can't write the report to %s: %w", shown, err)
+	}
 	fi, statErr := os.Stat(dest)
 	if statErr == nil && fi.IsDir() {
 		return nil, fmt.Errorf("can't write the report to %s: it is a directory", shown)
@@ -1042,34 +1155,44 @@ func createReport(dest string) (*reportFile, error) {
 	return &reportFile{File: f, dest: dest, existed: statErr == nil}, nil
 }
 
+// mayFollowLink is mayFollow; tests replace it to play a link another
+// user planted, which needs a second account to set up for real.
+var mayFollowLink = mayFollow
+
+// errForeignLink is the refusal for a link someone else planted.
+var errForeignLink = errors.New("it is a symlink another user made in a shared folder; remove it or pick another name")
+
 // followLinks returns the file path names in the end, after any
-// symlinks. A link whose target does not exist yet (a dangling one) is
-// still followed, so the report is created where it points and the link
-// stays. A loop or a chain longer than 40 links, the usual kernel limit,
-// gives up and leaves path as it is.
-func followLinks(path string) string {
-	if real, err := filepath.EvalSymlinks(path); err == nil {
-		return real
-	}
+// symlinks in its last part. A link whose target does not exist yet (a
+// dangling one) is still followed, so the report is created where it
+// points and the link stays. Links in the folders above are left to the
+// kernel, which resolves them when the report is created. A link the
+// kernel would refuse to follow (one another user owns in a sticky,
+// world-writable folder) is an error. A loop or a chain longer than 40
+// links, the usual kernel limit, gives up and leaves path as it is.
+func followLinks(path string) (string, error) {
 	cur := path
 	for range 40 {
 		fi, err := os.Lstat(cur)
 		if err != nil {
-			return cur // the end of the chain: a file that is not there yet
+			return cur, nil // the end of the chain: a file that is not there yet
 		}
 		if fi.Mode()&os.ModeSymlink == 0 {
-			return cur
+			return cur, nil
+		}
+		if !mayFollowLink(cur, fi) {
+			return "", errForeignLink
 		}
 		to, err := os.Readlink(cur)
 		if err != nil {
-			return path
+			return path, nil
 		}
 		if !filepath.IsAbs(to) {
 			to = filepath.Join(filepath.Dir(cur), to)
 		}
 		cur = to
 	}
-	return path
+	return path, nil
 }
 
 // removeStale deletes temporary reports matching glob that are older
@@ -1084,10 +1207,11 @@ func removeStale(glob string) {
 }
 
 // commit flushes the report to disk and moves it into place. A report
-// that replaces another keeps its permissions; a new one gets 0644, as
-// os.Create gives under the usual umask.
+// that replaces another keeps its permissions; a new one gets what
+// os.Create would give under the process umask (0644 under the usual
+// 022, 0600 under 077).
 func (r *reportFile) commit() error {
-	mode := os.FileMode(0o644)
+	mode := os.FileMode(0o666) &^ processUmask
 	if fi, err := os.Stat(r.dest); err == nil {
 		mode = fi.Mode().Perm()
 	}
@@ -1237,11 +1361,28 @@ func readTargets(r io.Reader, name string) ([]string, error) {
 
 // dedupe drops targets that name the same site or folder, keeping the
 // first spelling: example.com, https://example.com/ and HTTPS://Example.com
-// are one scan.
+// are one scan. A bare host is tried over https, then http, so it is also
+// one scan with http://host: when the list spells out the scheme for a
+// bare host anywhere, that spelling is scanned in the bare host's place.
 func dedupe(in []string) []string {
+	explicit := map[string]string{} // the key without its scheme -> the first spelling with one
+	for _, s := range in {
+		if strings.Contains(s, "://") && !isLocalPath(s) {
+			if _, rest, ok := strings.Cut(targetKey(s), "://"); ok {
+				if _, have := explicit[rest]; !have {
+					explicit[rest] = s
+				}
+			}
+		}
+	}
 	seen := map[string]bool{}
 	var out []string
 	for _, s := range in {
+		if !strings.Contains(s, "://") && !isLocalPath(s) {
+			if _, rest, ok := strings.Cut(targetKey(s), "://"); ok && explicit[rest] != "" {
+				s = explicit[rest]
+			}
+		}
 		if k := targetKey(s); !seen[k] {
 			seen[k] = true
 			out = append(out, s)

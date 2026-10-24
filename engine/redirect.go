@@ -111,6 +111,7 @@ var internalV4 = []netip.Prefix{
 	netip.MustParsePrefix("100.64.0.0/10"), // shared address space (RFC 6598)
 	netip.MustParsePrefix("192.0.0.0/24"),  // IETF protocol assignments
 	netip.MustParsePrefix("198.18.0.0/15"), // benchmarking
+	netip.MustParsePrefix("240.0.0.0/4"),   // reserved; 255.255.255.255 is broadcast
 }
 
 // embeddedV4 returns the IPv4 address that a carries for a translation
@@ -132,9 +133,14 @@ func embeddedV4(a netip.Addr) (netip.Addr, bool) {
 	return netip.Addr{}, false
 }
 
-// internal reports whether a is loopback, link-local, private, shared
-// (carrier-grade NAT) or otherwise non-public, including when it hides
-// in an IPv6 translation or tunnel address.
+// InternalAddr reports whether a is loopback, link-local, private,
+// shared (carrier-grade NAT), reserved or otherwise non-public, also when
+// it hides in an IPv6 translation or tunnel address (NAT64, 6to4,
+// Teredo, IPv4-compatible). Code that must not reach the local network
+// on someone else's behalf, such as serve's webhooks, uses it too.
+func InternalAddr(a netip.Addr) bool { return internal(a) }
+
+// internal is InternalAddr.
 func internal(a netip.Addr) bool {
 	a = a.Unmap()
 	if a.IsLoopback() || a.IsUnspecified() {
@@ -143,7 +149,7 @@ func internal(a netip.Addr) bool {
 	if v4, ok := embeddedV4(a); ok {
 		a = v4
 	}
-	if a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() || a.IsUnspecified() {
+	if a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast() || a.IsMulticast() || a.IsUnspecified() {
 		return true
 	}
 	return slices.ContainsFunc(internalV4, func(p netip.Prefix) bool { return p.Contains(a) })
@@ -226,8 +232,8 @@ func normHost(u *url.URL) string { return strings.TrimSuffix(strings.ToLower(u.H
 // the same host or its www/apex twin, with the same scheme and port or an
 // upgrade from http to https (which usually changes the port).
 //
-// The upgrade accepts any https port on that host on purpose: dev and
-// staging sites often pair ports such as 8080 and 8443, and a server that
+// The upgrade accepts any https port on that host on purpose. Dev and
+// staging sites often pair ports such as 8080 and 8443; a server that
 // answers for the host already chose where its https lives. The user's
 // headers follow it there.
 func sameSite(from, to *url.URL) bool {

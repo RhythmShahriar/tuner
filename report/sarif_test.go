@@ -111,7 +111,7 @@ func TestSARIFRemoteGolden(t *testing.T) {
 	for _, rule := range v.Runs[0].Tool.Driver.Rules {
 		rules[rule.ID] = rule.HelpURI
 	}
-	if rules["xmlrpc"] != findingReference+"#xmlrpc" || rules["vuln-php"] != findingReference+"#vulnerability-and-version-findings" {
+	if rules["xmlrpc"] != findingReference+"#xmlrpc" || rules["vuln-php"] != findingReference+"#vuln-php" {
 		t.Errorf("helpUri per rule = %v", rules)
 	}
 }

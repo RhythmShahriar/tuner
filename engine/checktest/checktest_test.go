@@ -97,7 +97,7 @@ func TestCleanCheckPasses(t *testing.T) {
 }
 
 // A first line that clears the screen and retitles the window reaches no
-// report, and the detector names each control byte a report would hold.
+// report. The detector names each control byte a report would hold.
 func TestControlBytes(t *testing.T) {
 	fixture := `positive:
   - name: escapes

@@ -81,7 +81,7 @@ Examples:
 `
 
 func init() {
-	registerCommand(command{Name: "serve", Summary: "run the HTTP API: ownership checks, queued scans, webhooks", Run: cmdServe})
+	registerCommand(command{Name: "serve", Args: "[--listen <addr>]", Summary: "run the HTTP API: ownership checks, queued scans, webhooks", Run: cmdServe})
 }
 
 // cmdServe runs the HTTP API until SIGINT or SIGTERM; see serveUsage.
@@ -89,7 +89,7 @@ func cmdServe(args []string, stdout, stderr io.Writer) int {
 	cfg, listen, err := planServe(args)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			fmt.Fprint(stdout, serveUsage)
+			fmt.Fprint(stdout, named(serveUsage))
 			return exitOK
 		}
 		fmt.Fprintf(stderr, "rhythm tuner: %v\nrun 'rhythm tuner serve --help' for its flags\n", err)
