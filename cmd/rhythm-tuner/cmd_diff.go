@@ -107,14 +107,20 @@ func severityFlag(name, v string) (engine.Severity, error) {
 
 // loadReports reads a saved JSON report: one target's, or a batch.
 func loadReports(path string) ([]report.Report, error) {
+	reports, _, err := readSaved(path)
+	return reports, err
+}
+
+// readSaved reads a saved JSON report with the targets it couldn't scan.
+func readSaved(path string) ([]report.Report, []report.TargetError, error) {
 	f, err := os.Open(path) //nolint:gosec // the user names the report to read
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer func() { _ = f.Close() }()
-	reports, _, err := report.ReadJSON(f)
+	reports, failed, err := report.ReadJSON(f)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, nil, fmt.Errorf("%s: %w", path, err)
 	}
-	return reports, nil
+	return reports, failed, nil
 }

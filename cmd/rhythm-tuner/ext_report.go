@@ -12,6 +12,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/RhythmShahriar/tuner/diff"
@@ -26,8 +27,8 @@ const notifyTimeout = 30 * time.Second
 
 // reportExtension adds change tracking to rhythm tuner scan: --since
 // compares the scan with an earlier JSON report, --fail-on-new fails CI
-// only on what is new and --notify sends what is new to chat or email.
-// It has the scanExtension shape from extend.go;
+// only on what is new, --notify sends what is new to chat or email and
+// --html writes a client-ready report. It has the scanExtension shape from extend.go;
 // it is registered with registerScanExtension once that registry is in
 // this tree.
 type reportExtension struct {
@@ -38,6 +39,10 @@ type reportExtension struct {
 	notifyMin      string
 	notifyAllFirst bool
 	notifyStrict   bool
+
+	html      string
+	brandName string
+	brandLogo string
 
 	level     engine.Severity
 	before    []report.Report
@@ -62,7 +67,14 @@ func (e *reportExtension) Help() string {
                            password in TUNER_SMTP_PASSWORD
       --notify-min <level> lowest severity to send (default high)
       --notify-all-first   with no earlier report, send every finding
-      --notify-strict      exit 3 when a notification can't be sent`
+      --notify-strict      exit 3 when a notification can't be sent
+
+Client report:
+      --html <file>        also write a self-contained HTML report (one file,
+                           no scripts; marks what is new with --since)
+      --brand-name <name>  your agency's name on the HTML report
+      --brand-logo <file>  your logo on the HTML report (PNG, JPEG or SVG,
+                           up to 512 KB)`
 }
 
 func (e *reportExtension) Flags(fs *flag.FlagSet) {
@@ -72,6 +84,9 @@ func (e *reportExtension) Flags(fs *flag.FlagSet) {
 	fs.StringVar(&e.notifyMin, "notify-min", "", "")
 	fs.BoolVar(&e.notifyAllFirst, "notify-all-first", false, "")
 	fs.BoolVar(&e.notifyStrict, "notify-strict", false, "")
+	fs.StringVar(&e.html, "html", "", "")
+	fs.StringVar(&e.brandName, "brand-name", "", "")
+	fs.StringVar(&e.brandLogo, "brand-logo", "", "")
 }
 
 // Plan checks the flags and reads the old report before the scan starts,
@@ -83,6 +98,9 @@ func (e *reportExtension) Plan(*scanPlan) error {
 		return usageError{err.Error()}
 	}
 	if err := e.planNotify(); err != nil {
+		return err
+	}
+	if err := checkBrand(e.html != "", e.brandName, e.brandLogo); err != nil {
 		return err
 	}
 	if e.since == "" {
@@ -136,10 +154,36 @@ func (e *reportExtension) planNotify() error {
 	return nil
 }
 
+// checkBrand checks the branding flags, reading the logo now so a bad
+// one fails before any work is done. html says an HTML report is asked for.
+func checkBrand(html bool, name, logo string) error {
+	if !html && (name != "" || logo != "") {
+		return usagef("--brand-name and --brand-logo only go on the HTML report (--html)")
+	}
+	if logo != "" {
+		if _, err := report.LogoDataURI(logo); err != nil {
+			return usageError{err.Error()}
+		}
+	}
+	return nil
+}
+
 // Finished prints what changed to stderr, so it never mixes into a report
 // on stdout, then sends the notifications. It exits 1 for --fail-on-new and
 // 3 for a notification that failed under --notify-strict.
 func (e *reportExtension) Finished(p *scanPlan, reports []report.Report, stderr io.Writer) (int, error) {
+	if e.html != "" {
+		o := report.WriteOptions{Many: len(p.targets) > 1, Brand: report.Brand{Name: e.brandName, LogoPath: e.brandLogo}}
+		if !e.firstRun {
+			o.Since, o.SinceName = e.before, sinceName(e.since)
+		}
+		if err := writeFile(e.html, "html", reports, o); err != nil {
+			return exitError, err
+		}
+		if !p.o.quiet {
+			fmt.Fprintf(stderr, "HTML report written to %s\n", e.html)
+		}
+	}
 	if e.since == "" && !e.firstRun {
 		return exitOK, nil
 	}
@@ -201,4 +245,13 @@ func (e *reportExtension) send(res diff.Result, since string, reports []report.R
 		}
 	}
 	return ok
+}
+
+// sinceName is how a client report names the earlier report: its file
+// name, not the folders on the agency's machine.
+func sinceName(path string) string {
+	if path == "" {
+		return ""
+	}
+	return filepath.Base(path)
 }
