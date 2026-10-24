@@ -1,0 +1,312 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# Tuner as a GitHub Action. It installs a verified rhythm-tuner release and
+# scans sites or site folders:
+#
+#   - uses: RhythmShahriar/tuner@v0
+#     with:
+#       target: https://staging.example.com
+#       fail-on: high
+#       sarif: true   # needs permissions: security-events: write
+#
+# v0 moves to each new v0.x release. To pin exactly, use a release's commit
+# SHA with the version in a comment: RhythmShahriar/tuner@<sha> # v0.4.0.
+name: Rhythm Tuner
+description: Find what's out of tune in your WordPress and PHP sites. Scans a URL or a site folder and gates CI on findings.
+author: Rhythm Shahriar
+branding:
+  icon: sliders
+  color: orange
+
+inputs:
+  target:
+    description: >
+      What to scan: a URL such as https://staging.example.com, or a site folder such as ./public.
+      Several targets go one per line.
+    required: true
+  version:
+    description: Tuner version to install, e.g. 0.4.0. Default the latest release.
+    required: false
+    default: latest
+  fail-on:
+    description: >
+      Fail the step when a finding is at or above this severity: critical, high, medium, low or info.
+      "none" never fails on findings.
+    required: false
+    default: high
+  min-confidence:
+    description: >
+      Only let findings at this confidence or higher fail the step: high (confirmed) or low (also likely).
+      Needs a Tuner release with --min-confidence. Default Tuner's own.
+    required: false
+    default: ""
+  baseline:
+    description: A JSON report from an earlier scan. Findings already in it are hidden and don't fail the step.
+    required: false
+    default: ""
+  sarif:
+    description: Write tuner.sarif in the working directory and upload it to GitHub code scanning (category tuner).
+    required: false
+    default: "false"
+  sarif-upload:
+    description: >
+      With sarif, upload the file to code scanning. The job needs permissions: security-events: write;
+      set "false" to only write the file, e.g. for pull requests from forks.
+    required: false
+    default: "true"
+  args:
+    description: Extra scan flags, e.g. "--profile quick --rate 2".
+    required: false
+    default: ""
+  working-directory:
+    description: Directory to run the scan in. Relative folder targets, baseline and tuner.sarif resolve here.
+    required: false
+    default: "."
+  verify-signature:
+    description: >
+      Verify the release's keyless signature with cosign before trusting checksums.txt. Leave it on;
+      "false" is for download-url mirrors that hold unsigned builds.
+    required: false
+    default: "true"
+  download-url:
+    description: >
+      Download the release files from this URL instead of GitHub, for mirrors and tests. It must hold
+      the archive for the runner and checksums.txt (plus checksums.txt.sigstore.json when verifying).
+    required: false
+    default: ""
+
+outputs:
+  score:
+    description: The Tune score (0 to 100). With several targets, the lowest.
+    value: ${{ steps.scan.outputs.score }}
+  findings:
+    description: How many findings were reported, after the baseline, across all targets.
+    value: ${{ steps.scan.outputs.findings }}
+  sarif-file:
+    description: Path of tuner.sarif when sarif is true.
+    value: ${{ steps.scan.outputs.sarif-file }}
+  report:
+    description: Path of the JSON report.
+    value: ${{ steps.scan.outputs.report }}
+  exit-code:
+    description: rhythm-tuner's exit code (0 ok, 1 findings at fail-on, 2 usage error, 3 a target couldn't be scanned).
+    value: ${{ steps.scan.outputs.exit-code }}
+
+runs:
+  using: composite
+  steps:
+    - name: Prepare
+      id: prep
+      shell: bash
+      run: |
+        set -euo pipefail
+        # rhythm-tuner caches under os.UserCacheDir()/rhythm.
+        case "$RUNNER_OS" in
+          Linux)   cache="${XDG_CACHE_HOME:-$HOME/.cache}/rhythm" ;;
+          macOS)   cache="$HOME/Library/Caches/rhythm" ;;
+          Windows) cache="$LOCALAPPDATA/rhythm" ;;
+          *) echo "::error::Tuner's action doesn't support runner OS $RUNNER_OS"; exit 1 ;;
+        esac
+        {
+          echo "cache=$cache"
+          echo "date=$(date -u +%Y-%m-%d)"
+        } >> "$GITHUB_OUTPUT"
+
+    # Vulnerability data and the check pack refresh once a day, so a cache
+    # per day saves the downloads on every later run that day.
+    - name: Cache Tuner data
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.prep.outputs.cache }}
+        key: rhythm-tuner-${{ runner.os }}-${{ steps.prep.outputs.date }}
+        restore-keys: rhythm-tuner-${{ runner.os }}-
+
+    - name: Install cosign
+      if: inputs.verify-signature != 'false'
+      uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      with:
+        cosign-release: v3.1.3
+
+    - name: Install Tuner
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        VERIFY: ${{ inputs.verify-signature }}
+        DOWNLOAD_URL: ${{ inputs.download-url }}
+      run: |
+        set -euo pipefail
+        case "$RUNNER_OS" in
+          Linux) os=linux ;; macOS) os=darwin ;; Windows) os=windows ;;
+        esac
+        case "$RUNNER_ARCH" in
+          X64) arch=amd64 ;; ARM64) arch=arm64 ;;
+          *) echo "::error::Tuner has no build for $RUNNER_ARCH runners"; exit 1 ;;
+        esac
+        bin=rhythm-tuner ext=tar.gz
+        [ "$os" = windows ] && bin=rhythm-tuner.exe ext=zip
+        archive="rhythm-tuner_${os}_${arch}.${ext}"
+
+        ver=${VERSION#v}
+        if [ -n "$DOWNLOAD_URL" ]; then
+          base=${DOWNLOAD_URL%/}
+        else
+          if [ "$ver" = latest ]; then
+            # Resolve latest to its tag first, so every file comes from one
+            # release and the signature check can name the tag.
+            url=$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/RhythmShahriar/tuner/releases/latest)
+            ver=${url##*/v}
+            case "$ver" in
+              [0-9]*.*) ;;
+              *) echo "::error::couldn't find Tuner's latest release (got $url)"; exit 1 ;;
+            esac
+          fi
+          base="https://github.com/RhythmShahriar/tuner/releases/download/v$ver"
+        fi
+
+        dir="$RUNNER_TEMP/rhythm-tuner-bin"
+        rm -rf "$dir" && mkdir -p "$dir" && cd "$dir"
+        echo "Downloading $archive from $base"
+        curl -fsSL --retry 3 -o "$archive" "$base/$archive"
+        curl -fsSL --retry 3 -o checksums.txt "$base/checksums.txt"
+
+        if [ "$VERIFY" != false ]; then
+          curl -fsSL --retry 3 -o checksums.txt.sigstore.json "$base/checksums.txt.sigstore.json"
+          # The shared release workflow signs for every Rhythm tool, so pin
+          # the repository and, when known, the release tag as well.
+          ref=()
+          [ "$ver" = latest ] || ref=(--certificate-github-workflow-ref "refs/tags/v$ver")
+          cosign verify-blob checksums.txt \
+            --bundle checksums.txt.sigstore.json \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity-regexp '^https://github\.com/RhythmShahriar/\.github/\.github/workflows/release-go\.yml@' \
+            --certificate-github-workflow-repository RhythmShahriar/tuner \
+            ${ref[@]+"${ref[@]}"}
+        fi
+
+        want=$(awk -v f="$archive" '$2 == f || $2 == "*" f { print $1 }' checksums.txt)
+        [ -n "$want" ] || { echo "::error::$archive is not listed in checksums.txt"; exit 1; }
+        if command -v sha256sum >/dev/null; then
+          got=$(sha256sum "$archive" | awk '{ print $1 }')
+        else
+          got=$(shasum -a 256 "$archive" | awk '{ print $1 }')
+        fi
+        if [ "$got" != "$want" ]; then
+          echo "::error::checksum mismatch for $archive: checksums.txt has $want, the download is $got"
+          exit 1
+        fi
+        echo "$archive: checksum OK"
+
+        if [ "$ext" = zip ]; then
+          # Git Bash on Windows runners may lack unzip; 7-Zip and PowerShell
+          # are always there.
+          if command -v unzip >/dev/null; then
+            unzip -o -q "$archive" "$bin"
+          elif command -v 7z >/dev/null; then
+            7z x -y -bd "$archive" "$bin" > /dev/null
+          else
+            pwsh -NoProfile -Command "Expand-Archive -Force -LiteralPath '$archive' -DestinationPath ."
+          fi
+        else
+          tar -xzf "$archive" "$bin"
+        fi
+        rm -f "$archive"
+        echo "$dir" >> "$GITHUB_PATH"
+        "./$bin" --version
+
+    - name: Run Tuner
+      id: scan
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        TARGET: ${{ inputs.target }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        MIN_CONFIDENCE: ${{ inputs.min-confidence }}
+        BASELINE: ${{ inputs.baseline }}
+        SARIF: ${{ inputs.sarif }}
+        ARGS: ${{ inputs.args }}
+      run: |
+        set -uo pipefail
+        targets=()
+        while IFS= read -r line; do
+          line=${line#"${line%%[![:space:]]*}"}
+          line=${line%"${line##*[![:space:]]}"}
+          [ -n "$line" ] && targets+=("$line")
+        done <<< "$TARGET"
+        [ "${#targets[@]}" -gt 0 ] || { echo "::error::the target input is empty"; exit 2; }
+
+        flags=(--plain)
+        case "$FAIL_ON" in
+          ""|none) ;;
+          *) flags+=(--fail-on "$FAIL_ON") ;;
+        esac
+        [ -z "$MIN_CONFIDENCE" ] || flags+=(--min-confidence "$MIN_CONFIDENCE")
+        base=()
+        [ -z "$BASELINE" ] || base=(--baseline "$BASELINE")
+        # shellcheck disable=SC2206 # ARGS is a flag string to split
+        extra=($ARGS)
+        # ${a[@]+"${a[@]}"} keeps empty arrays safe under set -u in bash 3.2.
+
+        out="$RUNNER_TEMP/rhythm-tuner-report"
+        mkdir -p "$out"
+        report="$out/tuner.json"
+        rhythm-tuner scan "${targets[@]}" "${flags[@]}" ${base[@]+"${base[@]}"} ${extra[@]+"${extra[@]}"} -o "$report"
+        code=$?
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        [ -s "$report" ] || { echo "::error::rhythm-tuner wrote no report (exit $code)"; exit "$((code > 1 ? code : 3))"; }
+        echo "report=$report" >> "$GITHUB_OUTPUT"
+
+        # A single target's report is an object, several an array.
+        score=$(jq '[if type == "array" then .[] else . end | .score] | min // empty' "$report")
+        findings=$(jq '[if type == "array" then .[] else . end | .findings | length] | add // 0' "$report")
+        {
+          echo "score=$score"
+          echo "findings=$findings"
+        } >> "$GITHUB_OUTPUT"
+        {
+          echo "### Tuner"
+          echo
+          echo "| Target | Score | Critical | High | Medium | Low | Info |"
+          echo "|---|---|---|---|---|---|---|"
+          jq -r 'if type == "array" then .[] else . end |
+            "| \(.target | gsub("\\|"; "\\|")) | \(.score) | \(.summary.critical // 0) | \(.summary.high // 0) | \(.summary.medium // 0) | \(.summary.low // 0) | \(.summary.info // 0) |"' "$report"
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        if [ "$SARIF" = true ]; then
+          file=tuner.sarif
+          if rhythm-tuner report --help >/dev/null 2>&1; then
+            rhythm-tuner report "$report" --sarif > "$file"
+          else
+            # This release can't convert a saved report, so scan again for
+            # SARIF from the cached check pack and vulnerability data.
+            rhythm-tuner scan "${targets[@]}" --plain -q --offline \
+              ${base[@]+"${base[@]}"} ${extra[@]+"${extra[@]}"} -o "$file" > /dev/null
+          fi
+          if [ -s "$file" ]; then
+            # Other steps are not in Git Bash on Windows, so hand them a
+            # native path.
+            path="$PWD/$file"
+            command -v cygpath >/dev/null && path=$(cygpath -w "$path")
+            echo "sarif-file=$path" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::rhythm-tuner wrote no SARIF file"
+          fi
+        fi
+        [ "$code" -ge 2 ] && exit "$code"
+        exit 0
+
+    - name: Upload SARIF
+      if: always() && inputs.sarif == 'true' && inputs.sarif-upload != 'false' && steps.scan.outputs.sarif-file != ''
+      uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+      with:
+        sarif_file: ${{ steps.scan.outputs.sarif-file }}
+        category: tuner
+
+    - name: Fail on findings
+      if: steps.scan.outputs.exit-code == '1'
+      shell: bash
+      env:
+        FAIL_ON: ${{ inputs.fail-on }}
+      run: |
+        echo "::error::Tuner found issues at or above $FAIL_ON. See the scan log and the job summary."
+        exit 1

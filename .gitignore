@@ -12,3 +12,5 @@ coverage.*
 .env
 .env.*
 !.env.example
+# ...except the fake leak the Action tests scan for
+!/testbed/action/site/.env

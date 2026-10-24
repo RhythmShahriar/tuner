@@ -21,3 +21,35 @@ jobs:
     permissions:
       contents: write
       id-token: write
+
+  # Moves the major tag (v0 for v0.x) that `uses: RhythmShahriar/tuner@v0`
+  # follows. Neither a prerelease nor a patch to an older line (once a
+  # newer release exists) moves it.
+  major-tag:
+    needs: release
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Move the major tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          major=${TAG%%.*}
+          newest=$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$major." --jq '.[].ref' |
+            sed 's|^refs/tags/||' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+          if [ "$newest" != "$TAG" ]; then
+            echo "$TAG is not the newest $major release ($newest is); $major stays put." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # A tag pushed with GITHUB_TOKEN starts no workflow; v0 doesn't
+          # match this workflow's v*.*.* filter anyway.
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$major" > /dev/null 2>&1; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$major" -f sha="$GITHUB_SHA" -F force=true > /dev/null
+          else
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$major" -f sha="$GITHUB_SHA" > /dev/null
+          fi
+          echo "Moved $major to $TAG ($GITHUB_SHA)." >> "$GITHUB_STEP_SUMMARY"
