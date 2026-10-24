@@ -27,7 +27,7 @@ min_confidence: confirmed
 baseline: base.json
 headers:
   X-Team: web
-  Authorization: Bearer ${TOKEN}
+  Authorization: Bearer ${TUNER_TOKEN}
 tags: [leak]
 exclude_tags: [headers]
 ids: [leak-*]
@@ -39,7 +39,7 @@ ignore:
   - path: /backup/*.zip
     reason: an empty archive
 `
-	c, err := Parse([]byte(data), "ci/.tuner.yml", env(map[string]string{"TOKEN": "s3cret"}))
+	c, err := Parse([]byte(data), "ci/.tuner.yml", env(map[string]string{"TUNER_TOKEN": "s3cret"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,13 +91,16 @@ func TestHeaderEnv(t *testing.T) {
 		vars  map[string]string
 		want  string // the header, or the error
 	}{
-		{"Bearer ${TOKEN}", map[string]string{"TOKEN": "abc"}, "Authorization: Bearer abc"},
-		{"${A}:${B}", map[string]string{"A": "u", "B": "p"}, "Authorization: u:p"},
+		{"Bearer ${TUNER_TOKEN}", map[string]string{"TUNER_TOKEN": "abc"}, "Authorization: Bearer abc"},
+		{"${TUNER_A}:${TUNER_B}", map[string]string{"TUNER_A": "u", "TUNER_B": "p"}, "Authorization: u:p"},
 		{"$TOKEN stays", nil, "Authorization: $TOKEN stays"},
-		{"Bearer ${TOKEN}", nil, "headers: Authorization uses ${TOKEN}, which is not set"},
-		{"Bearer ${TOKEN}", map[string]string{"TOKEN": ""}, "headers: Authorization uses ${TOKEN}, which is not set"},
+		{"Bearer ${TUNER_TOKEN}", nil, "headers: Authorization uses ${TUNER_TOKEN}, which is not set"},
+		{"Bearer ${TUNER_TOKEN}", map[string]string{"TUNER_TOKEN": ""}, "headers: Authorization uses ${TUNER_TOKEN}, which is not set"},
 		{"Bearer ${1X}", nil, "uses ${1X}, which is not a variable name"},
-		{"a${NL}b", map[string]string{"NL": "line\nbreak-secret"}, "headers: the value of Authorization has a line break or control character"},
+		{"a${TUNER_NL}b", map[string]string{"TUNER_NL": "line\nbreak-secret"}, "headers: the value of Authorization has a line break or control character"},
+		// An untrusted .tuner.yml can't reach a variable set for something else.
+		{"Bearer ${GITHUB_TOKEN}", map[string]string{"GITHUB_TOKEN": "ghs_secret"}, "headers: Authorization uses ${GITHUB_TOKEN}; only variables that start with TUNER_ can be used, so set TUNER_GITHUB_TOKEN and name that"},
+		{"${tuner_x}", map[string]string{"tuner_x": "low"}, "only variables that start with TUNER_"},
 	} {
 		cfg, err := Parse([]byte("headers:\n  Authorization: "+c.value+"\n"), ".tuner.yml", env(c.vars))
 		got := ""
@@ -110,7 +113,7 @@ func TestHeaderEnv(t *testing.T) {
 			t.Errorf("%q: got %q, want %q", c.value, got, c.want)
 		}
 		for _, v := range c.vars {
-			if err != nil && v != "" && strings.Contains(got, v) {
+			if err != nil && v != "" && strings.Contains(got, v) && !strings.Contains(c.want, v) {
 				t.Errorf("%q: the error shows the value: %s", c.value, got)
 			}
 		}
@@ -174,12 +177,12 @@ func TestFindAndLoad(t *testing.T) {
 	if p, err := Find(dir); p != "" || err != nil {
 		t.Errorf("no file: %q, %v", p, err)
 	}
-	os.WriteFile(filepath.Join(dir, DefaultName), []byte("headers:\n  X-Key: ${TUNERCONFIG_TEST_KEY}\n"), 0o600)
+	os.WriteFile(filepath.Join(dir, DefaultName), []byte("headers:\n  X-Key: ${TUNER_CONFIG_TEST_KEY}\n"), 0o600)
 	p, err := Find(dir)
 	if err != nil || p != filepath.Join(dir, DefaultName) {
 		t.Fatalf("%q, %v", p, err)
 	}
-	t.Setenv("TUNERCONFIG_TEST_KEY", "k")
+	t.Setenv("TUNER_CONFIG_TEST_KEY", "k")
 	c, err := Load(p)
 	if err != nil || !slices.Equal(c.Headers, []string{"X-Key: k"}) {
 		t.Errorf("%+v, %v", c, err)

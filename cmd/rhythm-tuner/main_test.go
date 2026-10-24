@@ -1267,6 +1267,16 @@ func TestConfigFile(t *testing.T) {
 		t.Errorf("--no-config: exit %d: %s", code, errs)
 	}
 
+	// Under -q and machine output stderr still names the file and the
+	// targets it chose; a target on the command line is not the file's.
+	code, _, errs = tuner(t, "scan", "-q", "--json")
+	if want := "rhythm tuner scan: using .tuner.yml, which chose the target: " + srv.URL + "\n"; code != exitOK || !strings.Contains(errs, want) {
+		t.Errorf("config note: exit %d, stderr %q, want %q", code, errs, want)
+	}
+	if _, _, errs := tuner(t, "scan", clean.URL, "-q", "--json"); !strings.Contains(errs, "rhythm tuner scan: using .tuner.yml\n") {
+		t.Errorf("config note with a command line target: %q", errs)
+	}
+
 	// The day after until, the ignore stops hiding and says so.
 	today = func() time.Time { return time.Date(2026, 10, 25, 0, 30, 0, 0, time.UTC) }
 	code, out, errs = tuner(t, "scan", "--plain", "-q")
@@ -1299,6 +1309,20 @@ func TestConfigHeadersAndErrors(t *testing.T) {
 	code, out, errs := tuner(t, "scan", srv.URL)
 	if code != exitUsage || errs != "rhythm tuner scan: .tuner.yml: headers: Authorization uses ${TUNER_TEST_TOKEN}, which is not set\n" || out != "" {
 		t.Errorf("missing variable: exit %d, stderr %q", code, errs)
+	}
+
+	// A .tuner.yml from an untrusted repository can't copy a variable set
+	// for something else into a request, even to a host it picked.
+	writeConfig(t, "targets: ["+srv.URL+"]\nheaders:\n  X-Leak: ${SECRET_TOKEN}\n")
+	t.Setenv("SECRET_TOKEN", "ci-secret-value")
+	got.Store("")
+	code, out, errs = tuner(t, "scan", "-q", "--json")
+	if code != exitUsage || out != "" || strings.Contains(errs, "ci-secret-value") ||
+		!strings.Contains(errs, "X-Leak uses ${SECRET_TOKEN}; only variables that start with TUNER_ can be used") {
+		t.Errorf("untrusted variable: exit %d, stderr %q", code, errs)
+	}
+	if v, _ := got.Load().(string); v != "" {
+		t.Errorf("a request was sent: %q", v)
 	}
 
 	writeConfig(t, "fail_on: high\nprofle: quick\n")

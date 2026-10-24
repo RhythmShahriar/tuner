@@ -15,7 +15,7 @@
 //	min_confidence: confirmed
 //	baseline: tuner-baseline.json
 //	headers:
-//	  Authorization: Bearer ${STAGING_TOKEN}
+//	  Authorization: Bearer ${TUNER_STAGING_TOKEN}
 //	tags: [leak, wordpress]
 //	exclude_tags: [headers]
 //	ids: [leak-*]
@@ -27,9 +27,15 @@
 //	    until: 2026-12-31
 //
 // A key Tuner does not know is an error, so a typo never quietly turns a
-// setting off. Header values may name environment variables as ${NAME};
-// one that is unset or empty is an error. Header values never appear in
-// an error message.
+// setting off. Header values may name environment variables as ${NAME}
+// when NAME starts with TUNER_; one that is unset or empty is an error.
+// Header values never appear in an error message.
+//
+// The prefix is the trust boundary. A scan reads .tuner.yml from the
+// current folder, so a cloned repository or a pull request can bring its
+// own file, with targets of its choosing. If it could name any variable,
+// it could send a CI runner's GITHUB_TOKEN or cloud keys to its own host.
+// A TUNER_ variable is one the user set for Tuner on purpose.
 package tunerconfig
 
 import (
@@ -68,7 +74,7 @@ type Config struct {
 	// Baseline is the baseline report's path, relative to the folder
 	// that holds the config file unless it is absolute.
 	Baseline string
-	// Headers are "Name: value" lines with ${NAME} already expanded,
+	// Headers are "Name: value" lines with ${TUNER_NAME} already expanded,
 	// sorted by name. Never print them: they hold credentials.
 	Headers     []string
 	Tags        []string
@@ -123,7 +129,8 @@ func Find(dir string) (string, error) {
 	return p, nil
 }
 
-// Load reads the config at path, expanding ${NAME} from the environment.
+// Load reads the config at path, expanding ${TUNER_NAME} from the
+// environment.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // the user's own config file
 	if err != nil {
@@ -275,15 +282,26 @@ var envRef = regexp.MustCompile(`\$\{([^}]*)\}`)
 // envName is what a variable name may look like.
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// expand replaces each ${NAME} in v. An unset or empty variable is an
-// error: CI systems pass a missing secret as an empty string. A scan
-// without its credentials would report a login page as the site.
+// EnvPrefix starts every variable a header value may name. See the
+// package doc for why.
+const EnvPrefix = "TUNER_"
+
+// expand replaces each ${NAME} in v. A name without EnvPrefix is an
+// error, so is an unset or empty variable: CI systems pass a missing
+// secret as an empty string. A scan without its credentials would report
+// a login page as the site.
 func expand(v string, env func(string) (string, bool)) (string, error) {
 	var err error
 	out := envRef.ReplaceAllStringFunc(v, func(ref string) string {
 		name := ref[2 : len(ref)-1]
 		if !envName.MatchString(name) {
 			err = fmt.Errorf("uses %s, which is not a variable name", ref)
+			return ""
+		}
+		if !strings.HasPrefix(name, EnvPrefix) {
+			if err == nil {
+				err = fmt.Errorf("uses ${%s}; only variables that start with %s can be used, so set %s%s and name that", name, EnvPrefix, EnvPrefix, name)
+			}
 			return ""
 		}
 		val, ok := env(name)

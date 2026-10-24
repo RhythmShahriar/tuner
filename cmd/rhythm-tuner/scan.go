@@ -691,6 +691,12 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 			printErr(stderr, "scan", n)
 		}
 	}
+	// Shown even with -q and machine output: a .tuner.yml can come with a
+	// cloned repository or a pull request, so the log must say which file
+	// steered the scan and which hosts it chose.
+	if n := p.configNote(); n != "" {
+		printErr(stderr, "scan", n)
+	}
 	// Shown even with -q: an expired ignore can fail a CI run that passed
 	// yesterday. The log should say why.
 	for _, ig := range p.expired {
@@ -850,6 +856,28 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 		exit = max(exit, code)
 	}
 	return exit
+}
+
+// configNote names the settings file in use and the targets it supplied,
+// such as "using .tuner.yml, which chose the targets: https://a.example".
+// It lists up to three targets; "" without a file.
+func (p *scanPlan) configNote() string {
+	if p.config == nil {
+		return ""
+	}
+	if len(p.configTargets) == 0 {
+		return "using " + p.config.Path
+	}
+	shown := p.configTargets[:min(len(p.configTargets), 3)]
+	list := strings.Join(shown, ", ")
+	if more := len(p.configTargets) - len(shown); more > 0 {
+		list += fmt.Sprintf(" and %d more", more)
+	}
+	what := "target"
+	if len(p.configTargets) > 1 {
+		what = "targets"
+	}
+	return fmt.Sprintf("using %s, which chose the %s: %s", p.config.Path, what, list)
 }
 
 // header is the live view's title for target: the target, then the
