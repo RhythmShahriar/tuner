@@ -6,7 +6,7 @@
 // fire on (positive) and stay quiet on (negative).
 //
 // Beyond firing, a positive case must render safely: its findings go
-// through every report format, and the case fails when a raw secret from
+// through every report format and the case fails when a raw secret from
 // the fixture body or a terminal control byte shows up in any of them.
 //
 // Test is for go test; Run is the same runner for tools without a
@@ -28,7 +28,7 @@ import (
 
 // StrictOutput makes output leaks fail Test rather than only being
 // logged. It stays off until the engine redacts before truncating and
-// strips control bytes, and the reports share one sanitizer; until then
+// strips control bytes and the reports share one sanitizer; until then
 // Test logs what it finds so the remaining gaps stay visible.
 const StrictOutput = false
 
@@ -186,7 +186,7 @@ func masked(res *engine.Result, want bool) []string {
 // outputLeaks renders res in every format and looks for anything from
 // the fixture bodies that must not be shown. KEY=value lines count as
 // secret whatever the key is called when the check extracts secrets or
-// the case expects them: a name like DB_PWD gives no hint, and .env and
+// the case expects them: a name like DB_PWD gives no hint and .env and
 // config files are exactly where those lines live.
 func outputLeaks(res *engine.Result, fc Case, c *engine.Check, source []byte) []string {
 	outputs, err := render(res)

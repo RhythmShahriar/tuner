@@ -20,7 +20,7 @@ const SigName = SumsName + ".sig"
 // TUNER_PACK_SIGNING_KEY Actions secret.
 //
 // To rotate, add the new key here and release a binary, switch the secret
-// to the new private key, and remove the old key in a later release once
+// to the new private key and remove the old key in a later release once
 // binaries that only trust it are rare. `go run ./internal/packbuild
 // -gen-key` prints a new pair.
 //

@@ -50,7 +50,7 @@ func fakeFS(check, fixture string) fstest.MapFS {
 }
 
 func TestLeakyCheckFails(t *testing.T) {
-	// The whole first line is evidence, and DB_PWD is no name the masking
+	// The whole first line is evidence and DB_PWD is no name the masking
 	// rules know.
 	res := Run(fakeFS(envCheck(`(?m)^[A-Z_]+=.+`), envFixture))
 	if len(res) != 2 {

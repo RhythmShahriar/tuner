@@ -74,7 +74,7 @@ jobs:
 
           This is not a Tuner release. rhythm-tuner downloads these assets
           automatically, verifies the signature on checks-sha256.txt and the
-          checksums in it, and uses them
+          checksums in it and uses them
           when they are newer than its built-in checks. See https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Check-Packs"
 
           if ! gh release view "$TAG" --repo "$repo" >/dev/null 2>&1; then

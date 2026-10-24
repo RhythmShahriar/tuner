@@ -3,8 +3,8 @@
 
 // Package checkpack lets checks update like data. CI publishes the checks/
 // tree as a "check pack" (a tar.gz, a manifest, a checksum file and its
-// signature) on the rolling checks-latest release, and Tuner fetches it,
-// verifies it, and uses it in place of the checks compiled into the binary
+// signature) on the rolling checks-latest release and Tuner fetches it,
+// verifies it and uses it in place of the checks compiled into the binary
 // when it is newer.
 //
 // A pack is only ever data: declarative YAML checks that make GET requests
@@ -12,7 +12,7 @@
 // signed with an Ed25519 key whose public half is compiled into Tuner (see
 // keys.go), so a pack can only come from CI, not from whoever can upload
 // release assets or run a mirror. The archive is checked against the
-// signed sums, unpacked in memory with strict limits, and loaded with
+// signed sums, unpacked in memory with strict limits and loaded with
 // engine.LoadChecks, which rejects unknown fields; that is how an older
 // binary refuses a pack that relies on matchers it doesn't have. A pack
 // must also carry every built-in check unless its manifest retires it, so
@@ -81,7 +81,7 @@ type Manifest struct {
 	Retired  []string  `json:"retired,omitempty"` // check IDs removed on purpose; older binaries still have them built in
 }
 
-// Built is a pack ready to publish: the release assets, and the
+// Built is a pack ready to publish: the release assets and the
 // signature once Sign has run.
 type Built struct {
 	Manifest Manifest

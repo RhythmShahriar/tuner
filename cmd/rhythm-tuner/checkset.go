@@ -74,7 +74,7 @@ func loadCheckSet(dir string, updates, offline bool, ua string, proxy *url.URL) 
 		return set, nil
 	}
 
-	// Short: an unreachable release must not hold up every scan, and after
+	// Short: an unreachable release must not hold up every scan and after
 	// a failure the client backs off for checkpack.Backoff.
 	pc := packClient(ua, proxy, offline, false)
 	wait := packFirstWait

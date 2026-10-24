@@ -34,7 +34,7 @@ match:
     - words: ["DB_PASSWORD"]
 `
 
-// packRelease serves a signed check pack holding check, and points Tuner
+// packRelease serves a signed check pack holding check and points Tuner
 // at it with an empty cache. The pack retires every built-in check, so
 // its one check may stand in for them.
 func packRelease(t *testing.T, check, minTuner string) {
@@ -44,7 +44,7 @@ func packRelease(t *testing.T, check, minTuner string) {
 }
 
 // servePack serves a pack built from config (pack.json) and check, signed
-// with key unless key is nil, and trusts testPackKey.
+// with key unless key is nil and trusts testPackKey.
 func servePack(t *testing.T, config, check string, key ed25519.PrivateKey) {
 	t.Helper()
 	src := fstest.MapFS{
@@ -172,7 +172,7 @@ func TestChecksDirOverridesPack(t *testing.T) {
 }
 
 // Packs that are unsigned, signed by an unknown key or short of built-in
-// checks are refused with a warning, and the built-in checks run.
+// checks are refused with a warning and the built-in checks run.
 func TestScanRefusesUntrustedPack(t *testing.T) {
 	retired, _ := json.Marshal(builtInIDs())
 	full := `{"min_tuner": "0.2.0", "retired": ` + string(retired) + `}`
@@ -215,7 +215,7 @@ func TestScanInsecurePack(t *testing.T) {
 }
 
 // hangingHost points Tuner at a pack host that accepts requests and never
-// answers, and counts them.
+// answers and counts them.
 func hangingHost(t *testing.T) *atomic.Int32 {
 	t.Helper()
 	var hits atomic.Int32

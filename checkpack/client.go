@@ -171,7 +171,7 @@ func (c *Client) Get(ctx context.Context) (*Pack, error) {
 	}
 	// Network, checksum or signature trouble: maybe the release is
 	// mid-upload or the network is down. Fall back to the cache without
-	// recording a check, and back off before trying again.
+	// recording a check and back off before trying again.
 	failed := &state{Failed: now}
 	if st != nil {
 		failed = st.keep(&state{Checked: st.Checked, Rejected: st.Rejected, Failed: now})
@@ -187,7 +187,7 @@ func (c *Client) Get(ctx context.Context) (*Pack, error) {
 }
 
 // fetch consults the release and returns the state to cache. The
-// signature is checked before anything in the sums is believed, and the
+// signature is checked before anything in the sums is believed and the
 // small manifest before the archive, so an incompatible or unchanged pack
 // costs three tiny downloads rather than the archive.
 func (c *Client) fetch(ctx context.Context, st *state) (*state, error) {
@@ -244,9 +244,9 @@ func (c *Client) fetch(ctx context.Context, st *state) (*state, error) {
 }
 
 // verified checks a pack's signature and contents and loads its checks.
-// It runs on every use, not just after download: the binary, and with it
-// the trusted keys and built-in checks, may have changed since the pack
-// was cached.
+// It runs on every use, not just after download: the binary may have
+// changed since the pack was cached, along with its trusted keys and
+// built-in checks.
 func (c *Client) verified(st *state) (*opened, error) {
 	if sum(st.Archive) != st.SHA256 {
 		return nil, errors.New("cached check pack is corrupt")
