@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -228,7 +229,7 @@ func (s *Scanner) Scan(ctx context.Context, target string, h Hooks) (*Result, er
 	}
 
 	home.TLS = ss.tlsInfo(ctx, home)
-	res := &Result{Target: ss.base.String(), Fingerprint: fingerprint.Detect(home), TLS: home.TLS, Warnings: ss.warnings}
+	res := &Result{Target: ss.base.Redacted(), Fingerprint: fingerprint.Detect(home), TLS: home.TLS, Warnings: ss.warnings}
 	// The PHP probe runs in every profile: it costs at most three requests,
 	// and without it quick scans would report the version as hidden behind
 	// a page cache.
@@ -362,7 +363,7 @@ func (ss *session) run(ctx context.Context, c *Check, p string) (Finding, bool) 
 		Title:      c.Name,
 		Severity:   c.Severity,
 		Confidence: c.Confidence,
-		URL:        r.URL.String(),
+		URL:        r.URL.Redacted(),
 		Path:       p,
 		Evidence:   Evidence{Request: c.Request.Method + " " + p, Status: r.Status, Matched: ev},
 		Impact:     strings.TrimSpace(c.Impact),
@@ -386,7 +387,7 @@ type session struct {
 	client   *http.Client // never follows redirects, used for checks
 	origin   *url.URL     // scheme and host the user asked for; user headers only go here
 	base     *url.URL     // where checks are sent: origin, or where its home page led
-	headers  http.Header  // the user's headers
+	headers  http.Header  // the user's headers, plus basic auth from the target URL
 	resolve  resolver
 	dial     dialFunc // guarded raw dialer for the TLS probe
 	warnings []string
@@ -418,13 +419,17 @@ func (ss *session) emit(fn func()) {
 }
 
 func (s *Scanner) open(ctx context.Context, target string, h Hooks) (*session, *matchers.Response, error) {
-	u, explicit, err := ParseTarget(target)
+	u, explicit, auth, err := ParseTargetAuth(target)
 	if err != nil {
 		return nil, nil, err
 	}
 	headers := s.opts.Headers.Clone()
 	if headers == nil {
 		headers = http.Header{}
+	}
+	// An explicit -H Authorization wins over credentials in the URL.
+	if auth != "" && headers.Get("Authorization") == "" {
+		headers.Set("Authorization", auth)
 	}
 	base := s.opts.HTTPClient
 	if base == nil {
@@ -511,19 +516,66 @@ func (s *Scanner) open(ctx context.Context, target string, h Hooks) (*session, *
 
 // ParseTarget accepts a URL or bare hostname. explicitScheme is false when
 // the scheme was guessed, in which case Scan falls back from https to http.
+// Credentials in the URL are dropped from u; ParseTargetAuth returns them.
 func ParseTarget(target string) (u *url.URL, explicitScheme bool, err error) {
+	u, explicitScheme, _, err = ParseTargetAuth(target)
+	return u, explicitScheme, err
+}
+
+// ParseTargetAuth is ParseTarget that also turns user:password@ in the URL
+// into an Authorization header value. The returned URL never carries
+// them, so they can't reach findings, logs or error messages; Scan sends
+// the header with every request to the target instead of only the first.
+func ParseTargetAuth(target string) (u *url.URL, explicitScheme bool, authorization string, err error) {
 	explicitScheme = strings.Contains(target, "://")
 	if !explicitScheme {
 		target = "https://" + target
 	}
 	u, err = url.Parse(target)
 	if err != nil || u.Host == "" {
-		return nil, false, fmt.Errorf("%q is not a valid URL or hostname", target)
+		return nil, false, "", fmt.Errorf("%q is not a valid URL or hostname", redactUserinfo(target))
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return nil, false, fmt.Errorf("unsupported scheme %q, use http or https", u.Scheme)
+		return nil, false, "", fmt.Errorf("unsupported scheme %q, use http or https", u.Scheme)
 	}
-	return u, explicitScheme, nil
+	if u.User != nil {
+		pass, _ := u.User.Password()
+		authorization = "Basic " + base64.StdEncoding.EncodeToString([]byte(u.User.Username()+":"+pass))
+		u.User = nil
+	}
+	return u, explicitScheme, authorization, nil
+}
+
+// redactUserinfo masks the password in a URL that may not parse, the way
+// url.URL.Redacted does for one that does.
+func redactUserinfo(raw string) string {
+	scheme, rest, ok := strings.Cut(raw, "://")
+	if !ok {
+		return raw
+	}
+	end := strings.IndexAny(rest, "/?#")
+	if end < 0 {
+		end = len(rest)
+	}
+	at := strings.LastIndex(rest[:end], "@")
+	if at < 0 {
+		return raw
+	}
+	user, _, hasPass := strings.Cut(rest[:at], ":")
+	if hasPass {
+		user += ":xxxxx"
+	}
+	return scheme + "://" + user + rest[at:]
+}
+
+// RedactURL masks the password in a URL or target string, like
+// url.URL.Redacted, even when it does not parse. Use it wherever a target
+// the user typed is printed.
+func RedactURL(raw string) string {
+	if u, err := url.Parse(raw); err == nil {
+		return u.Redacted()
+	}
+	return redactUserinfo(raw)
 }
 
 // get fetches a path relative to the target once per scan; later calls
@@ -574,7 +626,7 @@ func (ss *session) attempt(ctx context.Context, c *http.Client, method, u string
 	ss.requests.Add(1)
 	start := time.Now()
 	resp, err := c.Do(req)
-	log := RequestLog{Method: method, URL: u, Duration: time.Since(start), Attempt: n + 1, Err: err}
+	log := RequestLog{Method: method, URL: RedactURL(u), Duration: time.Since(start), Attempt: n + 1, Err: err}
 	if err != nil {
 		ss.logRequest(log)
 		if ctx.Err() != nil {
