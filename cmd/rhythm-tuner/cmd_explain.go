@@ -133,7 +133,7 @@ func lookupExplanation(id string, checks []*engine.Check, rules []engine.Rule) (
 			ID: c.ID, Kind: "check", Name: c.Name, Severity: c.Severity,
 			Confidence: string(c.Confidence), Profile: c.Profile, Tags: c.Tags,
 			Requires: c.Requires, Paths: c.Request.Path,
-			Impact: strings.TrimSpace(c.Impact), Fix: strings.TrimSpace(c.Fix),
+			Impact: strings.TrimSpace(c.Impact), Fix: withoutSnippets(c.Fix, c.FixServer),
 			References: c.References, Reference: findingReference + "#" + c.ID,
 		}
 		if n, a := strings.TrimSpace(c.FixServer.Nginx), strings.TrimSpace(c.FixServer.Apache); n != "" || a != "" {
@@ -165,6 +165,41 @@ func lookupExplanation(id string, checks []*engine.Check, rules []engine.Rule) (
 		ID: id, Kind: "rule", Name: best.Title, Severity: best.Severity,
 		Tags: best.Tags, Reference: ref,
 	}, true
+}
+
+// withoutSnippets drops the "nginx: ..." and "apache: ..." lines of a fix
+// that only repeat its fix_server snippets, which explain shows in full
+// under their own headings. Other lines, such as a different nginx
+// directive, stay.
+func withoutSnippets(fix string, fs engine.FixServer) string {
+	snippets := map[string]string{"nginx": fs.Nginx, "apache": fs.Apache}
+	var keep []string
+	for _, line := range strings.Split(strings.TrimSpace(fix), "\n") {
+		server, rest, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if ok && repeats(snippets[strings.ToLower(server)], rest) {
+			continue
+		}
+		keep = append(keep, line)
+	}
+	return strings.TrimSpace(strings.Join(keep, "\n"))
+}
+
+// repeats reports whether text is the snippet, or one of its lines, with
+// spacing ignored.
+func repeats(snippet, text string) bool {
+	text = strings.Join(strings.Fields(text), " ")
+	if snippet == "" || text == "" {
+		return false
+	}
+	if strings.Join(strings.Fields(snippet), " ") == text {
+		return true
+	}
+	for _, line := range strings.Split(snippet, "\n") {
+		if strings.Join(strings.Fields(line), " ") == text {
+			return true
+		}
+	}
+	return false
 }
 
 // write prints e for people. Long text keeps its own line breaks, indented

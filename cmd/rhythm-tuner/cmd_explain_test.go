@@ -32,7 +32,9 @@ func TestExplainCheck(t *testing.T) {
 		"Severity:   critical",
 		"Requests:   /.env /.env.local",
 		"\nImpact\n  Anyone can read database passwords",
-		"\nFix\n  Deny access to dotfiles",
+		"\nFix\n  Deny access to dotfiles, then rotate every secret in the file.\n\nnginx\n",
+		"\nnginx\n  location ~ /\\.(?!well-known) { deny all; }\n",
+		"\nApache\n  <FilesMatch \"^\\.\">\n    Require all denied\n  </FilesMatch>\n",
 		"\nReferences\n  https://owasp.org/",
 		"\nMore\n  " + findingReference + "#leak-dotenv\n",
 	} {
@@ -55,6 +57,17 @@ func TestExplainServerSnippets(t *testing.T) {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("missing %q in:\n%s", want, b.String())
 		}
+	}
+}
+
+func TestWithoutSnippets(t *testing.T) {
+	fs := engine.FixServer{Nginx: "location = /x { deny all; }\n", Apache: "<Files x>\n  Require all denied\n</Files>\n"}
+	fix := "Delete x.\nnginx:  location = /x {  deny all; }\napache: <Files x> Require all denied </Files>\nnginx:  root /srv/public;\n"
+	if got, want := withoutSnippets(fix, fs), "Delete x.\nnginx:  root /srv/public;"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if got := withoutSnippets(fix, engine.FixServer{}); got != strings.TrimSpace(fix) {
+		t.Errorf("no snippets: got %q", got)
 	}
 }
 
