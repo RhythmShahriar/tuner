@@ -24,10 +24,10 @@ fi
 # Stub plugins from ground-truth.yaml (built by make-plugins.sh, mounted
 # read-only). A plugin the image ships (akismet) is replaced whole, so
 # only the stub's version is on disk.
-[ -d /plugins-src ] && [ -n "$(ls /plugins-src)" ] || {
+if [ ! -d /plugins-src ] || [ -z "$(ls /plugins-src)" ]; then
 	echo "testbed: no stub plugins in /plugins-src; run sh testbed/wp/make-plugins.sh first" >&2
 	exit 1
-}
+fi
 for dir in /plugins-src/*/; do
 	slug=$(basename "$dir")
 	rm -rf "$root/wp-content/plugins/$slug"

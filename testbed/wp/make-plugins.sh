@@ -40,7 +40,10 @@ while IFS= read -r line; do
 	slug=$(printf '%s\n' "$line" | sed -n 's/.*slug: *\([a-z0-9-]*\).*/\1/p')
 	version=$(printf '%s\n' "$line" | sed -n 's/.*version: *\([0-9.]*\).*/\1/p')
 	disc=$(printf '%s\n' "$line" | sed -n 's/.*discoverable: *\([a-z]*\).*/\1/p')
-	[ -n "$slug" ] && [ -n "$version" ] || { echo "skipping: $line" >&2; continue; }
+	if [ -z "$slug" ] || [ -z "$version" ]; then
+		echo "skipping: $line" >&2
+		continue
+	fi
 
 	dir="$plugins/$slug"
 	mkdir -p "$dir"
