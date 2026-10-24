@@ -12,7 +12,7 @@ PIN_FILES ?= $(wildcard .github/workflows/*.yml .github/workflows/*.yaml action.
 #   checks-pack.yml        maintained with the check pack; remove once pinned
 PIN_EXEMPT := release-go\.yml@master$$|^\.github/workflows/checks-pack\.yml:
 
-.PHONY: build test test-all vuln checks-lint lint fmt check hooks pack pins actionlint release-check
+.PHONY: build test test-all vuln checks-lint lint fmt check hooks pack pins actionlint init-ci-lint release-check
 
 build: ## build bin/rhythm-tuner
 	go build -o bin/rhythm-tuner ./cmd/rhythm-tuner
@@ -63,6 +63,13 @@ pins: ## fail on any action or reusable workflow not pinned to a commit SHA
 
 actionlint: ## lint the workflows (and their run: scripts when shellcheck is installed)
 	$(ACTIONLINT)
+
+# The workflows rhythm tuner init ci writes, from its golden tests.
+init-ci-lint: ## actionlint the workflows that rhythm tuner init ci generates
+	@out=$$(mktemp -d) && \
+	TUNER_INIT_CI_OUT="$$out" go test -count=1 -run 'TestInitCI(URL|Folder)$$' ./cmd/rhythm-tuner && \
+	$(ACTIONLINT) "$$out"/*.yml && echo "generated workflows pass actionlint"; \
+	status=$$?; rm -rf "$$out"; exit $$status
 
 release-check: ## validate .goreleaser.yaml with the pinned GoReleaser
 	$(GORELEASER) check
