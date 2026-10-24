@@ -208,6 +208,13 @@ Batch and CI:
                            couldn't be fetched (otherwise exit 3)
       --allow-partial      let --fail-on pass a scan that was blocked or cut
                            short (otherwise exit 3)
+      --config <file>      read settings from this file instead of .tuner.yml
+      --no-config          don't read .tuner.yml
+                           A .tuner.yml in the current folder sets targets,
+                           profile, rate, concurrency, fail_on,
+                           min_confidence, baseline, headers (${VAR} reads
+                           the environment), tags, ids and ignore entries
+                           (id, path, reason, until). Flags win over it.
 
 ` + extensionHelp()
 }

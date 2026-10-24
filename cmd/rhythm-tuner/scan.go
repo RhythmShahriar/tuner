@@ -36,6 +36,7 @@ import (
 	"github.com/RhythmShahriar/tuner/fingerprint"
 	"github.com/RhythmShahriar/tuner/local"
 	"github.com/RhythmShahriar/tuner/report"
+	"github.com/RhythmShahriar/tuner/tunerconfig"
 	"github.com/RhythmShahriar/tuner/vulns"
 )
 
@@ -82,6 +83,9 @@ type scanOptions struct {
 	// allowMissingVulns and allowPartial let --fail-on pass a run it
 	// would otherwise not trust; see scanExit.
 	allowMissingVulns, allowPartial bool
+
+	config   string // --config: the settings file to read instead of .tuner.yml
+	noConfig bool   // --no-config: read no settings file
 }
 
 func scanFlagSet(o *scanOptions, stderr io.Writer) *flag.FlagSet {
@@ -133,6 +137,8 @@ func scanFlagSet(o *scanOptions, stderr io.Writer) *flag.FlagSet {
 	fs.StringVar(&o.baseline, "baseline", "", "")
 	fs.BoolVar(&o.allowMissingVulns, "allow-missing-vulns", false, "")
 	fs.BoolVar(&o.allowPartial, "allow-partial", false, "")
+	fs.StringVar(&o.config, "config", "", "")
+	fs.BoolVar(&o.noConfig, "no-config", false, "")
 	return fs
 }
 
@@ -151,6 +157,13 @@ type scanPlan struct {
 	// confirmedOnly makes --fail-on count only confirmed findings
 	// (--min-confidence confirmed). Likely ones are still reported.
 	confirmedOnly bool
+
+	// config is the settings file in use, or nil. Its ignore entries are
+	// split into ignores, which hide findings like a baseline, and
+	// expired, which hide nothing and get a note on stderr.
+	config           *tunerconfig.Config
+	configTargets    []string
+	ignores, expired []tunerconfig.Ignore
 
 	// local is the base for local scans; scanTarget copies it and fills in
 	// PHP, Advisor, OSV and Select.
@@ -190,12 +203,17 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 		}
 		return nil, flagError(flags, err)
 	}
+	set := map[string]bool{}
+	flags.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	if err := p.applyConfig(set, len(pos) > 0 || o.list != "" || o.stdin); err != nil {
+		return nil, err
+	}
 	if err := p.checkValues(); err != nil {
 		return nil, err
 	}
 
 	// Targets.
-	p.targets = pos
+	p.targets = append(pos, p.configTargets...)
 	if o.list != "" {
 		f, err := os.Open(o.list)
 		if err != nil {
@@ -355,6 +373,117 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 	return p, nil
 }
 
+// today is the date ignore entries are checked against. Tests change it.
+var today = time.Now
+
+// applyConfig reads .tuner.yml, or the --config file, and fills in every
+// option the command line left unset: flags always win. Its targets are
+// used only when none were given in any other way.
+func (p *scanPlan) applyConfig(set map[string]bool, haveTargets bool) error {
+	o := &p.o
+	if o.noConfig && o.config != "" {
+		return usagef("--config and --no-config don't go together")
+	}
+	if o.noConfig {
+		return nil
+	}
+	path := o.config
+	if path == "" {
+		found, err := tunerconfig.Find(".")
+		if err != nil || found == "" {
+			return err
+		}
+		path = found
+	} else if _, err := os.Stat(path); err != nil {
+		return usagef("--config %s: no such file", path)
+	}
+	c, err := tunerconfig.Load(path)
+	if err != nil {
+		return usageError{Msg: err.Error()}
+	}
+	p.config = c
+
+	str := func(flagName string, dst *string, v string) {
+		if !set[flagName] && v != "" {
+			*dst = v
+		}
+	}
+	list := func(flagName string, dst *listFlag, v []string) {
+		if !set[flagName] && len(v) > 0 {
+			*dst = v
+		}
+	}
+	str("profile", &o.profile, c.Profile)
+	str("fail-on", &o.failOn, c.FailOn)
+	str("min-confidence", &o.minConfidence, c.MinConfidence)
+	str("baseline", &o.baseline, c.Baseline)
+	list("tags", &o.tags, c.Tags)
+	list("exclude-tags", &o.excludeTags, c.ExcludeTags)
+	list("id", &o.ids, c.IDs)
+	list("exclude-id", &o.excludeIDs, c.ExcludeIDs)
+	if c.Rate != nil && !set["rate"] {
+		o.rate = *c.Rate
+	}
+	if c.Concurrency != nil && !set["c"] && !set["concurrency"] {
+		o.concurrency = *c.Concurrency
+	}
+	// A header given with -H replaces the config's header of that name.
+	var headers cli.RepeatFlag
+	for _, h := range c.Headers {
+		name, _, _ := strings.Cut(h, ":")
+		if !slices.ContainsFunc(o.headers, func(f string) bool {
+			given, _, _ := strings.Cut(f, ":")
+			return strings.EqualFold(strings.TrimSpace(given), name)
+		}) {
+			headers = append(headers, h)
+		}
+	}
+	o.headers = append(headers, o.headers...)
+
+	if !haveTargets {
+		dir := filepath.Dir(c.Path)
+		for _, t := range c.Targets {
+			// A folder in the config is relative to the config's folder.
+			if isLocal, err := classifyTarget(t); err == nil && isLocal && dir != "." && !filepath.IsAbs(t) && !strings.HasPrefix(t, "~") {
+				t = filepath.Join(dir, t)
+				if !filepath.IsAbs(t) {
+					t = "." + string(filepath.Separator) + t
+				}
+			}
+			p.configTargets = append(p.configTargets, t)
+		}
+	}
+	p.ignores, p.expired = c.Ignores(today())
+	return nil
+}
+
+// ignored reports whether a config ignore entry hides f.
+func (p *scanPlan) ignored(f engine.Finding) bool {
+	return slices.ContainsFunc(p.ignores, func(ig tunerconfig.Ignore) bool { return ig.Matches(f.ID, f.Path) })
+}
+
+// hidden reports whether f is left out of the report: it is in the
+// baseline or a config ignore entry covers it.
+func (p *scanPlan) hidden(f engine.Finding) bool { return p.baseline.Has(f) || p.ignored(f) }
+
+// filterIgnored drops the findings config ignore entries cover, recomputes
+// the score and returns how many it dropped.
+func (p *scanPlan) filterIgnored(res *engine.Result) int {
+	if len(p.ignores) == 0 {
+		return 0
+	}
+	kept := res.Findings[:0]
+	for _, f := range res.Findings {
+		if !p.ignored(f) {
+			kept = append(kept, f)
+		}
+	}
+	n := len(res.Findings) - len(kept)
+	res.Findings = kept
+	res.Score = engine.Score(kept)
+	return n
+}
+
 // checkValues validates and normalises the flags that take one of a few
 // values or a number, before anything slow runs. Names of levels and
 // profiles are accepted in any case.
@@ -478,6 +607,11 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 			printErr(stderr, "scan", w)
 		}
 	}
+	// Shown even with -q: an expired ignore can fail a CI run that passed
+	// yesterday, and the log should say why.
+	for _, ig := range p.expired {
+		printErr(stderr, "scan", ig.Note())
+	}
 
 	if config.FirstRun("tuner-authorised-use") {
 		fmt.Fprint(stderr, "Note: scan only sites you own or are authorised to test.\n"+
@@ -543,7 +677,11 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 				view = report.NewPretty(w, stderr, report.PrettyOptions{
 					Plain: plain, Quiet: o.quiet, Progress: single && tty && !o.verbose,
 				})
-				view.Header(version, target)
+				header := target
+				if p.config != nil {
+					header += " (config: " + p.config.Path + ")"
+				}
+				view.Header(version, header)
 			}
 
 			var h engine.Hooks
@@ -551,7 +689,7 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 				h.Fingerprint, h.Baseline, h.Progress = view.Fingerprint, view.Baseline, view.Progress
 			}
 			h.Finding = func(f engine.Finding) {
-				if p.baseline.Has(f) {
+				if p.hidden(f) {
 					return
 				}
 				if view != nil {
@@ -577,7 +715,8 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 			statuses[i] = p.status(ctx, err, slot)
 			if res != nil {
 				stampFindings(res, target)
-				suppressed := p.baseline.Filter(res)
+				// Ignored findings count with the baselined ones.
+				suppressed := p.baseline.Filter(res) + p.filterIgnored(res)
 				if live {
 					view.Summary(res, target, suppressed)
 				}

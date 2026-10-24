@@ -155,6 +155,21 @@ Show findings in your repository's **Security** tab:
     sarif_file: tuner.sarif
 ```
 
+Keep the settings in a `.tuner.yml` next to your code instead of on the command line. Flags still win over it:
+
+```yaml
+targets: [https://staging.yoursite.com]
+fail_on: high
+min_confidence: confirmed
+headers:
+  Authorization: Basic ${STAGING_AUTH}   # read from the environment, never printed
+ignore:
+  - id: leak-dotenv
+    path: /demo/.env
+    reason: fake keys for the public demo
+    until: 2026-12-31                    # after this day the finding shows again
+```
+
 More in the [CI guide](https://github.com/RhythmShahriar/rhythm/wiki/Tuner-CI).
 
 ## Docs

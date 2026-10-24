@@ -1269,3 +1269,110 @@ func TestSuggest(t *testing.T) {
 		t.Errorf("editDistance = %d", d)
 	}
 }
+
+// writeConfig puts a .tuner.yml in a fresh current folder.
+func writeConfig(t *testing.T, body string) {
+	t.Helper()
+	t.Chdir(t.TempDir())
+	if err := os.WriteFile(".tuner.yml", []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestConfigFile(t *testing.T) {
+	srv := leakySite(t)
+	old := today
+	defer func() { today = old }()
+	today = func() time.Time { return time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC) }
+
+	// Targets and fail_on come from the file; the header says so.
+	writeConfig(t, "targets: ["+srv.URL+"]\nfail_on: high\n")
+	code, out, errs := tuner(t, "scan", "--plain")
+	if code != exitFindings || !strings.Contains(out, "scanning "+srv.URL+" (config: .tuner.yml)") || !strings.Contains(out, ".env file exposed") {
+		t.Fatalf("fail_on from config: exit %d, stderr %s\n%s", code, errs, out)
+	}
+
+	// An ignore hides the finding and counts as baselined.
+	writeConfig(t, "targets: ["+srv.URL+"]\nfail_on: high\nignore:\n  - id: leak-dotenv\n    path: /.env\n    reason: demo keys\n    until: 2026-10-24\n")
+	code, out, errs = tuner(t, "scan", "--plain")
+	if code != exitOK || strings.Contains(out, ".env file exposed") || !strings.Contains(out, "1 baselined") {
+		t.Errorf("ignored: exit %d, stderr %s\n%s", code, errs, out)
+	}
+	code, out, _ = tuner(t, "scan", "--json")
+	if code != exitOK || strings.Contains(out, "leak-dotenv") {
+		t.Errorf("ignored JSON: exit %d\n%s", code, out)
+	}
+	code, out, _ = tuner(t, "scan", "--jsonl")
+	if code != exitOK || strings.Contains(out, "leak-dotenv") {
+		t.Errorf("ignored JSONL: exit %d\n%s", code, out)
+	}
+
+	// Flags win: --fail-on medium fails on the missing headers, and a
+	// target on the command line replaces the file's.
+	if code, _, errs := tuner(t, "scan", "--json", "--fail-on", "medium"); code != exitFindings {
+		t.Errorf("--fail-on over config: exit %d: %s", code, errs)
+	}
+	clean := cleanSite(t)
+	if code, out, _ := tuner(t, "scan", clean.URL, "--json"); code != exitOK || strings.Contains(out, srv.URL) {
+		t.Errorf("command line target: exit %d\n%.200s", code, out)
+	}
+	// --no-config reads nothing, so there is no target.
+	if code, _, errs := tuner(t, "scan", "--no-config"); code != exitUsage || !strings.Contains(errs, "no target given") {
+		t.Errorf("--no-config: exit %d: %s", code, errs)
+	}
+
+	// The day after until, the ignore stops hiding and says so.
+	today = func() time.Time { return time.Date(2026, 10, 25, 0, 30, 0, 0, time.UTC) }
+	code, out, errs = tuner(t, "scan", "--plain", "-q")
+	if code != exitFindings || !strings.Contains(out, ".env file exposed") ||
+		!strings.Contains(errs, "rhythm tuner scan: ignore for leak-dotenv /.env expired 2026-10-24: demo keys\n") {
+		t.Errorf("expired: exit %d, stderr %s\n%s", code, errs, out)
+	}
+}
+
+func TestConfigHeadersAndErrors(t *testing.T) {
+	var got atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			got.Store(r.Header.Get("Authorization") + "|" + r.Header.Get("X-Team"))
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	writeConfig(t, "headers:\n  Authorization: Bearer ${TUNER_TEST_TOKEN}\n  X-Team: web\n")
+	t.Setenv("TUNER_TEST_TOKEN", "tok-123")
+	if code, _, errs := tuner(t, "scan", srv.URL, "--json", "--no-vulns", "-H", "X-Team: ops"); code != exitOK {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	if v, _ := got.Load().(string); v != "Bearer tok-123|ops" {
+		t.Errorf("headers sent: %q (want the config's Authorization and -H's X-Team)", v)
+	}
+
+	t.Setenv("TUNER_TEST_TOKEN", "")
+	code, out, errs := tuner(t, "scan", srv.URL)
+	if code != exitUsage || errs != "rhythm tuner scan: .tuner.yml: headers: Authorization uses ${TUNER_TEST_TOKEN}, which is not set\n" || out != "" {
+		t.Errorf("missing variable: exit %d, stderr %q", code, errs)
+	}
+
+	writeConfig(t, "fail_on: high\nprofle: quick\n")
+	if code, _, errs := tuner(t, "scan", srv.URL); code != exitUsage || !strings.Contains(errs, `.tuner.yml line 2: unknown key "profle"`) {
+		t.Errorf("unknown key: exit %d: %s", code, errs)
+	}
+	if code, _, errs := tuner(t, "scan", srv.URL, "--config", "nope.yml"); code != exitUsage || !strings.Contains(errs, "--config nope.yml: no such file") {
+		t.Errorf("missing --config: exit %d: %s", code, errs)
+	}
+	if code, _, errs := tuner(t, "scan", srv.URL, "--config", "x.yml", "--no-config"); code != exitUsage || !strings.Contains(errs, "don't go together") {
+		t.Errorf("--config with --no-config: exit %d: %s", code, errs)
+	}
+
+	// --config names another file; its baseline and folders are relative
+	// to that file.
+	os.MkdirAll("ci/site", 0o755)
+	os.WriteFile("ci/site/.env", []byte("DB_PASSWORD="+rawSecret+"\n"), 0o600)
+	os.WriteFile("ci/tuner.yml", []byte("targets: [./site]\nfail_on: high\n"), 0o600)
+	code, out, errs = tuner(t, "scan", "--config", "ci/tuner.yml", "--plain", "--no-vulns")
+	if code != exitFindings || !strings.Contains(out, "(config: ci/tuner.yml)") || !strings.Contains(out, ".env file in the web root") {
+		t.Errorf("--config: exit %d, stderr %s\n%s", code, errs, out)
+	}
+}
