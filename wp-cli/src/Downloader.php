@@ -106,7 +106,7 @@ class Downloader {
 			if ( $this->cosignAvailable() ) {
 				$this->verifyCosign( $base, $version, $dir, $checksums );
 			} else {
-				// Most WordPress hosts have no cosign, and checksums.txt comes
+				// Most WordPress hosts have no cosign and checksums.txt comes
 				// from the same server as the archive, so say how little was
 				// checked.
 				call_user_func( $this->warn, 'cosign not found; checked the SHA-256 against checksums.txt only.' );

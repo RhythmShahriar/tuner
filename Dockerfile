@@ -13,7 +13,7 @@
 # instead of serving unauthenticated.
 #
 # There is no Go toolchain step: the context holds the already-built
-# binary at <os>/<arch>/rhythm-tuner, and buildx picks the one for the
+# binary at <os>/<arch>/rhythm-tuner and buildx picks the one for the
 # platform it builds. On a release the image job in
 # .github/workflows/release.yml fills the context from the signed release
 # archives. To build it by hand:
