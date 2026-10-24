@@ -26,12 +26,18 @@ func TestSafeName(t *testing.T) {
 		"lpt9":           "lpt9_",
 		"console":        "console",
 		"com10":          "com10",
-		"a/b@1.0":        "a~b@1.0",
-		"a_b/c@1.0":      "a_b~c@1.0",
-		"a b:c":          "a_b_c",
-		"../etc":         "..~etc",
-		"":               "",
-		"..":             "",
+		// The other device names Windows reserves hold characters that
+		// are replaced first, so they never reach the device check.
+		"CONIN$":    "CONIN_",
+		"conout$":   "conout_",
+		"com\u00b9": "com_",
+		"lpt\u00b3": "lpt_",
+		"a/b@1.0":   "a~b@1.0",
+		"a_b/c@1.0": "a_b~c@1.0",
+		"a b:c":     "a_b_c",
+		"../etc":    "..~etc",
+		"":          "",
+		"..":        "",
 	} {
 		if got := SafeName(key); got != want {
 			t.Errorf("SafeName(%q) = %q, want %q", key, got, want)

@@ -205,7 +205,9 @@ func (s *Store) Path(kind, key string) string {
 var unsafeKey = regexp.MustCompile(`[^A-Za-z0-9._@~-]`)
 
 // Windows reserves these device names, with or without an extension and in
-// any case: a cache file called con.json can't be created there.
+// any case: a cache file called con.json can't be created there. Its
+// other reserved names (CONIN$, CONOUT$, COM¹ and the like) hold
+// characters unsafeKey replaces, so they can't come out of SafeName.
 var reserved = regexp.MustCompile(`(?i)^(con|prn|aux|nul|com[0-9]|lpt[0-9])$`)
 
 // SafeName turns a key into a file name (without the extension) that is
