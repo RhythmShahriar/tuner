@@ -228,3 +228,26 @@ func TestWalkSkipDirs(t *testing.T) {
 		t.Errorf("root skipped: %v", got)
 	}
 }
+
+func TestLoadStopsHashingWhenCanceled(t *testing.T) {
+	// A sparse file far bigger than one check interval: hashing it must
+	// stop once the scan's context is done, not run to the end.
+	path := filepath.Join(t.TempDir(), "big.php")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(8 * hashCheckEvery); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	e := &entry{path: path, name: "big.php"}
+	ctx, cancel := context.WithCancel(context.Background())
+	if got := (&scan{ctx: ctx}).load(e, needMD5|needSHA256); got.md5 == "" || got.sha256 == "" {
+		t.Fatalf("live context: %+v", got)
+	}
+	cancel()
+	if got := (&scan{ctx: ctx}).load(e, needMD5|needSHA256); got.md5 != "" || got.sha256 != "" {
+		t.Errorf("canceled context still hashed: %+v", got)
+	}
+}

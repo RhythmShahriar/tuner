@@ -105,7 +105,7 @@ func scanStatus(ctx context.Context, root string, opts Options, h engine.Hooks) 
 	if err != nil {
 		return nil, status{}, err
 	}
-	s := &scan{opts: opts, root: abs, base: fileURL(abs)}
+	s := &scan{ctx: ctx, opts: opts, root: abs, base: fileURL(abs)}
 	if s.opts.MaxEntries <= 0 {
 		s.opts.MaxEntries = defaultMaxEntries
 	}
@@ -273,6 +273,9 @@ func fileURLSep(abs string, sep byte) *url.URL {
 
 // scan is the state of one local scan.
 type scan struct {
+	// ctx is Scan's context. The walk checks it between files; load also
+	// checks it while hashing, since one huge file can outlast --max-time.
+	ctx      context.Context
 	opts     Options
 	root     string   // absolute project root
 	web      string   // document root: root, or root/public for Laravel
@@ -407,7 +410,9 @@ func readFile(path string, n int64, hs ...hash.Hash) ([]byte, int64, error) {
 		w[i] = h
 	}
 	all := io.MultiWriter(w...)
-	_, _ = all.Write(head) // hash.Hash writes never fail
+	if _, err := all.Write(head); err != nil { // only a canceled ctxHash fails
+		return head, fi.Size(), err
+	}
 	_, err = io.Copy(all, f)
 	return head, fi.Size(), err
 }

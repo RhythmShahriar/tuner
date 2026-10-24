@@ -110,6 +110,9 @@ func (s *scan) walkTree(ctx context.Context, vs ...visitor) {
 					continue // drain
 				}
 				f := s.load(&j.e, j.need)
+				if ctx.Err() != nil {
+					continue // f may be cut short: don't judge it
+				}
 				for i, v := range vs {
 					if j.mask&(1<<i) != 0 {
 						v.visit(&j.e, f)
@@ -226,6 +229,10 @@ func (s *scan) load(e *entry, n need) *fileData {
 		sh = sha256.New()
 		hs = append(hs, sh)
 	}
+	if len(hs) > 0 && s.ctx != nil {
+		// Every hash sees the same writes, so watching one is enough.
+		hs[0] = &ctxHash{Hash: hs[0], ctx: s.ctx}
+	}
 	read := s.opts.read
 	if read == nil {
 		read = readFile
@@ -248,6 +255,27 @@ func (s *scan) load(e *entry, n need) *fileData {
 		f.sha256 = hex.EncodeToString(sh.Sum(nil))
 	}
 	return f
+}
+
+// ctxHash is a hash.Hash whose writes fail once ctx is done, so hashing
+// a multi-GB file stops on cancellation or --max-time instead of
+// finishing the file. It checks ctx once per hashCheckEvery bytes.
+type ctxHash struct {
+	hash.Hash
+	ctx     context.Context
+	written int
+}
+
+const hashCheckEvery = 4 << 20
+
+func (h *ctxHash) Write(p []byte) (int, error) {
+	if h.written += len(p); h.written >= hashCheckEvery {
+		h.written = 0
+		if err := h.ctx.Err(); err != nil {
+			return 0, err
+		}
+	}
+	return h.Hash.Write(p)
 }
 
 // collector gathers a visitor's findings from the worker goroutines.
