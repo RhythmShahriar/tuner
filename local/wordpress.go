@@ -29,6 +29,7 @@ const maxPluginFiles = 50
 
 var (
 	wpVersionVar = regexp.MustCompile(`\$wp_version\s*=\s*['"]([^'"]+)['"]`)
+	wpLocalVar   = regexp.MustCompile(`\$wp_local_package\s*=\s*['"]([A-Za-z_]+)['"]`)
 	versionToken = regexp.MustCompile(`^[0-9][0-9A-Za-z.+-]*`)
 	tablePrefix  = regexp.MustCompile(`\$table_prefix\s*=\s*['"]([^'"]*)['"]`)
 	defineRe     = regexp.MustCompile(`(?is)\bdefine\s*\(\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]\s*,\s*(.*?)\s*\)\s*;`)
@@ -56,6 +57,7 @@ var includeRe = regexp.MustCompile(`(?i)\b(?:require|include)(?:_once)?\b[^;]*;`
 type wordpress struct {
 	root       string
 	version    string
+	locale     string // a localized package's locale, e.g. de_DE; "" for en_US
 	content    string // wp-content directory
 	components []fingerprint.Component
 }
@@ -69,6 +71,9 @@ func (s *scan) detectWordPress(ctx context.Context, root string) *wordpress {
 	wp := &wordpress{root: root, content: filepath.Join(root, "wp-content")}
 	if m := wpVersionVar.FindSubmatch(b); m != nil {
 		wp.version = string(m[1])
+	}
+	if m := wpLocalVar.FindSubmatch(b); m != nil {
+		wp.locale = string(m[1])
 	}
 	wp.components = append(s.plugins(ctx, filepath.Join(wp.content, "plugins")), s.themes(ctx, filepath.Join(wp.content, "themes"))...)
 	return wp

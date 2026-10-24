@@ -65,6 +65,14 @@ type Options struct {
 	// pools) is read from; empty means "/". Tests point it at a fake tree.
 	ConfigRoot string
 
+	// Integrity compares WordPress core and wordpress.org plugin files
+	// with their published checksums. It fetches them, unless Checksums
+	// is offline.
+	Integrity bool
+	// Checksums fetches the checksums for Integrity; nil uses a default
+	// client without a disk cache.
+	Checksums *Checksums
+
 	// read replaces readFile in the walk, so tests can count opens.
 	read func(path string, n int64, hs ...hash.Hash) ([]byte, int64, error)
 }
@@ -137,8 +145,16 @@ func scanStatus(ctx context.Context, root string, opts Options, h engine.Hooks) 
 	}
 	findings = append(findings, s.laravelEnv()...)
 	stray, session := &strayVisitor{s: s}, &sessionVisitor{s: s}
-	s.walkTree(ctx, stray, session)
+	visitors := []visitor{stray, session}
+	integrity := s.prepareIntegrity(ctx)
+	if integrity != nil {
+		visitors = append(visitors, integrity)
+	}
+	s.walkTree(ctx, visitors...)
 	findings = append(findings, stray.findings()...)
+	if integrity != nil {
+		findings = append(findings, integrity.done()...)
+	}
 	osv := s.vulnStep(func() { findings = append(findings, s.composer(ctx)...) })
 	findings = append(findings, s.sessionUploadProgress(ctx, session)...)
 	findings, _ = engine.Filtered(static(findings), opts.Select).Advise(ctx, s.base, *fp)
