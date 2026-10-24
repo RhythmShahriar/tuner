@@ -204,7 +204,7 @@ func TestBaselineIsPortable(t *testing.T) {
 			{ID: "xmlrpc", Severity: engine.Low, Target: "https://" + host, URL: "https://" + host + "/xmlrpc.php", Path: "/xmlrpc.php"},
 		}}
 	}
-	base, _ = LoadBaseline(writeBaseline(t, remote("staging.example.test"), remote("other.example.test")))
+	base, _ = LoadBaseline(writeBaseline(t, remote("staging.example.test")))
 	www := remote("www.example.test")
 	if n := base.Filter(www); n != 2 {
 		t.Errorf("www: hid %d, left %+v", n, www.Findings)
@@ -214,6 +214,54 @@ func TestBaselineIsPortable(t *testing.T) {
 	www.Findings[0].URL = "https://www.example.test/shop/.env"
 	if n := base.Filter(www); n != 1 || www.Findings[0].ID != "env-file" {
 		t.Errorf("hid %d, left %+v", n, www.Findings)
+	}
+}
+
+// review: a batch baseline that accepts a finding on one client's site
+// must not hide the same finding on another site, in the batch or not.
+func TestBaselineBatchIsPerSite(t *testing.T) {
+	site := func(host string, advisories ...engine.Advisory) *engine.Result {
+		g := gallery(advisories...)
+		g.Target, g.URL = "https://"+host, "https://"+host+g.Path
+		return &engine.Result{Target: "https://" + host, Findings: []engine.Finding{
+			g, {ID: "xmlrpc", Severity: engine.Low, Target: "https://" + host, URL: "https://" + host + "/xmlrpc.php", Path: "/xmlrpc.php"},
+		}}
+	}
+	path := writeBaseline(t, site("client-a.test", critSQLi), &engine.Result{Target: "https://client-c.test", Findings: []engine.Finding{}})
+	base, err := LoadBaseline(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := site("client-b.test", critSQLi)
+	if n := base.Filter(b); n != 0 || len(b.Findings) != 2 || b.Score == 100 {
+		t.Errorf("client-b: hid %d, left %d, score %d", n, len(b.Findings), b.Score)
+	}
+	if base.Has(b.Findings[0]) {
+		t.Error("Has accepts client-a's finding on client-b")
+	}
+	// The same site, written another way, still matches.
+	a := site("client-a.test", critSQLi)
+	a.Target = "http://Client-A.test/"
+	if n := base.Filter(a); n != 2 || len(a.Findings) != 0 {
+		t.Errorf("client-a: hid %d, left %+v", n, a.Findings)
+	}
+	// A new advisory on the accepted plugin still comes back narrowed.
+	a = site("client-a.test", critSQLi, lowXSS)
+	if base.Filter(a); len(a.Findings) != 1 || len(a.Findings[0].Advisories) != 1 || a.Findings[0].Advisories[0].ID != "wf-1" {
+		t.Errorf("client-a with a new advisory: %+v", a.Findings)
+	}
+
+	// An array with one report and a failed target is a single-site
+	// baseline, so it still matches across hosts.
+	one := filepath.Join(t.TempDir(), "one.json")
+	var buf bytes.Buffer
+	if err := Write("json", &buf, []Report{New(site("staging.test", critSQLi), "test")}, WriteOptions{Many: true, Failed: []TargetError{{Target: "https://down.test", Error: "timeout"}}}); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(one, buf.Bytes(), 0o600)
+	base, _ = LoadBaseline(one)
+	if b := site("www.test", critSQLi); base.Filter(b) != 2 {
+		t.Errorf("single-site array: left %+v", b.Findings)
 	}
 }
 
@@ -255,7 +303,7 @@ func TestBaselineOldFormat(t *testing.T) {
 	if n := base.Filter(res); n != 1 || len(res.Findings) != 1 || len(res.Findings[0].Advisories) != 1 || res.Findings[0].Advisories[0].ID != "wf-2" {
 		t.Errorf("hid %d, left %+v", n, res.Findings)
 	}
-	if len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "predates finding fingerprints; save a fresh one with --json -o "+path) {
+	if len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "predates finding fingerprints; save a fresh one by running the scan without --baseline and with --json -o "+path) {
 		t.Errorf("warnings %q", res.Warnings)
 	}
 	// The legacy ID+URL key covers a finding whose fingerprint would differ.

@@ -23,8 +23,16 @@ import (
 // advisories is accepted one advisory at a time: when a plugin that was
 // accepted with one low advisory gains a critical one, the finding comes
 // back with only the new advisory.
+//
+// A baseline saved from one target matches any target, so staging's
+// baseline works for production. A baseline saved from a batch holds each
+// site's findings under that site: accepting a finding on one client's
+// site must not hide it on another's.
 type Baseline struct {
 	keys map[string]bool // fingerprints; fingerprint + " " + advisory ID for advisories
+	// scoped says keys start with the target's TargetKey and a space,
+	// for a baseline saved from several targets.
+	scoped bool
 	// legacy holds the "ID URL" keys of reports saved before fingerprints.
 	// They still count for one release, for findings without advisories.
 	legacy map[string]bool
@@ -32,6 +40,14 @@ type Baseline struct {
 }
 
 func advisoryKey(fp, id string) string { return fp + " " + id }
+
+// scope is the prefix of target's keys: "" for a single-target baseline.
+func (b Baseline) scope(target string) string {
+	if !b.scoped {
+		return ""
+	}
+	return TargetKey(target) + " "
+}
 
 func legacyKey(f engine.Finding) string { return f.ID + " " + f.URL }
 
@@ -43,6 +59,7 @@ func LoadBaseline(path string) (Baseline, error) {
 	}
 	type saved struct {
 		Target   string
+		Error    *string
 		Findings []stampedFinding
 	}
 	var many []saved
@@ -53,8 +70,12 @@ func LoadBaseline(path string) (Baseline, error) {
 		}
 		many = append(many, one)
 	}
-	b := Baseline{keys: map[string]bool{}, legacy: map[string]bool{}}
+	// A batch also lists the targets it could not reach; they have no
+	// findings and don't make the baseline a batch one.
+	many = slices.DeleteFunc(many, func(r saved) bool { return r.Error != nil })
+	b := Baseline{keys: map[string]bool{}, legacy: map[string]bool{}, scoped: len(many) > 1}
 	for _, r := range many {
+		scope := b.scope(r.Target)
 		for _, f := range r.Findings {
 			fp := f.Fingerprint
 			if !strings.HasPrefix(fp, fingerprintPrefix) {
@@ -64,6 +85,7 @@ func LoadBaseline(path string) (Baseline, error) {
 					b.legacy[legacyKey(f.Finding)] = true
 				}
 			}
+			fp = scope + fp
 			if len(f.Advisories) == 0 {
 				b.keys[fp] = true
 			}
@@ -76,9 +98,13 @@ func LoadBaseline(path string) (Baseline, error) {
 }
 
 // Has reports whether f is in the baseline: for a finding with advisories,
-// whether every one of them is. A zero Baseline has nothing.
-func (b Baseline) Has(f engine.Finding) bool {
-	fp := Fingerprint(f, "")
+// whether every one of them is. A batch baseline looks under f.Target.
+// A zero Baseline has nothing.
+func (b Baseline) Has(f engine.Finding) bool { return b.has(f.Target, f) }
+
+// has is Has for a finding of the scan of target.
+func (b Baseline) has(target string, f engine.Finding) bool {
+	fp := b.scope(target) + Fingerprint(f, "")
 	if len(f.Advisories) > 0 {
 		return !slices.ContainsFunc(f.Advisories, func(a engine.Advisory) bool { return !b.keys[advisoryKey(fp, a.ID)] })
 	}
@@ -88,18 +114,19 @@ func (b Baseline) Has(f engine.Finding) bool {
 // Filter removes baselined findings from res and recomputes its score.
 // A finding with some new advisories stays, narrowed to the new ones. It
 // returns how many findings were hidden; the caller puts that in
-// Report.Baselined.
+// Report.Baselined. A batch baseline hides only findings of the target
+// res scanned.
 func (b Baseline) Filter(res *engine.Result) int {
 	if len(b.keys) == 0 && len(b.legacy) == 0 {
 		return 0
 	}
 	kept := res.Findings[:0]
 	for _, f := range res.Findings {
-		if b.Has(f) {
+		if b.has(res.Target, f) {
 			continue
 		}
 		if len(f.Advisories) > 0 {
-			fp := Fingerprint(f, "")
+			fp := b.scope(res.Target) + Fingerprint(f, "")
 			var fresh []engine.Advisory
 			for _, a := range f.Advisories {
 				if !b.keys[advisoryKey(fp, a.ID)] {
@@ -115,7 +142,7 @@ func (b Baseline) Filter(res *engine.Result) int {
 	res.Score = engine.Score(kept)
 	if b.old != "" {
 		res.Warnings = append(res.Warnings, fmt.Sprintf(
-			"baseline %s predates finding fingerprints; save a fresh one with --json -o %s", b.old, b.old))
+			"baseline %s predates finding fingerprints; save a fresh one by running the scan without --baseline and with --json -o %s", b.old, b.old))
 	}
 	return n
 }

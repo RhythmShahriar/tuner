@@ -297,14 +297,5 @@ func earlier(since []Report, n int, r Report) *Report {
 	return nil
 }
 
-// sameTarget compares targets by host and path, ignoring the scheme and a
-// trailing slash, as package diff pairs them.
-func sameTarget(a, b string) bool {
-	key := func(t string) string {
-		if u, err := url.Parse(t); err == nil && u.Host != "" {
-			return strings.ToLower(u.Host) + strings.TrimSuffix(u.Path, "/")
-		}
-		return strings.TrimSuffix(t, "/")
-	}
-	return key(a) == key(b)
-}
+// sameTarget compares targets by TargetKey.
+func sameTarget(a, b string) bool { return TargetKey(a) == TargetKey(b) }

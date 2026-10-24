@@ -71,3 +71,13 @@ func cleanPath(p string) string {
 // writer and baselines compute fingerprints with Fingerprint when they
 // need them, so Stamp has nothing to store yet.
 func Stamp(res *engine.Result, root string) {}
+
+// TargetKey pairs a target across scans: a URL by host and path without
+// scheme or trailing slash, a folder as written. Batch baselines, diffs
+// and the HTML report's NEW markers all pair sites this way.
+func TargetKey(t string) string {
+	if u, err := url.Parse(t); err == nil && u.Host != "" {
+		return strings.ToLower(u.Host) + strings.TrimSuffix(u.Path, "/")
+	}
+	return strings.TrimSuffix(t, "/")
+}

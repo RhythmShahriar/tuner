@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/url"
 	"slices"
 	"strings"
 
@@ -64,16 +63,16 @@ func Compare(before, after []report.Report) Result {
 	}
 	old := map[string]*report.Report{}
 	for i := range before {
-		old[targetKey(before[i].Target)] = &before[i]
+		old[report.TargetKey(before[i].Target)] = &before[i]
 	}
 	seen := map[string]bool{}
 	for i := range after {
-		k := targetKey(after[i].Target)
+		k := report.TargetKey(after[i].Target)
 		seen[k] = true
 		res.add(old[k], &after[i])
 	}
 	for _, r := range before {
-		if !seen[targetKey(r.Target)] {
+		if !seen[report.TargetKey(r.Target)] {
 			res.NotScanned = append(res.NotScanned, r.Target)
 		}
 	}
@@ -143,15 +142,6 @@ func (res *Result) sort() {
 			return cmp.Compare(a.Finding.Severity.Rank(), b.Finding.Severity.Rank())
 		})
 	}
-}
-
-// targetKey pairs a target across scans: a URL by host and path without
-// scheme or trailing slash, a folder as written.
-func targetKey(t string) string {
-	if u, err := url.Parse(t); err == nil && u.Host != "" {
-		return strings.ToLower(u.Host) + strings.TrimSuffix(u.Path, "/")
-	}
-	return strings.TrimSuffix(t, "/")
 }
 
 // NewAtOrAbove reports whether a new finding is at least as severe as level.
