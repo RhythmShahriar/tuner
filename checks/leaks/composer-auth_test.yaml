@@ -6,6 +6,15 @@ positive:
     expect_secrets: true
     routes:
       /auth.json: {body: '{"github-oauth": {"github.com": "ghp_abcdefghijklmnopqrstuvwxyz0123456789"}}'}
+  - name: http-basic password readable
+    routes:
+      /auth.json:
+        body: |
+          {
+            "http-basic": {
+              "repo.example.com": {"username": "deploy", "password": "s3cr3t-B4sic-Pass"}
+            }
+          }
 negative:
   - name: unrelated json
     routes:

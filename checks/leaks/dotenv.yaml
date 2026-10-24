@@ -11,7 +11,11 @@ request:
 match:
   all:
     - status: 200
-    - regex: '(?m)^[A-Z_]+=.+'
+    # Names only: the match stops at "=", so no value can reach the
+    # evidence, whatever the variable is called.
+    - regex: '(?m)^[A-Za-z_][A-Za-z0-9_]*='
+    # A docs or error page that shows example KEY=value lines.
+    - not_regex: '(?i)<(?:!doctype|html|head|body)[\s>]'
     - not_baseline: true
 extract:
   secrets: true

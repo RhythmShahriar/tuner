@@ -10,6 +10,36 @@ positive:
           APP_NAME=Laravel
           DB_PASSWORD=supersecret
           STRIPE_SECRET=sk_live_abcdefghijklmnop1234
+  # Names the masking rules don't know come first, so they would be the
+  # evidence if the check captured values.
+  - name: unlisted password names first
+    routes:
+      /.env:
+        body: |
+          DB_PWD=Hunter2-RealProdPassword
+          SMTP_PW=MailPass99-Relay
+  - name: redis url with an empty user
+    routes:
+      /.env.production:
+        body: |
+          REDIS_URL=redis://:S3cretRedisPass@cache:6379/0
+  - name: mysql client password and api key
+    routes:
+      /.env.local:
+        body: |
+          MYSQL_PWD=HunterTwoDbPass
+          APIKEY=abcdef1234567890abcdef
+  - name: lower-case names
+    routes:
+      /.env:
+        body: |
+          db_password=lowercase-secret-value
+          app_key=base64:lowerCaseAppKeyValue123
+  - name: slack webhook
+    routes:
+      /.env.backup:
+        body: |
+          SLACK_WEBHOOK_URL=https://hooks.slack.com/services/T0ABCDEFG/B0HIJKLMN/abcdefghijklmnopqrstuvwx
 negative:
   - name: blocked
     routes:
@@ -18,3 +48,15 @@ negative:
     default: {status: 200, body: "<html><title>Not found</title><p>{{path}} does not exist</p></html>"}
   - name: catch-all that echoes env-like text
     default: {status: 200, body: "APP_ENV=prod served {{path}}"}
+  - name: html page that shows KEY=value in prose
+    routes:
+      /.env:
+        body: |
+          <!DOCTYPE html>
+          <html><body>
+          <p>Copy these lines into your own .env file:</p>
+          <pre>
+          APP_KEY=your-key-here
+          DB_PASSWORD=change-me
+          </pre>
+          </body></html>
