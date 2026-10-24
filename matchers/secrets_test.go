@@ -61,21 +61,26 @@ func TestFindSecretsKitAndSupplement(t *testing.T) {
 		{"REDIS_URL=redis://:S3cretRedisPass@cache:6379/0\n", "S3cretRedisPass", "url-credentials"},
 		{"MYSQL_PWD=myS3cretPw\n", "myS3cretPw", "env"},
 		{"DB_PWD=dbS3cretPw\n", "dbS3cretPw", "env"},
-		{"APIKEY=abcdef123456\n", "abcdef123456", "form-field"},
+		{"APIKEY=abcdef123456\n", "abcdef123456", "header-token"},
 		{`{"http-basic": {"repo.example.com": {"username": "bob", "password": "Bas1cPassw0rd"}}}`, "Bas1cPassw0rd", "json-field"},
-		// Supplement rules.
+		// Former supplement rules that kit/secrets v0.6 now covers.
 		{"SMTP_PW=smtpS3cret\n", "smtpS3cret", "env"},
-		{"export dbpw=lowerS3cret\n", "lowerS3cret", "env"},
 		{"LICENSEKEY=lic-0123456789\n", "lic-0123456789", "env"},
 		{"STRIPE_SECRETKEYS=sec-0123456789\n", "sec-0123456789", "env"},
 		{"SENTRY_DSN=pub0123456789abcdef\n", "pub0123456789abcdef", "env"},
 		{"AWS_CREDENTIALS=credS3cretValue\n", "credS3cretValue", "env"},
 		{"smtp_credential='credS3cret2'\n", "credS3cret2", "env"},
+		{"mysqlpwd=pwdS3cretValue\n", "pwdS3cretValue", "env"},
 		{"amqp://:Rabb1tPass@mq:5672", "Rabb1tPass", "url-credentials"},
+		{`{"bitbucket-oauth": {"bitbucket.org": {"consumer-key": "consumerKeyValue", "consumer-secret": "consumerSecretValue"}}}`, "consumerKeyValue", "json-field"},
+		// Rules the Tuner supplement still adds.
+		{"export dbpw=lowerS3cret\n", "lowerS3cret", "env"},
+		{"DBPW=upperS3cret\n", "upperS3cret", "env"},
+		{"LICENSEKEYS=lic-0123456789\n", "lic-0123456789", "env"},
 		{`{"github-oauth": {"github.com": "oauthT0kenValue123"}}`, "oauthT0kenValue123", "composer-auth"},
+		{`{"gitlab-oauth": {"gitlab.com": "glOauthValue123"}}`, "glOauthValue123", "composer-auth"},
 		{`{"gitlab-token": {"gitlab.com": "glT0kenValue123"}}`, "glT0kenValue123", "composer-auth"},
 		{`{"bearer": {"repo.example.org": "bearerT0kenValue"}}`, "bearerT0kenValue", "composer-auth"},
-		{`{"bitbucket-oauth": {"bitbucket.org": {"consumer-key": "consumerKeyValue", "consumer-secret": "consumerSecretValue"}}}`, "consumerKeyValue", "composer-auth"},
 	}
 	for _, c := range cases {
 		got := FindSecrets([]byte(c.in))
@@ -99,15 +104,14 @@ func TestFindSecretsKitAndSupplement(t *testing.T) {
 func TestFindSecretsSupplementNegatives(t *testing.T) {
 	for _, in := range []string{
 		"KEYBOARD_LAYOUT=us-international\n",
-		"KEY_REPEAT_DELAY=250ms\n",
 		"HOTKEY=ctrl-shift-k\n",
+		"HOTKEYS=ctrl-shift-k\n",
 		"MONKEYS=twelve\n",
 		"PWA_NAME=Shop\n",
-		"GOOGLE_APPLICATION_CREDENTIALS=/etc/gcp/service.json\n",
 		"CREDENTIALS_FILE=./creds.json\n",
 		"MYSQL_PWD=${MYSQL_PWD}\n",
 		"DB_PWD=null\n",
-		"DB_PW=xy\n",
+		"DBPW=${DBPW}\n",
 		"see https://example.com/:path@x",
 		`{"github-oauth": {}}`,
 	} {
@@ -120,9 +124,27 @@ func TestFindSecretsSupplementNegatives(t *testing.T) {
 	}
 }
 
+// kit/secrets v0.6 masks these, which the old supplement left alone: a
+// name part KEY anywhere, a credentials path and a short value under a
+// secret name. Masking too much is the safe side, so Tuner follows the kit.
+func TestFindSecretsKitMasksMore(t *testing.T) {
+	for in, secret := range map[string]string{
+		"KEY_REPEAT_DELAY=250ms\n":                               "250ms",
+		"GOOGLE_APPLICATION_CREDENTIALS=/etc/gcp/service.json\n": "service.json",
+		"DB_PW=xy\n": "xy",
+	} {
+		if got := FindSecrets([]byte(in)); len(got) != 1 {
+			t.Errorf("%q: got %v, want one secret", in, got)
+		}
+		if red := Redact(in); strings.Contains(red, secret) {
+			t.Errorf("Redact(%q) = %q leaks the value", in, red)
+		}
+	}
+}
+
 // A value both the kit and the supplement would catch is reported once.
 func TestFindSecretsNoDoubleReport(t *testing.T) {
-	got := FindSecrets([]byte("export GITHUB_APIKEY=ghp_abcdefghijklmnopqrstuvwxyz0123456789\n"))
+	got := FindSecrets([]byte("export GITHUB_DBPW=ghp_abcdefghijklmnopqrstuvwxyz0123456789\n"))
 	if len(got) != 1 || got[0].Kind != "github-token" {
 		t.Errorf("got %v, want one github-token", got)
 	}

@@ -5,57 +5,60 @@ package engine
 
 import (
 	"context"
+	"math"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/RhythmShahriar/rhythm/kit/ratelimit"
 )
 
 // Pace a scan without a rate limit (--rate 0) drops to on its first 429
-// or 503: four requests a second, halved again on each one after.
+// or 503: four requests a second, halved again on each one after. The kit
+// limiter does the same; the constant is kept for the tests and the help.
 const throttledPace = 250 * time.Millisecond
 
 // pace is the request pace for one host, shared by every scan a Scanner
 // runs against that host, so two targets on one server stay under --rate
-// together. It wraps a kit limiter and adds the one thing the kit lacks:
-// without --rate there is no limiter until the site first throttles.
+// together. The kit limiter already slows an unlimited pace on Slow; pace
+// adds one thing: the request right after the first throttle waits a full
+// step instead of going out at once.
 type pace struct {
-	mu sync.Mutex
-	l  *ratelimit.Limiter // nil lets everything through
+	l *ratelimit.Limiter
+	// unlimited is set while a pace made without --rate has not been
+	// slowed yet.
+	unlimited atomic.Bool
 }
 
 func (p *pace) wait(ctx context.Context) error {
-	p.mu.Lock()
-	l := p.l
-	p.mu.Unlock()
-	return l.Wait(ctx)
+	return p.l.Wait(ctx)
 }
 
 // slow halves the request rate, down to ratelimit.Slowest. An unlimited
 // pace starts at throttledPace and the next request already waits for it.
 func (p *pace) slow() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.l != nil {
-		p.l.Slow()
-		return
+	p.l.Slow()
+	if p.unlimited.CompareAndSwap(true, false) {
+		// An unlimited limiter's next slot is now; taking it here makes
+		// the request after the 429 wait a full step.
+		_ = p.l.Wait(context.Background())
 	}
-	p.l = ratelimit.New(float64(time.Second) / float64(throttledPace))
-	// A new limiter lets its first request through at once; taking that
-	// slot here makes the request after the 429 wait a full step.
-	_ = p.l.Wait(context.Background())
 }
 
 // paces hands out one pace per host name (any case, any port).
 type paces struct {
-	hosts *ratelimit.Hosts
-	mu    sync.Mutex
-	m     map[string]*pace
+	hosts     *ratelimit.Hosts
+	unlimited bool
+	mu        sync.Mutex
+	m         map[string]*pace
 }
 
+// newPaces paces each host at rps requests a second. Like the kit, a rate
+// of 0 or less (or NaN or +Inf) means no limit until a site throttles.
 func newPaces(rps float64) *paces {
-	return &paces{hosts: ratelimit.NewHosts(rps), m: map[string]*pace{}}
+	unlimited := !(rps > 0) || math.IsInf(rps, 1)
+	return &paces{hosts: ratelimit.NewHosts(rps), unlimited: unlimited, m: map[string]*pace{}}
 }
 
 func (ps *paces) For(host string) *pace {
@@ -65,6 +68,7 @@ func (ps *paces) For(host string) *pace {
 	p, ok := ps.m[host]
 	if !ok {
 		p = &pace{l: ps.hosts.For(host)}
+		p.unlimited.Store(ps.unlimited)
 		ps.m[host] = p
 	}
 	return p

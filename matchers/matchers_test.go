@@ -53,7 +53,7 @@ func TestRegexEvidenceRedactedBeforeCut(t *testing.T) {
 	if !ok {
 		t.Fatal("no match")
 	}
-	if !strings.Contains(ev, "sk_live_•••••") {
+	if !strings.Contains(ev, "sk_l•••••") {
 		t.Errorf("masked form missing: %q", ev)
 	}
 	if strings.Contains(ev, "sk_live_a") || strings.Contains(ev, "abcdef") {

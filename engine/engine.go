@@ -25,6 +25,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/RhythmShahriar/rhythm/kit/httpx"
 	"github.com/RhythmShahriar/rhythm/kit/ratelimit"
 	"github.com/RhythmShahriar/tuner/fingerprint"
 	"github.com/RhythmShahriar/tuner/matchers"
@@ -692,7 +693,7 @@ func (s *Scanner) open(ctx context.Context, target string, h Hooks) (*session, *
 
 // ParseTarget accepts a URL or bare hostname. explicitScheme is false when
 // the scheme was guessed, in which case Scan falls back from https to http.
-// It is kit/ratelimit.ParseTarget, except that credentials in the URL are
+// It is kit/httpx.ParseTarget, except that credentials in the URL are
 // dropped from u and masked in errors; ParseTargetAuth returns them.
 func ParseTarget(target string) (u *url.URL, explicitScheme bool, err error) {
 	u, explicitScheme, _, err = ParseTargetAuth(target)
@@ -704,7 +705,7 @@ func ParseTarget(target string) (u *url.URL, explicitScheme bool, err error) {
 // them, so they can't reach findings, logs or error messages; Scan sends
 // the header with every request to the target instead of only the first.
 func ParseTargetAuth(target string) (u *url.URL, explicitScheme bool, authorization string, err error) {
-	u, explicitScheme, err = ratelimit.ParseTarget(target)
+	u, explicitScheme, err = httpx.ParseTarget(target)
 	if err != nil {
 		// The kit quotes the target in its error, password included.
 		full := target
