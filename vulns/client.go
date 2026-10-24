@@ -49,7 +49,7 @@ const (
 var ErrOffline = cache.ErrOffline
 
 // ErrOldCache means the only cached copy was written by an older Tuner,
-// which normalised records differently, and --offline forbids refetching it.
+// which normalised records differently; --offline forbids refetching it.
 var ErrOldCache = cache.ErrOldFormat
 
 // cacheFormat versions the records on disk. Bump it whenever normalize

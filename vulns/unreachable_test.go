@@ -113,7 +113,7 @@ func TestUnreachableWarning(t *testing.T) {
 	}
 }
 
-// A data service that answers with errors is up: no breaker, and the
+// A data service that answers with errors is up: no breaker and the
 // usual warning.
 func TestHTTPErrorIsNotUnreachable(t *testing.T) {
 	f := newFakeAPI(t)

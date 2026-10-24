@@ -3,7 +3,7 @@
 
 // Package ratelimit keeps Tuner polite and quick with the free data
 // services it relies on: Limiter spaces requests, Breaker stops asking a
-// host that can't be reached, and FastClient gives up on dead connections
+// host that can't be reached and FastClient gives up on dead connections
 // early. Limiter matches rhythm's kit/ratelimit.Limiter, so the two can be
 // swapped once Tuner pins a kit release that has it.
 package ratelimit

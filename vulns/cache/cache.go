@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package cache is the on-disk cache for vulnerability data: fresh entries
-// are reused, stale ones refreshed, and when the network is down the last
+// are reused and stale ones refreshed. When the network is down the last
 // good copy is used.
 //
 // It follows rhythm's kit/cache (Store, Load, ReadJSON, WriteJSON,
@@ -37,10 +37,10 @@ const errorMemo = time.Minute
 
 var (
 	// ErrOffline means the data isn't cached and the store is offline.
-	ErrOffline = errors.New("not cached, and offline mode is on")
+	ErrOffline = errors.New("not cached; offline mode is on")
 	// ErrOldFormat means the only cached copy has another format (an older
 	// Tuner wrote it) and the store is offline, so it can't be refetched.
-	ErrOldFormat = errors.New("cached by an older Tuner, and offline mode is on")
+	ErrOldFormat = errors.New("cached by an older Tuner; offline mode is on")
 )
 
 // Store caches JSON-encodable values under Dir/<kind>/<key>.json.
@@ -202,7 +202,7 @@ var unsafeKey = regexp.MustCompile(`[^A-Za-z0-9._@-]`)
 var reserved = regexp.MustCompile(`(?i)^(con|prn|aux|nul|com[0-9]|lpt[0-9])$`)
 
 // SafeName turns a key into a file name (without the extension) that is
-// valid on every OS: unsafe characters become "_", and a Windows device
+// valid on every OS: unsafe characters become "_" and a Windows device
 // name gets a trailing "_" (con → con_). It returns "" for keys that
 // can't name a file, like "" and "..".
 func SafeName(key string) string {

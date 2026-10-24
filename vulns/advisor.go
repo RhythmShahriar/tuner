@@ -190,7 +190,7 @@ func (a *Advisor) AdviseStatus(ctx context.Context, base *url.URL, fp fingerprin
 	for _, l := range lookups {
 		looked++
 		if l.err == nil && l.rec == nil {
-			l.err = errNoRecord // never expected, but a nil record must not crash a scan
+			l.err = errNoRecord // never expected; still, a nil record must not crash a scan
 		}
 		if l.err != nil {
 			fail(l.kind+" "+l.slug, l.err)
