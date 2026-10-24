@@ -251,6 +251,9 @@ func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.store.setActive(sc)
+	// The answer is the scan as queued: once pushed, a worker may start
+	// or even finish it before the response is written.
+	queued := sc.record().public()
 	if err := s.queue.push(sc); err != nil {
 		// Turned away: as if the request never came.
 		s.store.dropActive(sc.id)
@@ -264,7 +267,7 @@ func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 	}
 	s.logf("scan %s queued for %s", sc.id, t.URL)
 	w.Header().Set("Location", "/v0/scans/"+sc.id)
-	writeJSON(w, http.StatusAccepted, sc.record().public())
+	writeJSON(w, http.StatusAccepted, queued)
 }
 
 func (s *Server) getScan(w http.ResponseWriter, r *http.Request) {
