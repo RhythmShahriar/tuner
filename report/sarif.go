@@ -21,8 +21,22 @@ type sarifLog struct {
 }
 
 type sarifRun struct {
-	Tool    sarifTool     `json:"tool"`
-	Results []sarifResult `json:"results"`
+	Tool        sarifTool         `json:"tool"`
+	Invocations []sarifInvocation `json:"invocations"`
+	Results     []sarifResult     `json:"results"`
+}
+
+// sarifInvocation says whether the run finished. A partial scan sets
+// executionSuccessful to false and explains why in a notification, so a
+// reader of the alerts knows some may be missing.
+type sarifInvocation struct {
+	ExecutionSuccessful        bool                `json:"executionSuccessful"`
+	ToolExecutionNotifications []sarifNotification `json:"toolExecutionNotifications,omitempty"`
+}
+
+type sarifNotification struct {
+	Level   string    `json:"level"`
+	Message sarifText `json:"message"`
 }
 
 type sarifTool struct {
@@ -103,6 +117,12 @@ func writeSARIF(w io.Writer, reports []Report, o WriteOptions) error {
 			}},
 			Results: []sarifResult{},
 		}
+		st := r.Status()
+		inv := sarifInvocation{ExecutionSuccessful: !st.Partial()}
+		for _, n := range st.Notes() {
+			inv.ToolExecutionNotifications = append(inv.ToolExecutionNotifications, sarifNotification{"warning", sarifText{n}})
+		}
+		run.Invocations = []sarifInvocation{inv}
 		for _, f := range r.Findings {
 			if !slices.ContainsFunc(run.Tool.Driver.Rules, func(x sarifRule) bool { return x.ID == f.ID }) {
 				rule := sarifRule{

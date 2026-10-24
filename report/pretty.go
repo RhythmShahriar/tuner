@@ -42,11 +42,16 @@ type Pretty struct {
 	drawn   bool // a progress line is on screen and must be cleared first
 	spaced  bool // a blank line already separates the scan steps from the report
 	tally   map[engine.Severity]int
+	status  Status
 }
 
 func NewPretty(w, errw io.Writer, o PrettyOptions) *Pretty {
-	return &Pretty{w: w, errw: errw, o: o, start: time.Now(), tally: map[engine.Severity]int{}}
+	return &Pretty{w: w, errw: errw, o: o, start: time.Now(), tally: map[engine.Severity]int{}, status: Status{Complete: true}}
 }
+
+// SetStatus tells Summary how complete the scan was, so a partial scan
+// says so above its score.
+func (p *Pretty) SetStatus(s Status) { p.status = s }
 
 var (
 	muted = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.Muted))
@@ -311,9 +316,9 @@ func (p *Pretty) Summary(res *engine.Result, target string, suppressed int) {
 			parts = append(parts, fmt.Sprintf("%d %s", n, s))
 		}
 	}
-	stats := []string{fmt.Sprintf("%d checks", res.Checks)}
+	stats := []string{plural(int64(res.Checks), "check")}
 	if res.Requests > 0 { // local scans make none
-		stats = append(stats, fmt.Sprintf("%d requests", res.Requests))
+		stats = append(stats, plural(res.Requests, "request"))
 	}
 	stats = append(stats, res.Duration.Round(100*time.Millisecond).String())
 	if suppressed > 0 {
@@ -323,7 +328,7 @@ func (p *Pretty) Summary(res *engine.Result, target string, suppressed int) {
 		stats = append(stats, fmt.Sprintf("throttled %d× (slowed down)", res.Throttled))
 	}
 	if res.Errors > 0 {
-		stats = append(stats, fmt.Sprintf("%d errors", res.Errors))
+		stats = append(stats, plural(res.Errors, "error"))
 	}
 
 	var notes []string
@@ -339,13 +344,21 @@ func (p *Pretty) Summary(res *engine.Result, target string, suppressed int) {
 		if len(parts) == 0 {
 			parts = []string{"no findings"}
 		}
-		fmt.Fprintf(p.w, "\nScore %d/100 - %s - %s\n", res.Score, strings.Join(parts, ", "), strings.Join(stats, ", "))
+		fmt.Fprintln(p.w)
+		for _, n := range p.status.Notes() {
+			fmt.Fprintln(p.w, n)
+		}
+		fmt.Fprintf(p.w, "Score %d/100 - %s - %s\n", res.Score, strings.Join(parts, ", "), strings.Join(stats, ", "))
 		for _, n := range notes {
 			fmt.Fprintf(p.w, "note: %s\n", n)
 		}
 		return
 	}
 
+	warn := lipgloss.NewStyle().Foreground(lipgloss.Color(ui.Warn)).Bold(true)
+	for _, n := range p.status.Notes() {
+		fmt.Fprintf(p.w, "  %s\n", warn.Render("! "+n))
+	}
 	fmt.Fprintln(p.w, scorePanel(res.Score, counts))
 	fmt.Fprintf(p.w, "  %s\n", muted.Render(strings.Join(stats, " · ")))
 	for _, n := range notes {
@@ -422,6 +435,14 @@ func scorePanel(score int, counts map[engine.Severity]int) string {
 	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(color)).
 		Padding(0, 2).MarginLeft(1)
 	return box.Render(strings.Join([]string{top, bar, breakdown}, "\n"))
+}
+
+// plural renders a count with its noun: "1 error", "3 errors".
+func plural(n int64, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 func firstLine(s string) string {

@@ -23,6 +23,17 @@ func writeMarkdown(w io.Writer, reports []Report, o WriteOptions) error {
 			b.WriteString("\n---\n\n")
 		}
 		fmt.Fprintf(&b, "# Tuner report: %s\n\n", MDText(r.Target))
+		if notes := r.Status().Notes(); len(notes) > 0 {
+			var quote []string
+			for _, n := range notes {
+				if rest, ok := strings.CutPrefix(n, "Incomplete: "); ok {
+					quote = append(quote, "> ⚠️ **Incomplete:** "+MDText(rest))
+				} else {
+					quote = append(quote, "> ⚠️ "+MDText(n))
+				}
+			}
+			b.WriteString(strings.Join(quote, "\n>\n") + "\n\n")
+		}
 		fmt.Fprintf(&b, "**Tune score %d/100** · %s · %d checks · %d requests · rhythm-tuner %s\n\n",
 			r.Score, MDText(r.Fingerprint.String()), r.Checks, r.Requests, MDText(r.Version))
 

@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"strings"
 
 	"github.com/RhythmShahriar/tuner/engine"
 )
@@ -25,6 +26,15 @@ type Report struct {
 	CheckSet   string                  `json:"check_set,omitempty"`  // built-in, pack or directory
 	CheckPack  string                  `json:"check_pack,omitempty"` // the pack's version, when check_set is pack
 	Baselined  int                     `json:"baselined"`            // findings a baseline file hid
+
+	// How complete the scan is (see Status). These sit on Report rather
+	// than in an embedded struct so they win over the same names on
+	// engine.Result once it has them (contract D1).
+	Complete  bool   `json:"complete"`
+	StoppedBy string `json:"stopped_by,omitempty"`
+	BlockedBy string `json:"blocked_by,omitempty"`
+	VulnData  string `json:"vuln_data,omitempty"`
+
 	*engine.Result
 
 	root string // the local scan root, for fingerprints; see WriteOptions.Root
@@ -78,8 +88,86 @@ func New(res *engine.Result, version string) Report {
 		Version:    SafeText(version),
 		DurationMS: res.Duration.Milliseconds(),
 		Summary:    clean.Counts(),
+		Complete:   true, // until engine.Result says otherwise (contract D1)
 		Result:     &clean,
 	}
+}
+
+// Status says whether a scan saw everything it set out to. A report that
+// looks finished but isn't (a Ctrl+C, --max-time, a firewall challenge,
+// a vulnerability API that never answered) would pass a CI gate it
+// should fail, so every format says so plainly.
+type Status struct {
+	Complete  bool
+	StoppedBy string // interrupted, max-time, waf, home-status or budget
+	BlockedBy string // the firewall that challenged the scan: cloudflare, sucuri, ...
+	VulnData  string // ok, partial, missing or off (--no-vulns)
+}
+
+// Status returns the report's completeness.
+func (r Report) Status() Status {
+	return Status{Complete: r.Complete, StoppedBy: r.StoppedBy, BlockedBy: r.BlockedBy, VulnData: r.VulnData}
+}
+
+// SetStatus records the scan's completeness on the report.
+func (r *Report) SetStatus(s Status) {
+	r.Complete, r.StoppedBy, r.BlockedBy, r.VulnData = s.Complete, SafeText(s.StoppedBy), SafeText(s.BlockedBy), SafeText(s.VulnData)
+}
+
+// Partial reports whether the scan stopped early or was blocked.
+func (s Status) Partial() bool { return !s.Complete || s.StoppedBy != "" || s.BlockedBy != "" }
+
+// Notes returns the warnings a reader must see before the score, e.g.
+// "Incomplete: stopped by --max-time". It is empty for a whole scan.
+func (s Status) Notes() []string {
+	var notes []string
+	if s.Partial() {
+		notes = append(notes, "Incomplete: "+s.reason())
+	}
+	switch s.VulnData {
+	case "missing":
+		notes = append(notes, "Score excludes known vulnerabilities (vulnerability data missing)")
+	case "partial":
+		notes = append(notes, "Score may miss known vulnerabilities (vulnerability data partial)")
+	}
+	return notes
+}
+
+func (s Status) reason() string {
+	blocked := "blocked by a firewall challenge"
+	if s.BlockedBy != "" {
+		blocked = "blocked by " + firewallName(s.BlockedBy) + " challenge"
+	}
+	switch s.StoppedBy {
+	case "interrupted":
+		return "interrupted"
+	case "max-time":
+		return "stopped by --max-time"
+	case "waf":
+		return blocked
+	case "home-status":
+		return "the home page did not load"
+	case "budget":
+		return "stopped at the request budget"
+	case "":
+		if s.BlockedBy != "" {
+			return blocked
+		}
+		return "the scan did not finish"
+	}
+	return "stopped by " + SafeText(s.StoppedBy)
+}
+
+var firewallNames = map[string]string{
+	"cloudflare": "Cloudflare", "sucuri": "Sucuri", "imperva": "Imperva", "wordfence": "Wordfence",
+	"akamai": "Akamai", "aws": "AWS WAF", "modsecurity": "ModSecurity",
+}
+
+func firewallName(id string) string {
+	if n, ok := firewallNames[strings.ToLower(id)]; ok {
+		return n
+	}
+	return SafeText(id)
 }
 
 func encoder(w io.Writer) *json.Encoder {
