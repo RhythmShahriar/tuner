@@ -142,7 +142,7 @@ func (r *Rule) compile() error {
 		return fmt.Errorf("severity %q isn't one of critical, high, medium, low, info", r.Severity)
 	case r.Extract.Severity != "" && !slices.Contains(engine.Severities, r.Extract.Severity):
 		return fmt.Errorf("extract.severity %q isn't one of critical, high, medium, low, info", r.Extract.Severity)
-	case r.Confidence != "high" && r.Confidence != "low":
+	case r.Confidence != confidenceHigh && r.Confidence != confidenceLow:
 		return fmt.Errorf("confidence %q must be high or low", r.Confidence)
 	case len(r.Files) == 0:
 		return errors.New("files is required")

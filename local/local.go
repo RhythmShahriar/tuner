@@ -186,8 +186,15 @@ func scanStatus(ctx context.Context, root string, opts Options, h engine.Hooks) 
 	res.Score = engine.Score(res.Findings)
 	res.Duration = time.Since(start)
 	st := status{complete: s.stoppedBy == "", stoppedBy: s.stoppedBy, vulnData: combineVulnData(advisor, osv)}
+	if observe != nil {
+		observe(opts, res)
+	}
 	return res, st, ctx.Err()
 }
+
+// observe, when set, sees every scan's result. Tests use it to check
+// that each finding ID the suite produces is in the Catalog.
+var observe func(Options, *engine.Result)
 
 // Root resolves a local target to an absolute directory, expanding a
 // leading ~, ~/ or ~\ to the home folder on every OS. It errors if the
@@ -285,7 +292,7 @@ func (s *scan) finding(id string, sev engine.Severity, abs, title string, ev []s
 		ID:         id,
 		Title:      title,
 		Severity:   sev,
-		Confidence: "high",
+		Confidence: confidenceHigh,
 		URL:        fileURL(abs).String(),
 		Path:       s.rel(abs),
 		Evidence:   engine.Evidence{Request: "read " + s.rel(abs), Matched: ev},
@@ -429,7 +436,7 @@ func sortFindings(fs []engine.Finding) {
 		if d := a.Severity.Rank() - b.Severity.Rank(); d != 0 {
 			return d
 		}
-		if al, bl := a.Confidence == "low", b.Confidence == "low"; al != bl {
+		if al, bl := a.Confidence == confidenceLow, b.Confidence == confidenceLow; al != bl {
 			if al {
 				return 1
 			}

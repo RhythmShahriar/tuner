@@ -354,7 +354,7 @@ func (s *scan) wpConfig() []engine.Finding {
 func (s *scan) maybe(cfg config, absent bool, id string, sev engine.Severity, path, title string, ev []string, impact, fix string, tags ...string) engine.Finding {
 	f := s.finding(id, sev, path, title, ev, impact, fix, tags...)
 	if absent && cfg.includes {
-		f.Confidence = "low"
+		f.Confidence = confidenceLow
 		f.Evidence.Matched = append(f.Evidence.Matched, "wp-config.php includes other files, which may set this")
 	}
 	return f

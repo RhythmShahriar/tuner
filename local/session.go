@@ -167,11 +167,11 @@ func (s *scan) sessionUploadProgress(ctx context.Context, code *sessionVisitor) 
 		f.Title = sessionCVE + " is reachable: all four conditions hold"
 	case cond1:
 		f.Title = sessionCVE + " is likely reachable"
-		f.Confidence = "low"
+		f.Confidence = confidenceLow
 		f.Caveat = "likely: the code's order of calls couldn't be confirmed from one file"
 	case len(ctxs) == 0:
 		f.Severity, f.Title = engine.Medium, sessionCVE+": runtime handler switch found, configuration unknown"
-		f.Confidence = "low"
+		f.Confidence = confidenceLow
 		f.Caveat = "likely: PHP's configuration couldn't be read; check session.serialize_handler"
 	default:
 		f.Severity, f.Title = engine.Low, sessionCVE+": runtime handler switch found, not reachable now"
