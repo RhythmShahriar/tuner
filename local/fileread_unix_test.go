@@ -39,12 +39,11 @@ func TestSpecialFilesDontBlock(t *testing.T) {
 	if err := os.Symlink("/dev/zero", filepath.Join(root, "wp-content/themes/zero/style.css")); err != nil {
 		t.Fatal(err)
 	}
-	// Unix socket paths are limited to about 100 bytes; keep it short.
-	ln, err := net.Listen("unix", filepath.Join(root, "wp-content/themes/sock/style.css"))
-	if err != nil {
-		t.Skipf("unix socket: %v", err)
-	}
-	defer func() { _ = ln.Close() }()
+	// Unix socket paths are limited to about 100 bytes, less than a
+	// macOS TMPDIR plus the tree needs, so bind in a short folder and
+	// move the socket into the tree. If even that fails, only the
+	// socket check is left out.
+	sock := bindSocket(t, filepath.Join(root, "wp-content/themes/sock/style.css"))
 
 	done := make(chan *engine.Result, 1)
 	go func() {
@@ -68,11 +67,13 @@ func TestSpecialFilesDontBlock(t *testing.T) {
 		"skipped /auth.json: it is a named pipe",
 		"skipped /.env: it is a named pipe",
 		"skipped /wp-content/themes/zero/style.css: it is a link to a character device",
-		"skipped /wp-content/themes/sock/style.css: it is a socket",
 	} {
 		if !slices.ContainsFunc(res.Warnings, func(w string) bool { return strings.HasPrefix(w, want) }) {
 			t.Errorf("no warning %q in %q", want, res.Warnings)
 		}
+	}
+	if want := "skipped /wp-content/themes/sock/style.css: it is a socket"; sock && !slices.ContainsFunc(res.Warnings, func(w string) bool { return strings.HasPrefix(w, want) }) {
+		t.Errorf("no warning %q in %q", want, res.Warnings)
 	}
 	if slices.ContainsFunc(res.Warnings, func(w string) bool { return strings.Contains(w, "couldn't read wp-config.php") }) {
 		t.Errorf("wp-config.php warned twice: %q", res.Warnings)
@@ -116,4 +117,31 @@ func mkfifo(t *testing.T, path string) {
 	if err := syscall.Mkfifo(path, 0o600); err != nil {
 		t.Skipf("mkfifo: %v", err)
 	}
+}
+
+// bindSocket puts a listening unix socket at path and reports whether it
+// could. It binds under a short temporary folder (in TMPDIR, else /tmp)
+// and renames the socket into place, since path itself may be over the
+// socket path limit.
+func bindSocket(t *testing.T, path string) bool {
+	t.Helper()
+	var err error
+	for _, base := range []string{"", "/tmp"} {
+		var dir string
+		if dir, err = os.MkdirTemp(base, "s"); err != nil {
+			continue
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(dir) })
+		var ln net.Listener
+		if ln, err = net.Listen("unix", filepath.Join(dir, "s")); err != nil {
+			continue
+		}
+		t.Cleanup(func() { _ = ln.Close() })
+		if err = os.Rename(filepath.Join(dir, "s"), path); err != nil {
+			break // the socket is there but can't move; another folder won't help
+		}
+		return true
+	}
+	t.Logf("unix socket left out: %v", err)
+	return false
 }
