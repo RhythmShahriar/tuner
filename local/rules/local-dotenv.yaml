@@ -1,0 +1,17 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+id: local-dotenv
+name: "{file} file in the web root"
+severity: medium
+confidence: high
+tags: [leak, secrets]
+scope: web
+files: ["**/.env", "**/.env.*"]
+# Templates, not real settings.
+exclude: ["**/.env.example", "**/.env.sample", "**/.env.dist", "**/.env.template", "**/.env.defaults"]
+extract:
+  secrets: true
+  severity: high
+impact: Environment files hold database passwords and API keys. Servers don't block them by default, so anyone could download it.
+fix: "Move it above the web root, or block dotfiles in the server config (nginx: location ~ /\\. { deny all; }). Rotate any secrets in it if it was ever reachable."

@@ -1,0 +1,13 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+positive:
+  - path: wp-content/debug.log
+    content: "PHP Warning: x in /var/www/wp-content/plugins/a.php"
+  - path: error_log
+    content: "PHP Fatal error"
+negative:
+  - path: logs.txt
+    content: "a log"
+  - path: wp-content/cache/debug.log
+    content: "skipped folder"

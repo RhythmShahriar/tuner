@@ -73,6 +73,11 @@ type Options struct {
 	// client without a disk cache.
 	Checksums *Checksums
 
+	// Rules holds local rule files (*.yaml at its root, see Rule) to use
+	// instead of the built-in ones, such as a check pack's newer copies.
+	// nil uses the rules built into Tuner.
+	Rules fs.FS
+
 	// read replaces readFile in the walk, so tests can count opens.
 	read func(path string, n int64, hs ...hash.Hash) ([]byte, int64, error)
 }
@@ -144,14 +149,22 @@ func scanStatus(ctx context.Context, root string, opts Options, h engine.Hooks) 
 		findings = append(findings, s.muPlugins()...)
 	}
 	findings = append(findings, s.laravelEnv()...)
-	stray, session := &strayVisitor{s: s}, &sessionVisitor{s: s}
-	visitors := []visitor{stray, session}
+	stray, session, rules := &strayVisitor{s: s}, &sessionVisitor{s: s}, &rulesVisitor{s: s}
+	for _, r := range s.rules() {
+		if r.Scope == scopeWeb {
+			stray.rules = append(stray.rules, r)
+		} else {
+			rules.rules = append(rules.rules, r)
+		}
+	}
+	visitors := []visitor{stray, session, rules}
 	integrity := s.prepareIntegrity(ctx)
 	if integrity != nil {
 		visitors = append(visitors, integrity)
 	}
 	s.walkTree(ctx, visitors...)
 	findings = append(findings, stray.findings()...)
+	findings = append(findings, rules.findings()...)
 	if integrity != nil {
 		findings = append(findings, integrity.done()...)
 	}

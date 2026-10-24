@@ -1,0 +1,16 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+id: local-private-key
+name: Private key in the web root
+severity: high
+confidence: high
+tags: [leak, secrets]
+scope: web
+files: ["**/*.pem", "**/*.key", "**/id_rsa", "**/id_ecdsa", "**/id_ed25519"]
+match:
+  secrets: [private-key]
+extract:
+  secrets: true
+impact: Anyone who downloads a private key can impersonate the server or log in where the key is trusted.
+fix: Move it out of the web root, and replace the key if it was ever reachable.

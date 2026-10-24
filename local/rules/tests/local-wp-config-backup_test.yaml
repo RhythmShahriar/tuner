@@ -1,0 +1,17 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+positive:
+  - path: wp-config.php.bak
+    content: "<?php define('DB_PASSWORD', 'hunter2-not-real');"
+  - path: .wp-config.php.swp
+    content: "swap"
+  - path: wp-config.old
+    content: "old"
+negative:
+  - path: wp-config.php
+    content: "<?php // the real one"
+  - path: wp-config-sample.php
+    content: "<?php // sample"
+  - path: wp-config.backup.php
+    content: "<?php // runs, isn't sent as text"

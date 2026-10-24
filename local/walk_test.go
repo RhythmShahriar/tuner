@@ -97,15 +97,6 @@ func TestWalkVisitorsKeepTheirOwnScope(t *testing.T) {
 	}
 }
 
-func TestWalkCountsChecksFromVisitors(t *testing.T) {
-	root := tree(t, map[string]string{"index.html": "hi"})
-	res := scanTree(t, root, Options{Exec: noPHP})
-	// The stray-file checks and the session check.
-	if want := len(strayChecks) + 1; res.Checks != want {
-		t.Errorf("checks %d, want %d", res.Checks, want)
-	}
-}
-
 func TestWalkStableOrder(t *testing.T) {
 	files := map[string]string{}
 	for i := range 40 {
@@ -156,9 +147,10 @@ func genTree(b *testing.B, n int) string {
 }
 
 // BenchmarkScan scans a generated 20,000-file tree. For reference, on a
-// 16-thread i9-9900K with a warm page cache one scan takes about 0.2 s
-// with the single walk and its workers, against about 0.45 s for the two
-// serial walks before.
+// 16-thread i9-9900K with a warm page cache one scan takes about 0.45 s:
+// about 0.2 s for the single walk and its workers, the rest for the 17
+// built-in rules. The two serial walks it replaced took about 0.45 s
+// without any rules.
 func BenchmarkScan(b *testing.B) {
 	root := genTree(b, 20_000)
 	opts := Options{Exec: noPHP}

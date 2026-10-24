@@ -1,0 +1,20 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+positive:
+  - path: info.php
+    content: "<?php phpinfo(); ?>"
+  - path: x.php
+    content: "<?php\nPHPInfo ( );\n"
+  - path: tools/test.php
+    content: "<?php phpinfo();"
+negative:
+  - path: tools/x.php
+    content: "<?php phpinfo(); // not top level, not a test name"
+  - path: wp-content/plugins/diag/info.php
+    content: "<?php phpinfo();"
+  - path: index.php
+    content: "<?php echo 'hello';"
+  - path: big.php
+    content: "<?php phpinfo();\n"
+    pad: 20000

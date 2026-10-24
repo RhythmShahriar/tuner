@@ -1,0 +1,18 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+id: local-php-backup
+name: Backup copy of a PHP file in the web root
+severity: medium
+confidence: high
+tags: [leak, source]
+scope: web
+files: ["**"]
+# Copies of wp-config.php have their own rule.
+exclude: ["**/wp-config*", "**/.wp-config*"]
+match:
+  filename: '(?i)\.php(\.(bak|old|orig|save|saved|swp|swo|backup|copy|tmp|txt)|~)$'
+extract:
+  secrets: true
+impact: The server sends backup copies as plain text, exposing source code and any credentials in it.
+fix: Delete editor and backup copies from the server.
