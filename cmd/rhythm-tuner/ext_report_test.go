@@ -5,27 +5,27 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/RhythmShahriar/tuner/engine"
+	"github.com/RhythmShahriar/tuner/notify"
 	"github.com/RhythmShahriar/tuner/report"
 )
 
 // planned parses scan flags into a fresh extension and runs its Plan.
 func planned(t *testing.T, args ...string) (*reportExtension, error) {
 	t.Helper()
-	e := &reportExtension{}
-	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	e.Flags(fs)
-	if err := fs.Parse(args); err != nil {
-		t.Fatal(err)
-	}
-	return e, e.Plan(&scanPlan{})
+	return notifyPlanned(t, nil, args...)
 }
 
 func thisWeek() []report.Report {
@@ -104,5 +104,162 @@ func TestReportExtensionPlanErrors(t *testing.T) {
 	}
 	if !strings.Contains(e.Help(), "--since <file>") || !strings.Contains(e.Help(), "--fail-on-new <level>") {
 		t.Errorf("help:\n%s", e.Help())
+	}
+}
+
+// hookReceiver is a local https webhook that answers status and hands
+// each body it gets to the test.
+func hookReceiver(t *testing.T, status int) (*httptest.Server, chan []byte) {
+	t.Helper()
+	bodies := make(chan []byte, 4)
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		bodies <- b
+		w.WriteHeader(status)
+	}))
+	_ = srv.Listener.Close()
+	for port := 20140; port < 20160; port++ {
+		if l, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port)); err == nil {
+			srv.Listener = l
+			break
+		}
+	}
+	srv.StartTLS()
+	t.Cleanup(srv.Close)
+	return srv, bodies
+}
+
+// notifyPlanned is planned with the notifiers pointed at srv.
+func notifyPlanned(t *testing.T, srv *httptest.Server, args ...string) (*reportExtension, error) {
+	t.Helper()
+	e := &reportExtension{}
+	if srv != nil {
+		e.notifyOptions.HTTPClient = srv.Client()
+	}
+	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	e.Flags(fs)
+	if err := fs.Parse(args); err != nil {
+		t.Fatal(err)
+	}
+	return e, e.Plan(&scanPlan{})
+}
+
+func hookURL(srv *httptest.Server) string {
+	return "webhook+https://" + srv.Listener.Addr().String() + "/hook/SECRETTOKEN"
+}
+
+func TestReportExtensionNotify(t *testing.T) {
+	old, _ := diffFixtures(t)
+	srv, bodies := hookReceiver(t, http.StatusOK)
+	e, err := notifyPlanned(t, srv, "--since", old, "--notify", hookURL(srv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var errs bytes.Buffer
+	if code, err := e.Finished(&scanPlan{}, thisWeek(), &errs); code != exitOK || err != nil {
+		t.Fatalf("exit %d, %v", code, err)
+	}
+	var msg notify.Message
+	if err := json.Unmarshal(<-bodies, &msg); err != nil {
+		t.Fatal(err)
+	}
+	// Only the new high: xmlrpc was there before and is low anyway.
+	if len(msg.Findings) != 1 || msg.Findings[0].ID != "leak-git-config" || msg.Since != "last-week.json" || msg.MinSeverity != engine.High {
+		t.Errorf("message: %+v", msg)
+	}
+	want := "notified webhook+https://" + srv.Listener.Addr().String() + ": 1 finding\n"
+	if !strings.HasSuffix(errs.String(), want) || strings.Contains(errs.String(), "SECRETTOKEN") {
+		t.Errorf("stderr:\n%s", errs.String())
+	}
+
+	// Nothing new at the level: no request at all.
+	e, _ = notifyPlanned(t, srv, "--since", old, "--notify", hookURL(srv), "--notify-min", "critical")
+	errs.Reset()
+	if code, _ := e.Finished(&scanPlan{}, thisWeek(), &errs); code != exitOK || !strings.Contains(errs.String(), "nothing new at critical or above, so no notification\n") {
+		t.Errorf("exit %d:\n%s", code, errs.String())
+	}
+	select {
+	case b := <-bodies:
+		t.Errorf("sent %s", b)
+	default:
+	}
+}
+
+func TestReportExtensionNotifyFirstRun(t *testing.T) {
+	srv, bodies := hookReceiver(t, http.StatusOK)
+	missing := filepath.Join(t.TempDir(), "previous.json")
+	for _, args := range [][]string{
+		{"--since", missing, "--notify-all-first", "--notify-min", "low", "--notify", hookURL(srv)},
+		{"--notify-all-first", "--notify-min", "low", "--notify", hookURL(srv)},
+	} {
+		e, err := notifyPlanned(t, srv, args...)
+		if err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		var errs bytes.Buffer
+		if code, _ := e.Finished(&scanPlan{}, thisWeek(), &errs); code != exitOK || !strings.HasPrefix(errs.String(), "no previous report; sending all findings\n") {
+			t.Errorf("%v: exit %d:\n%s", args, code, errs.String())
+		}
+		var msg notify.Message
+		if err := json.Unmarshal(<-bodies, &msg); err != nil || len(msg.Findings) != 2 || msg.Since != "" {
+			t.Errorf("%v: %v %+v", args, err, msg)
+		}
+	}
+	// Without --notify-all-first a missing report is still an error (exit 3).
+	var ue usageError
+	if _, err := notifyPlanned(t, srv, "--since", missing, "--notify", hookURL(srv)); err == nil || errors.As(err, &ue) {
+		t.Errorf("missing --since file: %v", err)
+	}
+}
+
+func TestReportExtensionNotifyFailure(t *testing.T) {
+	old, _ := diffFixtures(t)
+	srv, _ := hookReceiver(t, http.StatusInternalServerError)
+	for strict, want := range map[bool]int{false: exitOK, true: exitError} {
+		args := []string{"--since", old, "--notify", hookURL(srv)}
+		if strict {
+			args = append(args, "--notify-strict")
+		}
+		e, err := notifyPlanned(t, srv, args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var errs bytes.Buffer
+		code, err := e.Finished(&scanPlan{}, thisWeek(), &errs)
+		warn := "rhythm tuner: warning: could not notify webhook+https://" + srv.Listener.Addr().String() + ": receiver answered 500 Internal Server Error\n"
+		if err != nil || code != want || !strings.HasSuffix(errs.String(), warn) || strings.Contains(errs.String(), "SECRETTOKEN") {
+			t.Errorf("strict=%v: exit %d (%v):\n%s", strict, code, err, errs.String())
+		}
+	}
+}
+
+func TestReportExtensionNotifyPlanErrors(t *testing.T) {
+	old, _ := diffFixtures(t)
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--notify", "slack://hooks.slack.com/services/SECRETTOKEN"}, "--notify needs --since <file>"},
+		{[]string{"--since", old, "--notify-min", "high"}, "--notify-min needs --notify <url>"},
+		{[]string{"--since", old, "--notify-all-first"}, "--notify-all-first needs --notify <url>"},
+		{[]string{"--since", old, "--notify-strict"}, "--notify-strict needs --notify <url>"},
+		{[]string{"--since", old, "--notify", "slack://x.test/a", "--notify-min", "loud"}, `--notify-min "loud"`},
+		{[]string{"--since", old, "--notify", "ftp://x.test/SECRETTOKEN"}, `--notify: unsupported notification scheme "ftp"`},
+		{[]string{"--since", old, "--notify", "webhook+http://x.test/SECRETTOKEN"}, "--notify: webhook+http://x.test: plain http"},
+	} {
+		var ue usageError
+		_, err := notifyPlanned(t, nil, c.args...)
+		if !errors.As(err, &ue) || !strings.Contains(err.Error(), c.want) || strings.Contains(err.Error(), "SECRETTOKEN") {
+			t.Errorf("%v: %v, want %q", c.args, err, c.want)
+		}
+	}
+	t.Setenv("TUNER_SMTP_PASSWORD", "")
+	if _, err := notifyPlanned(t, nil, "--since", old, "--notify", "smtp://me@mail.test?to=a@b.test&from=t@b.test"); err == nil || !strings.Contains(err.Error(), "TUNER_SMTP_PASSWORD") {
+		t.Errorf("smtp without password: %v", err)
+	}
+	t.Setenv("TUNER_SMTP_PASSWORD", "hunter2")
+	if _, err := notifyPlanned(t, nil, "--since", old, "--notify", "smtp://me@mail.test?to=a@b.test&from=t@b.test"); err != nil {
+		t.Errorf("smtp with password: %v", err)
 	}
 }
