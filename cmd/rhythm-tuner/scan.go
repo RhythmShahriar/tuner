@@ -574,8 +574,8 @@ func scanExit(ctx context.Context, p *scanPlan, reports []report.Report, failed 
 
 // reportFile is a report being written next to its destination. It
 // replaces the destination only once complete, so a killed, canceled or
-// failed run never leaves the previous report truncated, and two cron
-// runs writing the same path never interleave.
+// failed run never leaves the previous report truncated. Two cron runs
+// writing the same path never interleave either.
 type reportFile struct {
 	*os.File
 	dest string
