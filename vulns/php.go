@@ -329,7 +329,7 @@ func hiddenPHPFinding(base *url.URL, flaws []*recentFlaw, branches []string) (en
 	fix += fmt.Sprintf(" Branches older than %s are end of life and need moving to a supported one.", branches[len(branches)-1])
 
 	f := finding(base, "php-version-hidden", engine.Medium, "/", title, ev, impact, fix, "php", "vuln")
-	f.Confidence = "low"
+	f.Confidence = confidenceLow
 	f.Caveat = "the PHP version is hidden, so this can't be confirmed"
 	f.Advisories = advisories
 	f.References = top.References
