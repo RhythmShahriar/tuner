@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/RhythmShahriar/tuner/engine"
+	"github.com/RhythmShahriar/tuner/vulns/cache"
 )
 
 // When a site hides its PHP version, critical or actively exploited PHP
@@ -38,8 +39,13 @@ func (b Branch) Supported(now time.Time) bool {
 
 // PHPBranches returns every PHP release branch php.net knows, oldest first.
 func (c *Client) PHPBranches(ctx context.Context) (branches []Branch, stale bool, err error) {
+	branches, info, err := c.phpBranches(ctx)
+	return branches, info.Stale, err
+}
+
+func (c *Client) phpBranches(ctx context.Context) ([]Branch, cache.Info, error) {
 	c.init()
-	return load(c, ctx, "php.net/releases", "states", func(ctx context.Context) ([]Branch, error) {
+	return cache.Load(c.store, ctx, "php.net/releases", "states", func(ctx context.Context) ([]Branch, error) {
 		// {"8": {"8.4": {"state": "stable", "security_support_end": "2028-12-31T00:00:00+00:00"}}};
 		// ancient branches have a null state.
 		var raw map[string]map[string]struct {
@@ -114,7 +120,7 @@ func advisoryKey(v Vuln) string {
 // newerPHPFlaws finds advisories disclosed after an end-of-life branch lost
 // support. WPVulnerability stops listing new CVEs for such branches, so they
 // are inferred: an advisory for the oldest supported branch with no lower
-// bound affects every older release too, and will never be fixed on an EOL
+// bound affects every older release too and will never be fixed on an EOL
 // branch. Advisories rec already lists are skipped. It returns nothing when
 // version's branch is still supported.
 func (a *Advisor) newerPHPFlaws(ctx context.Context, rec *Record, version string, now time.Time) (flaws []Vuln, from string, stale bool, err error) {
@@ -270,7 +276,7 @@ func hiddenPHPFinding(base *url.URL, flaws []*recentFlaw, branches []string) (en
 				line = f.CVEs[0] + " " + line
 			}
 			if fixed != "" {
-				line += " — " + fixed
+				line += " (" + fixed + ")"
 			}
 			if f.KEV {
 				line += " [actively exploited]"
@@ -323,7 +329,7 @@ func hiddenPHPFinding(base *url.URL, flaws []*recentFlaw, branches []string) (en
 	fix += fmt.Sprintf(" Branches older than %s are end of life and need moving to a supported one.", branches[len(branches)-1])
 
 	f := finding(base, "php-version-hidden", engine.Medium, "/", title, ev, impact, fix, "php", "vuln")
-	f.Confidence = "low"
+	f.Confidence = confidenceLow
 	f.Caveat = "the PHP version is hidden, so this can't be confirmed"
 	f.Advisories = advisories
 	f.References = top.References

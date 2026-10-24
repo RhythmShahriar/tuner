@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/RhythmShahriar/tuner/engine"
 	"github.com/RhythmShahriar/tuner/fingerprint"
+	"github.com/RhythmShahriar/tuner/vulns/cache"
 )
 
 // Responses shaped like the real APIs, including their inconsistencies:
@@ -84,6 +86,10 @@ func newFakeAPI(t *testing.T, routes ...map[string]string) *fakeAPI {
 			return
 		}
 		if body, ok := f.routes[r.URL.Path]; ok {
+			if code, err := strconv.Atoi(strings.TrimPrefix(body, "!")); err == nil && body[0] == '!' {
+				http.Error(w, "fail", code) // "!500" answers with that status
+				return
+			}
 			w.Write([]byte(body))
 			return
 		}
@@ -260,12 +266,12 @@ func age(t *testing.T, dir string, by time.Duration) {
 			return err
 		}
 		data, _ := os.ReadFile(p)
-		var e cacheEntry[map[string]any]
+		var e cache.Entry[map[string]any]
 		if err := jsonUnmarshal(data, &e); err != nil {
 			t.Fatal(err)
 		}
 		e.Fetched = e.Fetched.Add(-by)
-		return writeJSON(p, e)
+		return cache.WriteJSON(p, e)
 	})
 }
 

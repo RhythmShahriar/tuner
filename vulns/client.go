@@ -6,7 +6,9 @@
 //
 // Vulnerability data comes from WPVulnerability (wpvulnerability.com),
 // public domain under CC0 1.0, which aggregates CVE, Wordfence, WPScan and
-// Patchstack. Latest-release data comes from the wordpress.org API, and
+// Patchstack. With an API key, the Wordfence Intelligence feed is a second
+// source, merged by CVE (see Wordfence). Latest-release data comes from
+// the wordpress.org API, and
 // PHP's supported branches from php.net. Every
 // lookup is cached on disk and refreshed automatically once it is older
 // than the TTL; when the network is unavailable, stale data is used.
@@ -20,16 +22,20 @@ import (
 	"fmt"
 	"html"
 	"io"
-	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/RhythmShahriar/tuner/fingerprint"
+	"github.com/RhythmShahriar/tuner/vulns/cache"
+	"github.com/RhythmShahriar/tuner/vulns/ratelimit"
 )
 
 const (
@@ -37,13 +43,23 @@ const (
 	DefaultWPOrgBase  = "https://api.wordpress.org"
 	DefaultPHPNetBase = "https://www.php.net"
 	DefaultTTL        = 24 * time.Hour
+	DefaultTimeout    = 10 * time.Second
 
 	// Attribution shown with every vulnerability finding.
 	Source = "WPVulnerability (wpvulnerability.com, CC0)"
 )
 
 // ErrOffline means the data isn't cached and --offline forbids fetching it.
-var ErrOffline = errors.New("not cached, and offline mode is on")
+var ErrOffline = cache.ErrOffline
+
+// ErrOldCache means the only cached copy was written by an older Tuner,
+// which normalised records differently; --offline forbids refetching it.
+var ErrOldCache = cache.ErrOldFormat
+
+// cacheFormat versions the records on disk. Bump it whenever normalize
+// changes what a record holds, so entries an older Tuner wrote are fetched
+// again instead of living on under --offline or a restored CI cache.
+const cacheFormat = 1
 
 type Client struct {
 	HTTP       *http.Client
@@ -53,21 +69,19 @@ type Client struct {
 	Offline    bool          // never fetch; use cached data however old
 	Force      bool          // always fetch, ignoring the TTL (rhythm tuner update)
 	Pace       time.Duration // gap between requests to the data services; 0 means 200ms, <0 none
+	Timeout    time.Duration // per request, reading the answer included; 0 means DefaultTimeout
 	VulnBase   string
 	WPOrgBase  string
 	PHPNetBase string
+	// Wordfence, when set, adds the Wordfence Intelligence feed as a
+	// second source for plugins, themes and core, merged by CVE.
+	Wordfence *Wordfence
 
-	lim  *pacer
-	mu   sync.Mutex
-	mem  map[string]*memo
-	once sync.Once
-}
-
-type memo struct {
-	once  sync.Once
-	v     any
-	stale bool
-	err   error
+	lim     *ratelimit.Limiter
+	breaker ratelimit.Breaker
+	http    *http.Client
+	store   *cache.Store
+	once    sync.Once
 }
 
 // DefaultCacheDir is ~/.cache/rhythm/tuner/vulns (or the OS equivalent).
@@ -81,8 +95,11 @@ func DefaultCacheDir() string {
 
 func (c *Client) init() {
 	c.once.Do(func() {
-		if c.HTTP == nil {
-			c.HTTP = &http.Client{Timeout: 20 * time.Second}
+		// Connections give up after a few seconds: a firewalled data
+		// service must not hold the scan for the OS connect timeout.
+		c.http = ratelimit.FastClient(c.HTTP)
+		if c.Timeout <= 0 {
+			c.Timeout = DefaultTimeout
 		}
 		if c.TTL <= 0 {
 			c.TTL = DefaultTTL
@@ -98,11 +115,11 @@ func (c *Client) init() {
 		}
 		switch {
 		case c.Pace == 0:
-			c.lim = &pacer{every: 200 * time.Millisecond} // be polite to free services
+			c.lim = ratelimit.New(5) // one request every 200ms: be polite to free services
 		case c.Pace > 0:
-			c.lim = &pacer{every: c.Pace}
+			c.lim = ratelimit.New(float64(time.Second) / float64(c.Pace))
 		}
-		c.mem = map[string]*memo{}
+		c.store = &cache.Store{Dir: c.CacheDir, TTL: c.TTL, Offline: c.Offline, Force: c.Force, Format: cacheFormat}
 	})
 }
 
@@ -134,7 +151,12 @@ type Vuln struct {
 	Unfixed     bool     `json:"unfixed,omitempty"`
 	References  []string `json:"references,omitempty"`
 	Published   string   `json:"published,omitempty"`
+	Sources     []string `json:"sources,omitempty"` // SourceWPVulnerability, SourceWordfence; set when merged
 }
+
+// Valid reports whether r holds a usable record; a cache entry without
+// one is fetched again.
+func (r *Record) Valid() bool { return r != nil && r.Vulns != nil }
 
 // Affects reports whether version v is in the vulnerable range.
 func (v Vuln) Affects(version string) bool {
@@ -156,12 +178,56 @@ type Release struct {
 	NotFound    bool      `json:"not_found,omitempty"` // not on wordpress.org: premium, custom or removed
 }
 
+// Valid reports whether r holds a usable release; a cache entry without
+// one is fetched again.
+func (r *Release) Valid() bool { return r != nil }
+
 // Advisories returns known vulnerabilities for a component. kind is plugin,
 // theme, core, php, nginx or apache; key is the slug, or the version for
 // core and software. stale is true when cached data past its TTL was used.
 func (c *Client) Advisories(ctx context.Context, kind, key string) (rec *Record, stale bool, err error) {
+	rec, info, err := c.advisories(ctx, kind, key)
+	return rec, info.Stale, err
+}
+
+func (c *Client) advisories(ctx context.Context, kind, key string) (*Record, cache.Info, error) {
+	rec, info, err := c.wpvulnerability(ctx, kind, key)
+	if c.Wordfence == nil || kind != "plugin" && kind != "theme" && kind != "core" {
+		return rec, info, err
+	}
+	slug := key
+	if kind == "core" {
+		slug = "wordpress" // core is looked up by version, the feed lists it by slug
+	}
+	wf, winfo, werr := c.Wordfence.Advisories(ctx, kind, slug)
+	if werr != nil {
+		return rec, info, err // the advisor warns once about the feed
+	}
+	if kind == "core" {
+		// WPVulnerability answers for one version; match the feed's ranges to it.
+		wf = slices.DeleteFunc(slices.Clone(wf), func(v Vuln) bool { return !v.Affects(key) })
+	}
+	if err != nil || rec == nil {
+		// WPVulnerability failed: the feed alone still checks known
+		// vulnerabilities, which is why it's there.
+		return merge(&Record{Vulns: []Vuln{}}, wf), winfo, nil
+	}
+	return merge(rec, wf), joinInfo(info, winfo), nil
+}
+
+// joinInfo describes data built from two lookups: stale if either was,
+// fetched when the older stale one was.
+func joinInfo(a, b cache.Info) cache.Info {
+	switch {
+	case a.Stale && b.Stale && b.Fetched.Before(a.Fetched), !a.Stale && b.Stale:
+		return b
+	}
+	return a
+}
+
+func (c *Client) wpvulnerability(ctx context.Context, kind, key string) (*Record, cache.Info, error) {
 	c.init()
-	return load(c, ctx, "wpvulnerability/"+kind, key, func(ctx context.Context) (*Record, error) {
+	return cache.Load(c.store, ctx, "wpvulnerability/"+kind, key, func(ctx context.Context) (*Record, error) {
 		var raw rawResponse
 		if err := c.getJSON(ctx, c.VulnBase+"/"+kind+"/"+url.PathEscape(key)+"/", &raw); err != nil {
 			return nil, err
@@ -181,8 +247,13 @@ func (c *Client) Advisories(ctx context.Context, kind, key string) (rec *Record,
 
 // Latest returns the newest release of a plugin, a theme, or core (slug "wordpress").
 func (c *Client) Latest(ctx context.Context, kind, slug string) (rel *Release, stale bool, err error) {
+	rel, info, err := c.latest(ctx, kind, slug)
+	return rel, info.Stale, err
+}
+
+func (c *Client) latest(ctx context.Context, kind, slug string) (*Release, cache.Info, error) {
 	c.init()
-	return load(c, ctx, "wordpress.org/"+kind, slug, func(ctx context.Context) (*Release, error) {
+	return cache.Load(c.store, ctx, "wordpress.org/"+kind, slug, func(ctx context.Context) (*Release, error) {
 		switch kind {
 		case "core":
 			var v struct {
@@ -219,37 +290,42 @@ func (c *Client) Latest(ctx context.Context, kind, slug string) (rel *Release, s
 	})
 }
 
-// Refresh re-fetches every cached record, ignoring the TTL. It returns how
-// many were refreshed and how many failed.
+// Refresh re-fetches every cached record plus the Wordfence feed when one
+// is set, ignoring the TTL. It returns how many were refreshed and how
+// many failed.
 func (c *Client) Refresh(ctx context.Context) (ok, failed int, err error) {
 	c.init()
 	if c.CacheDir == "" {
 		return 0, 0, errors.New("no cache directory")
 	}
+	// The feed is fetched whole, so it needs no earlier scan to refresh.
+	if w := c.Wordfence; w != nil {
+		fw := &Wordfence{HTTP: w.HTTP, UserAgent: w.UserAgent, Key: w.Key, Base: w.Base, CacheDir: w.CacheDir, TTL: w.TTL, Timeout: w.Timeout, Force: true}
+		if _, _, werr := fw.index(ctx); werr != nil {
+			failed++
+		} else {
+			ok++
+		}
+	}
+	if _, err := os.Stat(c.CacheDir); err != nil {
+		return ok, failed, err
+	}
 	force := &Client{
 		HTTP: c.HTTP, UserAgent: c.UserAgent, CacheDir: c.CacheDir, TTL: c.TTL,
-		VulnBase: c.VulnBase, WPOrgBase: c.WPOrgBase, PHPNetBase: c.PHPNetBase, Pace: c.Pace, Force: true,
+		VulnBase: c.VulnBase, WPOrgBase: c.WPOrgBase, PHPNetBase: c.PHPNetBase, Pace: c.Pace, Timeout: c.Timeout, Force: true,
 	}
-	err = filepath.WalkDir(c.CacheDir, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || filepath.Ext(p) != ".json" {
-			return err
-		}
-		rel, _ := filepath.Rel(c.CacheDir, p)
-		parts := strings.Split(filepath.ToSlash(rel), "/")
-		if len(parts) != 3 {
-			return nil
-		}
-		key := strings.TrimSuffix(parts[2], ".json")
+	err = c.store.Entries(func(kind, key string) error {
 		var ferr error
-		switch parts[0] {
-		case "wpvulnerability":
-			_, _, ferr = force.Advisories(ctx, parts[1], key)
-		case "wordpress.org":
-			_, _, ferr = force.Latest(ctx, parts[1], key)
-		case "php.net":
+		source, sub, _ := strings.Cut(kind, "/")
+		switch {
+		case source == "wpvulnerability" && sub != "":
+			_, _, ferr = force.Advisories(ctx, sub, key)
+		case source == "wordpress.org" && sub != "":
+			_, _, ferr = force.Latest(ctx, sub, key)
+		case kind == "php.net/releases":
 			_, _, ferr = force.PHPBranches(ctx)
 		default:
-			return nil
+			return nil // osv/, wordfence/ and anything else belong to other clients
 		}
 		if ferr != nil {
 			failed++
@@ -261,160 +337,53 @@ func (c *Client) Refresh(ctx context.Context) (ok, failed int, err error) {
 	return ok, failed, err
 }
 
-// cacheEntry is what lands on disk.
-type cacheEntry[T any] struct {
-	Fetched time.Time `json:"fetched"`
-	Data    T         `json:"data"`
+// Prefetch looks up everything a scan of a site with fingerprint fp would
+// ask the data services, so the answers are cached for a later --offline
+// scan (rhythm tuner update --prefetch). Fresh cached copies are kept. It
+// returns the warnings such a scan would print and the data status.
+func (c *Client) Prefetch(ctx context.Context, fp fingerprint.Result) (warnings []string, status string) {
+	_, warnings, status = (&Advisor{Client: c}).AdviseStatus(ctx, &url.URL{}, fp)
+	return warnings, status
 }
 
-// load returns fresh cached data, else fetches it, else falls back to stale
-// cached data. Concurrent and repeated calls for the same key in one
-// process share a single lookup.
-func load[T any](c *Client, ctx context.Context, kind, key string, fetch func(context.Context) (T, error)) (T, bool, error) {
-	id := kind + "/" + key
-	c.mu.Lock()
-	m := c.mem[id]
-	if m == nil {
-		m = &memo{}
-		c.mem[id] = m
-	}
-	c.mu.Unlock()
-
-	m.once.Do(func() {
-		path := c.cachePath(kind, key)
-		var cached cacheEntry[T]
-		have := path != "" && readJSON(path, &cached) == nil
-		age := time.Since(cached.Fetched)
-		switch {
-		case have && c.Offline:
-			m.v, m.stale = cached.Data, age > c.TTL
-			return
-		case have && !c.Force && age < c.TTL:
-			m.v = cached.Data
-			return
-		case c.Offline:
-			m.err = ErrOffline
-			return
-		}
-		data, err := fetch(ctx)
-		if err != nil {
-			// A forced refresh must report failure; the cached copy stays on disk.
-			if have && !c.Force {
-				m.v, m.stale = cached.Data, true
-				return
-			}
-			m.err = err
-			return
-		}
-		m.v = data
-		if path != "" {
-			_ = writeJSON(path, cacheEntry[T]{Fetched: time.Now().UTC(), Data: data})
-		}
-	})
-	if m.err != nil {
-		var zero T
-		return zero, false, m.err
-	}
-	return m.v.(T), m.stale, nil
-}
-
-var unsafeKey = regexp.MustCompile(`[^A-Za-z0-9._-]`)
-
-func (c *Client) cachePath(kind, key string) string {
-	if c.CacheDir == "" || key == "" || key == "." || key == ".." {
-		return ""
-	}
-	return filepath.Join(c.CacheDir, filepath.FromSlash(kind), unsafeKey.ReplaceAllString(key, "_")+".json")
-}
-
-func readJSON(path string, v any) error {
-	data, err := os.ReadFile(path) //nolint:gosec // path is built from the cache dir and a sanitized key
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(data, v)
-}
-
-// writeJSON writes atomically so a crash never leaves a torn cache file.
-func writeJSON(path string, v any) error {
-	data, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
-	if err != nil {
-		return err
-	}
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmp.Name())
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmp.Name())
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
+// Unreachable lists the data hosts this client gave up on after a timeout
+// or connection error; their lookups fall back to cached data.
+func (c *Client) Unreachable() []string {
+	c.init()
+	return c.breaker.Down()
 }
 
 func (c *Client) getJSON(ctx context.Context, u string, v any) error {
-	if err := c.lim.wait(ctx); err != nil {
-		return err
-	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("User-Agent", c.UserAgent)
-	req.Header.Set("Accept", "application/json")
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotFound {
-		return fmt.Errorf("%s: HTTP %d", req.URL.Host, resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
-	if err != nil {
-		return err
-	}
-	if err := json.Unmarshal(body, v); err != nil {
-		return fmt.Errorf("%s: unexpected response: %w", req.URL.Host, err)
-	}
-	return nil
-}
-
-// pacer spaces requests to third-party data services.
-type pacer struct {
-	mu    sync.Mutex
-	every time.Duration
-	next  time.Time
-}
-
-func (p *pacer) wait(ctx context.Context) error {
-	if p == nil {
+	return c.breaker.Do(ctx, req.URL.Host, func() error {
+		if err := c.lim.Wait(ctx); err != nil {
+			return err
+		}
+		ctx, cancel := context.WithTimeout(ctx, c.Timeout)
+		defer cancel()
+		req := req.WithContext(ctx)
+		req.Header.Set("User-Agent", c.UserAgent)
+		req.Header.Set("Accept", "application/json")
+		resp, err := c.http.Do(req)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotFound {
+			return fmt.Errorf("%s: HTTP %d", req.URL.Host, resp.StatusCode)
+		}
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(body, v); err != nil {
+			return fmt.Errorf("%s: unexpected response: %w", req.URL.Host, err)
+		}
 		return nil
-	}
-	p.mu.Lock()
-	now := time.Now()
-	at := p.next
-	if at.Before(now) {
-		at = now
-	}
-	p.next = at.Add(p.every)
-	p.mu.Unlock()
-	t := time.NewTimer(time.Until(at))
-	defer t.Stop()
-	select {
-	case <-t.C:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	})
 }
 
 func parseWPDate(s string) time.Time {
@@ -429,7 +398,7 @@ func parseWPDate(s string) time.Time {
 // --- WPVulnerability wire format ---
 
 // flex accepts a JSON string, number, bool, null or object. The API is
-// inconsistent: unfixed is "0" for plugins and 0 for PHP, and kev may be
+// inconsistent: unfixed is "0" for plugins but 0 for PHP; kev may be
 // false or an object.
 type flex string
 
@@ -464,7 +433,7 @@ type rawResponse struct {
 	Data    json.RawMessage `json:"data"`
 }
 
-// object decodes a JSON object into T, and treats [] or null as absent:
+// object decodes a JSON object into T and treats [] or null as absent:
 // the API sends PHP's empty array where an object has no fields.
 type object[T any] struct {
 	V  T

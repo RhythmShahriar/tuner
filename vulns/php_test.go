@@ -79,7 +79,7 @@ func TestPHPVersionHidden(t *testing.T) {
 		t.Errorf("severity %s confidence %s, %d advisories", h.Severity, h.Confidence, len(h.Advisories))
 	}
 	ev := h.Evidence.Matched
-	if len(ev) != 6 || !strings.HasPrefix(ev[0], "CVE-2026-109618 ") || !strings.HasSuffix(ev[0], " — fixed in 8.5.12, 8.4.27, 8.3.36, 8.2.35") ||
+	if len(ev) != 6 || !strings.HasPrefix(ev[0], "CVE-2026-109618 ") || !strings.HasSuffix(ev[0], " (fixed in 8.5.12, 8.4.27, 8.3.36, 8.2.35)") ||
 		ev[5] != "…and 3 more" {
 		t.Errorf("evidence:\n%s", strings.Join(ev, "\n"))
 	}
@@ -100,7 +100,7 @@ func TestPHPVersionHidden(t *testing.T) {
 }
 
 func TestPHPVersionHiddenQuiet(t *testing.T) {
-	// A year on, nothing is recent: no finding, and no warning either.
+	// A year on, nothing is recent: no finding and no warning either.
 	f := newFakeAPI(t)
 	a := newAdvisor(f, t.TempDir())
 	a.Now = func() time.Time { return time.Date(2027, 10, 23, 0, 0, 0, 0, time.UTC) }
@@ -159,7 +159,7 @@ func TestPHPEndOfLife(t *testing.T) {
 	}
 	// 8.2-only flaws from before 8.1's end of life aren't inferred.
 	if _, ok := byCVE["CVE-2024-8932"]; ok && byCVE["CVE-2024-8932"].FixedIn == "" {
-		t.Error("CVE-2024-8932 inferred, but it predates 8.1's end of life")
+		t.Error("CVE-2024-8932 inferred though it predates 8.1's end of life")
 	}
 	// 8.1's own advisories keep their fixed version.
 	if ad := byCVE["CVE-2025-14177"]; ad.FixedIn != "8.1.34" {
@@ -176,7 +176,7 @@ func TestPHPEndOfLife(t *testing.T) {
 }
 
 // Fixtures reproduce the API's quirks: "impact": [] for unscored advisories,
-// unfixed as 0 or "0", and null bounds.
+// unfixed as 0 or "0" and null bounds.
 func TestNewerPHPFlaws(t *testing.T) {
 	f := newFakeAPI(t, map[string]string{
 		"/php/7.4.33/": `{"error":0,"data":{"php":"7.4","name":"PHP 7.4","date_end":"2022-11-28","vulnerability":[
@@ -221,7 +221,7 @@ func TestNewerPHPFlaws(t *testing.T) {
 		t.Errorf("flaw %+v", flaws[0])
 	}
 
-	// A supported branch infers nothing, and doesn't ask php.net.
+	// A supported branch infers nothing and doesn't ask php.net.
 	rec.EndOfLife = "2099-01-01"
 	f.mu.Lock()
 	f.paths = nil
