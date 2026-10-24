@@ -96,7 +96,7 @@ func TestCmdDiffExitCodes(t *testing.T) {
 		{[]string{old}, exitUsage, "diff takes two JSON reports"},
 		{[]string{old, cur, "--json", "--md"}, exitUsage, "pick one of --json and --md"},
 		{[]string{old, cur, "--fail-on-new", "severe"}, exitUsage, `--fail-on-new "severe": want one of`},
-		{[]string{old, filepath.Join(t.TempDir(), "missing.json")}, exitError, "no such file"},
+		{[]string{old, filepath.Join(t.TempDir(), "missing.json")}, exitError, "missing.json"}, // not the OS's wording, which differs on Windows
 		{[]string{old, notReport}, exitError, "not a Tuner JSON report"},
 	} {
 		var out, errs bytes.Buffer

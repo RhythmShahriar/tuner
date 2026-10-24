@@ -157,9 +157,9 @@ func TestCmdReportErrors(t *testing.T) {
 		{[]string{saved, "--md", "--brand-name", "Acme"}, exitUsage, "--brand-name and --brand-logo only go on the HTML report (--html)"},
 		{[]string{saved, "--html", "--brand-logo", big}, exitUsage, "is over 512 KB"},
 		{[]string{saved, "--html", "--bogus"}, exitUsage, "flag provided but not defined"},
-		{[]string{"/nonexistent/scan.json", "--html"}, exitError, "no such file"},
-		{[]string{saved, "--html", "--since", "/nonexistent/old.json"}, exitError, "no such file"},
-		{[]string{saved, "--html", "-o", "/nonexistent/dir/out.html"}, exitError, "no such file"},
+		{[]string{"/nonexistent/scan.json", "--html"}, exitError, "/nonexistent/scan.json"}, // the OS's wording differs on Windows
+		{[]string{saved, "--html", "--since", "/nonexistent/old.json"}, exitError, "/nonexistent/old.json"},
+		{[]string{saved, "--html", "-o", "/nonexistent/dir/out.html"}, exitError, "/nonexistent/dir/out.html"},
 	} {
 		var errs bytes.Buffer
 		if code := cmdReport(c.args, &bytes.Buffer{}, &errs); code != c.code || !strings.Contains(errs.String(), c.want) {
