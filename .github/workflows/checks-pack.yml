@@ -53,10 +53,24 @@ jobs:
       # Every check must pass its positive and negative fixtures. The
       # fingerprint data and local rules must pass their own tests.
       - name: Test checks
-        run: go test ./engine/... ./checkpack ./internal/packbuild ./fingerprint/... ./local/...
+        run: go test ./engine/... ./checkpack ./internal/packbuild ./fingerprint/... ./local/... ./export
 
       - name: Lint checks
         run: go run ./cmd/rhythm-tuner checks lint checks
+
+      # The export tests check the template fields and run the matchers
+      # against every fixture. Nuclei's own validator runs too when a
+      # runner has nuclei installed; it is not installed here on purpose,
+      # since a publish must not depend on it.
+      - name: Validate Nuclei export
+        run: |
+          set -euo pipefail
+          go run ./cmd/rhythm-tuner checks export --no-check-updates --nuclei "$RUNNER_TEMP/nuclei"
+          if command -v nuclei >/dev/null; then
+            nuclei -duc -validate -t "$RUNNER_TEMP/nuclei"
+          else
+            echo "nuclei not installed; skipping nuclei -validate"
+          fi
 
       # The same command as a local `make pack`, plus the signature, so the
       # assets can be rebuilt and compared byte for byte. packbuild refuses
