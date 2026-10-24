@@ -153,7 +153,7 @@ func checksDir(dir string) (fs.FS, string, error) {
 	}
 	// A missing directory is a bad argument, not a failing check, and
 	// os.DirFS would only say "stat .".
-	switch st, err := os.Stat(dir); {
+	switch st, err := os.Stat(dir); { //nolint:gosec // the user names the directory to read
 	case errors.Is(err, fs.ErrNotExist):
 		return nil, "", fmt.Errorf("%s: no such directory", dir)
 	case err != nil:
