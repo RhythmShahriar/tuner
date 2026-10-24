@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -92,6 +93,44 @@ match: {all: [{status: 200}]}
 	}
 	if d := time.Since(start); d < 190*time.Millisecond {
 		t.Errorf("5 requests at 20/s took %v", d)
+	}
+}
+
+// Two targets on one host share the --rate pace when one Scanner scans
+// both, as a batch or a long-running server does.
+func TestRateSharedPerHost(t *testing.T) {
+	var n atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n.Add(1)
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	c := mustParse(t, `
+id: t-many
+name: many
+severity: low
+request: {path: ["/a", "/b", "/c", "/d"]}
+match: {all: [{status: 200}]}
+`)
+	s := New([]*Check{c}, Options{Rate: 20, HTTPClient: srv.Client()})
+	start := time.Now()
+	var wg sync.WaitGroup
+	for _, target := range []string{srv.URL, srv.URL + "/blog"} {
+		wg.Go(func() {
+			if _, err := s.Scan(context.Background(), target, Hooks{}); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	wg.Wait()
+	// At 20/s together, n requests need (n-1) * 50ms. Two separate paces
+	// would finish in about half that.
+	total := n.Load()
+	if want := time.Duration(total-1) * 50 * time.Millisecond; time.Since(start) < want-20*time.Millisecond {
+		t.Errorf("%d requests took %v, want at least %v", total, time.Since(start), want)
+	}
+	if s.paces.For("A.example") != s.paces.For("a.example") {
+		t.Error("one host must get one pace")
 	}
 }
 

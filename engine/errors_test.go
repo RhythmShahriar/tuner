@@ -117,29 +117,27 @@ match: {all: [{status: 200}, {words: ["never"]}]}
 	}
 }
 
-func TestLimiterUnlimitedUntilSlowed(t *testing.T) {
-	l := newLimiter(0)
+func TestPaceUnlimitedUntilSlowed(t *testing.T) {
+	p := newPaces(0).For("example.com")
 	start := time.Now()
 	for range 100 {
-		if err := l.wait(context.Background()); err != nil {
+		if err := p.wait(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if d := time.Since(start); d > 50*time.Millisecond {
-		t.Errorf("unlimited limiter waited %v", d)
+		t.Errorf("unlimited pace waited %v", d)
 	}
-	l.slow()
+	p.slow()
 	start = time.Now()
-	if err := l.wait(context.Background()); err != nil {
+	if err := p.wait(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if d := time.Since(start); d < throttledPace-20*time.Millisecond {
 		t.Errorf("first wait after slow took %v, want about %v", d, throttledPace)
 	}
-	l.slow()
-	if l.every != 2*throttledPace {
-		t.Errorf("second slow: every %v", l.every)
-	}
+	// Further slowing is the kit limiter's Slow, tested in the kit.
+	p.slow()
 }
 
 func TestNotHTTPS(t *testing.T) {

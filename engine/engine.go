@@ -207,6 +207,7 @@ type Scanner struct {
 	checks  []*Check
 	opts    Options
 	resolve resolver // host lookups for the address guard; tests stub it
+	paces   *paces   // request pace per host, shared by every Scan
 }
 
 func New(checks []*Check, opts Options) *Scanner {
@@ -217,7 +218,7 @@ func New(checks []*Check, opts Options) *Scanner {
 		opts.Timeout = 10 * time.Second
 	}
 	opts.Profile = Profile(strings.ToLower(string(opts.Profile)))
-	return &Scanner{checks: checks, opts: opts, resolve: defaultResolve}
+	return &Scanner{checks: checks, opts: opts, resolve: defaultResolve, paces: newPaces(opts.Rate)}
 }
 
 // Scan fingerprints target, learns its soft-404 behavior, then runs every
@@ -484,7 +485,7 @@ type session struct {
 	resolve  resolver
 	dial     dialFunc // guarded raw dialer for the TLS probe
 	warnings []string
-	lim      *limiter
+	lim      *pace // shared with other scans of the same host
 	// inflight holds one token per HTTP exchange in progress. Every request
 	// of the scan (checks, soft-404 probes, version lookups, the PHP and
 	// TLS probes) takes one, so -c is a hard cap however the work is split.
@@ -561,7 +562,7 @@ func (s *Scanner) open(ctx context.Context, target string, h Hooks) (*session, *
 		resolve:  s.resolve,
 		roots:    roots,
 		proxied:  proxied,
-		lim:      newLimiter(s.opts.Rate),
+		lim:      s.paces.For(u.Hostname()),
 		inflight: make(chan struct{}, s.opts.Concurrency),
 		token:    "rhythm-tuner-" + randHex(6),
 		cache:    map[string]*fetch{},
@@ -843,57 +844,4 @@ func randHex(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
-}
-
-// limiter spaces requests evenly to stay under a requests-per-second cap.
-type limiter struct {
-	mu    sync.Mutex
-	every time.Duration
-	next  time.Time
-}
-
-// Slowest pace the limiter backs off to after repeated throttling.
-const slowest = 2 * time.Second
-
-// Pace a scan without a rate limit (--rate 0) drops to on its first 429
-// or 503: four requests a second, halved again on each one after.
-const throttledPace = 250 * time.Millisecond
-
-// newLimiter returns a limiter for rps requests per second. With rps 0 it
-// lets everything through until the site first throttles.
-func newLimiter(rps float64) *limiter {
-	if rps <= 0 {
-		return &limiter{}
-	}
-	return &limiter{every: time.Duration(float64(time.Second) / rps)}
-}
-
-func (l *limiter) wait(ctx context.Context) error {
-	l.mu.Lock()
-	if l.every == 0 {
-		l.mu.Unlock()
-		return nil
-	}
-	now := time.Now()
-	at := l.next
-	if at.Before(now) {
-		at = now
-	}
-	l.next = at.Add(l.every)
-	l.mu.Unlock()
-	return ratelimit.Sleep(ctx, time.Until(at))
-}
-
-// slow halves the request rate, down to one request every two seconds.
-// An unlimited scan starts pacing at throttledPace, and the next request
-// already waits for it.
-func (l *limiter) slow() {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.every == 0 {
-		l.every = throttledPace
-		l.next = time.Now().Add(l.every)
-		return
-	}
-	l.every = min(l.every*2, slowest)
 }
