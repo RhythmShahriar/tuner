@@ -1,0 +1,24 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# QA gap 5, bug 7. A file in the web root whose name carries terminal
+# escapes. Its name ends up in titles and evidence; the bytes must not.
+title: escape sequences in file names never reach the output
+qa: [5]
+xfail: E3 R1
+xfail_covers: ['matches \[\\x00']
+skip_on: [windows]
+tree:
+  - write: "site/.env.\e]0;PWNED\a\e[2J\e[31mFAKE"
+    content: "DB_PASSWORD=scenario-pass\n"
+  - write: site/index.php
+    content: "<?php echo 'hi';\n"
+steps:
+  - args: [scan, ./site, --no-vulns, --plain, -o, report.md]
+    expect:
+      stdout:
+        contains: [FAKE]
+        not_matches: ['[\x00-\x08\x0b-\x1f\x7f]']
+      files:
+        report.md:
+          not_matches: ['[\x00-\x08\x0b-\x1f\x7f]']

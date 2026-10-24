@@ -1,0 +1,144 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# Tests the WP-CLI bridge package (wp-cli/): PHPUnit for the download,
+# verification and argument building, then a smoke test that installs the
+# package in a pinned WP-CLI inside a pinned PHP container and runs
+# `wp tuner scan` on a fixture WordPress with a local release of this
+# commit. Every uses: is pinned by SHA (make pins).
+name: wp-cli
+on:
+  push:
+    branches: [master]
+    paths: [wp-cli/**, .github/workflows/wp-cli.yml]
+  pull_request:
+    paths: [wp-cli/**, .github/workflows/wp-cli.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: wp-cli
+
+jobs:
+  phpunit:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ["7.4", "8.1", "8.3"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: mbstring, zip, phar, json
+          coverage: none
+      - uses: ramsey/composer-install@3cf229dc2919194e9e36783941438d17239e8520 # 3.1.1
+        with:
+          working-directory: wp-cli
+      - name: PHPUnit
+        run: composer test
+
+  # The smoke test runs WP-CLI in a digest-pinned PHP container with a
+  # pinned WP-CLI release whose SHA-512 is checked, installs this package
+  # and scans a fixture site with a local release of this commit. The
+  # release is read from a mounted folder (file://) and every Tuner data
+  # service points at a dead loopback port, so the scan itself never
+  # leaves the container.
+  smoke:
+    runs-on: ubuntu-latest
+    env:
+      WP_CLI_VERSION: 2.12.0
+      WP_CLI_SHA512: be928f6b8ca1e8dfb9d2f4b75a13aa4aee0896f8a9a0a1c45cd5d2c98605e6172e6d014dda2e27f88c98befc16c040cbb2bd1bfa121510ea5cdf5f6a30fe8832
+      PHP_IMAGE: php:8.3-cli@sha256:5e792a31b25c74d2453a7f06e0747c8b122879cc58bcefac66fa3699cd747e3a
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # Build this commit and package it exactly as a release does.
+      - name: Package a local release
+        working-directory: .
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/release"
+          GOOS=linux GOARCH=amd64 go build -o "$RUNNER_TEMP/rhythm-tuner" ./cmd/rhythm-tuner
+          tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/release/rhythm-tuner_linux_amd64.tar.gz" rhythm-tuner
+          ( cd "$RUNNER_TEMP/release" && sha256sum rhythm-tuner_linux_amd64.tar.gz > checksums.txt )
+      # A throwaway WordPress tree for the local scan. The package never
+      # runs the site's PHP, so WordPress need not be installed or served.
+      - name: Fixture WordPress
+        working-directory: .
+        run: |
+          set -euo pipefail
+          site="$RUNNER_TEMP/site"
+          mkdir -p "$site/wp-includes" "$site/wp-content/plugins"
+          printf "<?php \$wp_version = '6.4.1';\n" > "$site/wp-includes/version.php"
+          printf "<?php\ndefine('DB_PASSWORD', 'smoke-not-a-secret');\n" > "$site/wp-config.php"
+          printf 'DB_PASSWORD=smoke-not-a-secret\n' > "$site/.env"
+      - name: Download WP-CLI ${{ env.WP_CLI_VERSION }}
+        working-directory: .
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/wp-cli" "$RUNNER_TEMP/home"
+          curl -fsSL -o "$RUNNER_TEMP/wp-cli/wp-cli.phar" \
+            "https://github.com/wp-cli/wp-cli/releases/download/v${WP_CLI_VERSION}/wp-cli-${WP_CLI_VERSION}.phar"
+          echo "$WP_CLI_SHA512  $RUNNER_TEMP/wp-cli/wp-cli.phar" | sha512sum -c -
+      - name: wp tuner scan
+        working-directory: .
+        run: |
+          set -uo pipefail
+          dead=http://127.0.0.1:20250
+          wp() {
+            docker run --rm -u "$(id -u):$(id -g)" \
+              -e HOME=/home/wp -e TUNER_DOWNLOAD_URL=file:///release \
+              -e TUNER_VULN_API=$dead -e TUNER_WPORG_API=$dead -e TUNER_PHPNET_API=$dead \
+              -e TUNER_OSV_API=$dead -e TUNER_CHECKS_URL=$dead -e RHYTHM_GITHUB_API=$dead \
+              -v "$RUNNER_TEMP/home:/home/wp" -v "$GITHUB_WORKSPACE/wp-cli:/pkg:ro" \
+              -v "$RUNNER_TEMP/release:/release:ro" -v "$RUNNER_TEMP/site:/site:ro" \
+              -v "$RUNNER_TEMP/wp-cli:/opt/wp-cli:ro" \
+              "$PHP_IMAGE" php /opt/wp-cli/wp-cli.phar "$@"
+          }
+          fail() { echo "::error::$*"; exit 1; }
+
+          wp --version || fail "WP-CLI did not start"
+          wp package install /pkg || fail "the package did not install"
+
+          # JSON goes to stdout as Tuner's report, not as an escaped string.
+          wp --path=/site tuner scan --format=json --fail-on=none --no-verify-signature > out.json
+          code=$?
+          echo "exit $code"; cat out.json
+          [ "$code" -eq 0 ] || fail "--fail-on=none exited $code"
+          jq -e '.findings | map(.id) | index("local-dotenv")' out.json >/dev/null || fail "no local-dotenv finding in the JSON report"
+          ! grep -q smoke-not-a-secret out.json || fail "the report shows the secret unmasked"
+
+          # The table plus Tuner's exit code passed on at --fail-on.
+          wp --path=/site tuner scan --fail-on=low --no-verify-signature > table.txt
+          code=$?
+          cat table.txt
+          [ "$code" -eq 1 ] || fail "--fail-on=low exited $code, want 1"
+          grep -q local-dotenv table.txt || fail "the table lacks local-dotenv"
+
+          # A scan error with no report keeps Tuner's code and reason
+          # instead of exit 1 ("findings") and a generic message.
+          wp --path=/site/missing tuner scan --no-verify-signature > error.txt 2>&1
+          code=$?
+          cat error.txt
+          [ "$code" -eq 2 ] || fail "scanning a missing folder exited $code, want Tuner's 2"
+          grep -q 'no such directory' error.txt || fail "Tuner's reason is not shown"
+
+          # --integrity is refused clearly while Tuner has no such flag
+          # (local-server L7) and passed on once it does.
+          if wp --path=/site tuner scan --integrity --fail-on=none --no-verify-signature > integrity.txt 2>&1; then
+            echo "this Tuner supports --integrity"
+          else
+            cat integrity.txt
+            grep -q 'no integrity checking yet' integrity.txt || fail "--integrity failed without the expected message"
+          fi

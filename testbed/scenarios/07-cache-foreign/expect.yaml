@@ -1,0 +1,39 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# QA gap 7, bugs 4 and 17. Cache files in another tool's or an older
+# release's shape: a bare record without the {fetched, data} wrapper, an
+# empty object and a check pack config that isn't JSON. Each counts as
+# missing: offline the scan goes on without them, online they are
+# fetched again.
+title: foreign and corrupt cache files are refetched, not trusted
+qa: [7]
+xfail: V1
+tree:
+  - copy: ../_fixtures/wordpress
+    to: site
+  - write: "{{cache}}/tuner/vulns/wpvulnerability/plugin/gallery.json"
+    content: '{"name":"Gallery","vulns":[]}'
+  - write: "{{cache}}/tuner/vulns/wpvulnerability/core/6.9.3.json"
+    content: "{}"
+  - write: "{{cache}}/tuner/checks/pack.json"
+    content: "not json at all"
+steps:
+  - name: offline
+    args: [scan, ./site, --offline, --plain]
+    expect:
+      exit: [0, 1]
+      output:
+        not_contains: [panic, "nil pointer"]
+  - name: online
+    args: [scan, ./site, --plain, -o, report.json]
+    expect:
+      exit: [0, 1]
+      output:
+        not_contains: [panic, "nil pointer"]
+        contains: ["gallery 1.5"]
+      requests:
+        data: {paths: [/plugin/gallery/]}
+      files:
+        report.json:
+          finding_ids: [vuln-plugin-gallery]

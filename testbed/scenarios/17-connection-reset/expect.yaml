@@ -1,0 +1,33 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# QA gap 17. The server resets the connection halfway through a body.
+# On the home page the target fails with a clear error naming it; on a
+# probed path that path is skipped and the scan goes on.
+title: connections reset mid-body fail cleanly
+qa: [17]
+servers:
+  - name: home
+    routes:
+      /: {reset: true, body: "<html><body>a home page that never arrives in full</body></html>"}
+  - name: site
+    routes:
+      /: {body: "<html><body>home</body></html>"}
+      /backup.zip: {reset: true, type: application/zip, body: "PK\x03\x04 not really a zip, cut halfway through"}
+steps:
+  - name: home page
+    args: [scan, "{{url:home}}", --no-vulns, --no-check-updates, --rate, "0", --plain, --retries, "1"]
+    expect:
+      exit: 3
+      max_time: 10s
+      stderr:
+        contains: ["{{url:home}}"]
+        not_contains: [panic]
+  - name: a probed path
+    args: [scan, "{{url:site}}", --no-vulns, --no-check-updates, --rate, "0", --plain, --retries, "1", -o, report.json]
+    expect:
+      exit: 0
+      max_time: 10s
+      files:
+        report.json:
+          min_size: 10

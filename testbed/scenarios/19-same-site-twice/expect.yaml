@@ -1,0 +1,23 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# QA gap 19. The same site listed three times in different forms with
+# --parallel. It is one site: scan it once, not three times at triple
+# the load.
+title: the same site in different forms is scanned once
+qa: [19]
+xfail: U3
+servers:
+  - name: site
+    routes:
+      /: {body: "<html><body>home</body></html>"}
+      /.env: {type: text/plain, body: "APP_KEY=scenario\n"}
+steps:
+  - args: [scan, "{{url:site}}", "{{url:site}}/", "{{host:site}}", --parallel, "3", --no-vulns, --no-check-updates, --rate, "0", --plain, -o, report.json]
+    expect:
+      exit: 0
+      files:
+        report.json:
+          finding_ids: [leak-dotenv]
+      requests:
+        site: {path_max: {/.env: 1}}

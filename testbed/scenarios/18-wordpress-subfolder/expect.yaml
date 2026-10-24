@@ -1,0 +1,26 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# QA gap 18. WordPress lives in /blog while the root is a catch-all page
+# answering 200 for every path. Scanning /blog/ must probe under /blog,
+# find the exposed debug.log there and leave the root alone.
+title: WordPress in /blog is scanned under /blog
+qa: [18]
+servers:
+  - name: site
+    routes:
+      "*": {body: "<html><body>Our landing page. Nothing to see here.</body></html>"}
+      /blog/*: {status: 404, body: "<html><body><h1>Page not found</h1></body></html>"}
+      /blog/: {body: "<html><head><meta name=\"generator\" content=\"WordPress 6.9.3\"><link rel=\"stylesheet\" href=\"/blog/wp-includes/css/dist/block-library/style.min.css?ver=6.9.3\"></head><body>Blog</body></html>"}
+      /blog/wp-content/debug.log: {type: text/plain, body: "[24-Oct-2026 01:02:03 UTC] PHP Warning:  Undefined variable $x in /var/www/blog/wp-content/themes/t/functions.php on line 3\n"}
+steps:
+  - args: [scan, "{{url:site}}/blog/", --no-vulns, --no-check-updates, --rate, "0", --plain, -o, report.json]
+    expect:
+      exit: 0
+      stdout:
+        contains: ["WordPress 6.9.3", "{{url:site}}/blog/wp-content/debug.log"]
+      files:
+        report.json:
+          finding_ids: [wp-debug-log]
+      requests:
+        site: {paths: [/blog/, /blog/wp-content/debug.log], not_paths: [/wp-content/debug.log, /.env]}

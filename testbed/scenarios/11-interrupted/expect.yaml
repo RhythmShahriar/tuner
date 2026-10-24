@@ -1,0 +1,26 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# QA gap 11, bug 12. Ctrl+C during a scan. The partial report must say
+# it is partial.
+title: an interrupted scan writes a report marked incomplete
+qa: [11]
+xfail: U4 R3
+skip_on: [windows]
+servers:
+  - name: site
+    routes:
+      "*": {delay: 300ms, status: 404, body: "<h1>Not Found</h1>"}
+      /: {delay: 300ms, body: "<html><body>home</body></html>"}
+steps:
+  - args: [scan, "{{url:site}}", --no-vulns, --no-check-updates, --rate, "0", -c, "2", --plain, -o, report.json]
+    signals:
+      - {after: 2s, signal: INT}
+    expect:
+      exit: 130
+      max_time: 5s
+      stderr:
+        contains: ["scan canceled; results are partial"]
+      files:
+        report.json:
+          json: {complete: false, stopped_by: interrupted}

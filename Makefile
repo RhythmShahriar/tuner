@@ -1,6 +1,18 @@
 GOLANGCI := go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
+ACTIONLINT := go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+GORELEASER := go run github.com/goreleaser/goreleaser/v2@v2.18.3
+GOVULNCHECK := go run golang.org/x/vuln/cmd/govulncheck@v1.8.0
 
-.PHONY: build test lint fmt check hooks pack
+# Files whose uses: lines must name a full commit SHA with a version
+# comment, e.g. uses: actions/checkout@<40 hex> # v7.0.1.
+PIN_FILES ?= $(wildcard .github/workflows/*.yml .github/workflows/*.yaml action.yml)
+# Lines allowed to stay unpinned, each for a reason:
+#   release-go.yml@master  the release signature's identity names this ref
+#                          (see release.yml); changing it is a separate decision
+#   checks-pack.yml        maintained with the check pack; remove once pinned
+PIN_EXEMPT := release-go\.yml@master$$|^\.github/workflows/checks-pack\.yml:
+
+.PHONY: build test test-all testbed-fast testbed testbed-down testbed-config testbed-config-test benchmark benchmark-test vuln checks-lint lint fmt check hooks pack pins actionlint init-ci-lint release-check image-context
 
 build: ## build bin/rhythm-tuner
 	go build -o bin/rhythm-tuner ./cmd/rhythm-tuner
@@ -8,16 +20,102 @@ build: ## build bin/rhythm-tuner
 test: ## run tests, including every check's fixtures
 	go test -race ./...
 
+test-all: test ## test, then compile every package and test for Windows and macOS
+	GOOS=windows go vet ./...
+	GOOS=darwin go vet ./...
+
+# The hermetic scenario suite (testbed/scenarios). go test ./... runs it
+# too; this target runs only it, with a summary when TUNER_SCENARIO_SUMMARY
+# names a file.
+testbed-fast: ## run the scenario suite: loopback fixtures for QA's failure modes
+	go test -count=1 ./testbed/scenarios/
+
+testbed: ## build the plugin tree and start the WordPress testbed (needs Docker)
+	sh testbed/wp/make-plugins.sh
+	docker compose -f testbed/docker-compose.yml up -d --wait
+
+testbed-down: ## stop and remove the testbed, database and volumes
+	docker compose -f testbed/docker-compose.yml down -v
+
+benchmark: ## run Tuner, WPScan, wpprobe and Nuclei on the testbed and write docs/benchmark.md
+	go run -tags testbed ./testbed/bench
+
+benchmark-test: ## test the benchmark scoring without Docker or the network
+	go test -tags testbed ./testbed/bench/
+
+# Validates the server-config bundles from `rhythm-tuner fix` (checks-pack
+# C6) against the testbed's nginx and Apache: nginx -t, then httpd -t with
+# the bundle included in the docroot's <Directory> and a live request with
+# it as .htaccess. Skips cleanly until C6 ships the fix subcommand.
+testbed-config: ## validate C6 server-config bundles against nginx and Apache (needs Docker)
+	@if go run ./cmd/rhythm-tuner fix --help >/dev/null 2>&1; then \
+		sh testbed/validate-config.sh; \
+	else \
+		echo "testbed-config: rhythm-tuner fix is not in this build yet (checks-pack C6); skipped"; \
+	fi
+
+testbed-config-test: ## prove testbed-config passes good bundles and fails broken ones (needs Docker)
+	sh testbed/validate-config-test.sh
+
+vuln: ## report known vulnerabilities in the code paths Tuner calls
+	$(GOVULNCHECK) ./...
+
+# Until the checks command has a lint subcommand, say so instead of
+# failing: older builds ignore "lint" and would just list the checks.
+checks-lint: ## lint every built-in check (IDs, methods, fixtures, budgets)
+	@if go run ./cmd/rhythm-tuner checks --help | grep -q 'checks lint'; then \
+		go run ./cmd/rhythm-tuner checks lint checks; \
+	else \
+		echo "checks lint: not in this build yet; skipped"; \
+	fi
+
 lint:
 	$(GOLANGCI) run ./...
 
 fmt:
 	gofmt -w .
 
-check: lint test ## everything CI runs
+check: lint test-all pins ## what CI runs, short of other platforms and govulncheck
 
 pack: ## build the check pack into dist/checks-pack, byte for byte as CI publishes it
 	go run ./internal/packbuild -commit "$$(git rev-parse HEAD)" -time "$$(git log -1 --format=%cI)"
 
 hooks: ## enable the Conventional Commits hook
 	git config core.hooksPath .githooks
+
+pins: ## fail on any action or reusable workflow not pinned to a commit SHA
+	@bad=$$(grep -HnE '^[[:space:]]*(-[[:space:]]+)?uses:' $(PIN_FILES) /dev/null | \
+		grep -vE 'uses:[[:space:]]*(\./[^[:space:]]*|docker://[^[:space:]]+@sha256:[0-9a-f]{64}|[^[:space:]@]+@[0-9a-f]{40}[[:space:]]+#[[:space:]]*[^[:space:]].*)$$' | \
+		grep -vE '$(PIN_EXEMPT)'); \
+	if [ -n "$$bad" ]; then \
+		printf '%s\n' "$$bad"; \
+		echo "pin each of these to a full commit SHA with its version in a comment"; \
+		exit 1; \
+	fi; \
+	echo "every uses: is pinned"
+
+actionlint: ## lint the workflows (and their run: scripts when shellcheck is installed)
+	$(ACTIONLINT)
+
+# The workflows rhythm tuner init ci writes, from its golden tests.
+init-ci-lint: ## actionlint the workflows that rhythm tuner init ci generates
+	@out=$$(mktemp -d) && \
+	TUNER_INIT_CI_OUT="$$out" go test -count=1 -run 'TestInitCI(URL|Folder)$$' ./cmd/rhythm-tuner && \
+	$(ACTIONLINT) "$$out"/*.yml && echo "generated workflows pass actionlint"; \
+	status=$$?; rm -rf "$$out"; exit $$status
+
+release-check: ## validate .goreleaser.yaml with the pinned GoReleaser
+	$(GORELEASER) check
+
+# The Dockerfile copies <os>/<arch>/rhythm-tuner from its context, the
+# layout buildx's TARGETPLATFORM names. CI (image.yml) builds from this;
+# a release fills the same layout from its signed archives instead.
+IMAGE_VERSION ?= dev
+image-context: ## build the linux binaries and Dockerfile into dist/image for docker buildx
+	rm -rf dist/image
+	for arch in amd64 arm64; do \
+		CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath \
+			-ldflags "-s -w -X main.version=$(IMAGE_VERSION)" \
+			-o dist/image/linux/$$arch/rhythm-tuner ./cmd/rhythm-tuner || exit 1; \
+	done
+	cp Dockerfile dist/image/Dockerfile

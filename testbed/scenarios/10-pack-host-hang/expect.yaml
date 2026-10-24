@@ -1,0 +1,30 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# QA gap 10, bug 16. The check pack host never answers. A scan must not
+# wait 10 seconds for it every time. It must say it used other checks.
+title: a hanging check pack host doesn't hold up every scan
+qa: [10]
+xfail: C4
+servers:
+  - name: site
+    routes:
+      /: {body: "<html><body>home</body></html>"}
+  - name: packhost
+    routes:
+      "*": {hang: true}
+steps:
+  - name: first run
+    args: [scan, "{{url:site}}", --no-vulns, --rate, "0", --plain, -q, --profile, quick]
+    env: {TUNER_CHECKS_URL: "{{url:packhost}}/checks-latest"}
+    expect:
+      max_time: 4s
+      stderr:
+        contains: ["check pack"]
+  - name: second run backs off
+    args: [scan, "{{url:site}}", --no-vulns, --rate, "0", --plain, -q, --profile, quick]
+    env: {TUNER_CHECKS_URL: "{{url:packhost}}/checks-latest"}
+    expect:
+      max_time: 2s
+      requests:
+        packhost: {max: 0}

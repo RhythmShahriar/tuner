@@ -1,13 +1,103 @@
 # Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
 # SPDX-License-Identifier: AGPL-3.0-only
 
+# Every uses: names a full commit SHA with its version in a comment, so a
+# moved tag or a push to another repository can't change how Tuner is
+# built. Dependabot proposes the bumps; `make pins` (the pins job) fails on
+# anything else.
 name: ci
 on:
   push:
     branches: [master]
   pull_request:
+
+permissions:
+  contents: read
+
 jobs:
+  # The shared workflows have no tags, so Dependabot can't bump these.
+  # Move both SHAs by hand after a change in RhythmShahriar/.github.
   go:
-    uses: RhythmShahriar/.github/.github/workflows/ci-go.yml@master
+    uses: RhythmShahriar/.github/.github/workflows/ci-go.yml@d296f34c9b6629211c68561504d938c404afaf74 # master 2026-10-24
   commitlint:
-    uses: RhythmShahriar/.github/.github/workflows/commitlint.yml@master
+    uses: RhythmShahriar/.github/.github/workflows/commitlint.yml@d296f34c9b6629211c68561504d938c404afaf74 # master 2026-10-24
+
+  workflows:
+    name: pins, actionlint and goreleaser check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Every action pinned by SHA
+        run: make pins
+      # actionlint runs shellcheck, preinstalled on ubuntu-latest, over
+      # every run: block.
+      - name: actionlint
+        run: make actionlint
+      - name: actionlint on what init ci generates
+        run: make init-ci-lint
+      - name: goreleaser check
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          version: v2.18.3
+          args: check
+
+  # The shared go job tests on Linux only while Windows and macOS binaries
+  # ship too. go.mod pins a released kit, so like the shared job this one
+  # builds against it without linking a local checkout.
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # The race detector needs cgo, which Windows runners don't set up.
+      # ./... includes the scenario suite (testbed/scenarios); its table of
+      # passes and expected failures goes to the job summary.
+      - name: go test
+        shell: bash
+        run: |
+          export TUNER_SCENARIO_SUMMARY="$GITHUB_STEP_SUMMARY"
+          if [ "$RUNNER_OS" = Windows ]; then
+            go test ./...
+          else
+            go test -race ./...
+          fi
+
+  vuln:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: govulncheck
+        run: make vuln
+
+  checks-lint:
+    name: checks lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: rhythm-tuner checks lint
+        run: make checks-lint

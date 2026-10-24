@@ -1,0 +1,24 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# QA gap 16. A site on IPv6 loopback, written as http://[::1]:port.
+title: IPv6 targets are scanned and reported with brackets
+qa: [16]
+servers:
+  - name: site
+    listen: "::1"
+    routes:
+      /: {body: "<html><body>home</body></html>"}
+      /.env: {type: text/plain, body: "APP_KEY=scenario\n"}
+steps:
+  - args: [scan, "{{url:site}}", --no-vulns, --no-check-updates, --rate, "0", --plain, -o, report.json]
+    expect:
+      exit: 0
+      stdout:
+        contains: ["{{url:site}}/.env"]
+      files:
+        report.json:
+          finding_ids: [leak-dotenv]
+          json: {target: "{{url:site}}"}
+      requests:
+        site: {paths: [/, /.env]}

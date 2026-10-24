@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<!-- Copyright (c) 2026 Rhythm Shahriar <me@rhy.io> -->
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<phpunit
+    bootstrap="tests/bootstrap.php"
+    colors="true"
+    failOnWarning="true"
+    failOnRisky="true">
+    <testsuites>
+        <testsuite name="tuner-wp-cli">
+            <directory suffix="Test.php">tests</directory>
+        </testsuite>
+    </testsuites>
+</phpunit>

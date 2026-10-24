@@ -1,0 +1,35 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# QA gap 13, bug 8. A folder named like the host sits in the current
+# folder. A bare name that is both must be a usage error, not a silent
+# local scan; ./name and http://name stay unambiguous.
+title: a bare target that is also a folder is a usage error
+qa: [13]
+xfail: U1
+servers:
+  - name: site
+    routes:
+      /: {body: "<html><body>home</body></html>"}
+tree:
+  - copy: ../_fixtures/wordpress
+    to: localhost
+steps:
+  - name: ambiguous
+    args: [scan, localhost, --no-vulns, --no-check-updates, --plain]
+    expect:
+      exit: 2
+      stderr:
+        contains: ["localhost is both a folder here and a hostname"]
+  - name: ./ means the folder
+    args: [scan, ./localhost, --no-vulns, --plain]
+    expect:
+      exit: [0, 1]
+      stdout:
+        contains: ["WordPress 6.9.3"]
+  - name: a URL means the site
+    args: [scan, "http://localhost:{{port:site}}", --no-vulns, --no-check-updates, --rate, "0", --plain, --profile, quick]
+    expect:
+      exit: 0
+      requests:
+        site: {min: 1}

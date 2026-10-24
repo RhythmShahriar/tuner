@@ -1,0 +1,30 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# QA gap 6, bug 5. A socket, a symlink to /dev/zero and a symlink to a
+# secret outside the site. The scan finishes, never reads /dev/zero and
+# never reports what lies outside the folder it was given.
+title: sockets, device links and links out of the root are skipped
+qa: [6]
+skip_on: [windows]
+tree:
+  - copy: ../_fixtures/wordpress
+    to: site
+  - socket: site/php-fpm.sock
+  - symlink: site/.env
+    target: /dev/zero
+  - write: outside/.env.production
+    content: "DB_PASSWORD=Scenario-Outside-Secret\n"
+  - symlink: site/.env.production
+    target: ../outside/.env.production
+steps:
+  - args: [scan, ./site, --no-vulns, --plain, -o, report.json]
+    timeout: 30s
+    expect:
+      exit: [0, 1]
+      max_time: 5s
+      output:
+        not_contains: [Scenario-Outside, Scenario-Outside-Secret]
+      files:
+        report.json:
+          not_contains: [Scenario-Outside]

@@ -1,0 +1,26 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# QA gap 1, bug 1. The home page redirects to a host the user never
+# named. Tuner must stop there instead of probing the other host. The
+# user's -H and --cookie must never reach it.
+title: a cross-host redirect does not move the scan
+qa: [1]
+xfail: E1
+servers:
+  - name: site
+    routes:
+      "*": {status: 302, headers: {Location: "http://localhost:{{port:other}}/"}}
+  - name: other
+    routes:
+      /: {body: "<html><title>Parked domain</title></html>"}
+steps:
+  - args: [scan, "{{url:site}}", --no-vulns, --no-check-updates, --rate, "0", --plain,
+           -H, "Authorization: Bearer scenario-token", --cookie, "wordpress_logged_in=scenario", -o, report.json]
+    expect:
+      exit: 3
+      stderr:
+        contains: ["redirects to localhost:{{port:other}}"]
+      requests:
+        site: {min: 1}
+        other: {max: 0}

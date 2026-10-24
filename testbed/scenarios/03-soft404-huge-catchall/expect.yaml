@@ -1,0 +1,18 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# QA gap 3. A catch-all page over 1 MiB, so every body is cut to the same
+# length. Nothing on the site is a leak; nothing may be reported as one.
+title: a catch-all page over 1 MiB gives no leak findings
+qa: [3]
+servers:
+  - name: site
+    routes:
+      "*": {body: "<p>Lorem ipsum dolor sit amet, catch-all page for every path.</p>\n", repeat: 40000}
+steps:
+  - args: [scan, "{{url:site}}", --no-vulns, --no-check-updates, --rate, "0", --plain, --tags, leak, -o, report.json]
+    expect:
+      exit: 0
+      files:
+        report.json:
+          json: {findings.#: 0}

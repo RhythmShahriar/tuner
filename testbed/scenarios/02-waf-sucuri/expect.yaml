@@ -1,0 +1,25 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# QA gap 2, bug 13. Every path answers with a Sucuri block page. Tuner never
+# saw the site, so the report must say it was blocked and is partial.
+title: a Sucuri block page on every path marks the scan blocked
+qa: [2]
+xfail: E7
+servers:
+  - name: site
+    routes:
+      "*": {status: 403, body: "<html><head><title>Sucuri WebSite Firewall - Access Denied</title></head><body><h1>Access Denied - Sucuri Website Firewall</h1></body></html>", headers: {Server: Sucuri/Cloudproxy, X-Sucuri-ID: "17010", X-Sucuri-Block: BOT01}}
+steps:
+  - args: [scan, "{{url:site}}", --no-vulns, --no-check-updates, --rate, "0", --plain, -o, report.json]
+    expect:
+      output:
+        contains: ["results are partial"]
+        not_contains: ["server returns real 404s"]
+      files:
+        report.json:
+          json: {complete: false, blocked_by: sucuri, stopped_by: waf}
+  - name: the gate
+    args: [scan, "{{url:site}}", --no-vulns, --no-check-updates, --rate, "0", --plain, --fail-on, high]
+    expect:
+      exit: 3

@@ -1,0 +1,79 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# Builds the container image for both architectures (no push) and
+# smoke-tests it, so a change to the Dockerfile or the release image job's
+# layout is caught before a release. The real multi-arch push and signing
+# happen on a tag in release.yml's image job, from the same Dockerfile and
+# context layout (make image-context). Every uses: is pinned by SHA (make
+# pins).
+name: image
+on:
+  push:
+    branches: [master]
+    paths: [Dockerfile, Makefile, .github/workflows/image.yml, .github/workflows/release.yml]
+  pull_request:
+    paths: [Dockerfile, Makefile, .github/workflows/image.yml, .github/workflows/release.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # Both architectures must build; only amd64 is loaded to run below.
+      - name: Build the image
+        run: |
+          set -euo pipefail
+          make image-context IMAGE_VERSION=snapshot
+          docker buildx build --platform linux/arm64 dist/image
+          docker buildx build --platform linux/amd64 --load -t tuner:smoke dist/image
+      # /v0/health answers. With no TUNER_SERVE_TOKEN the container
+      # refuses to serve on 0.0.0.0. Both need the serve command, which is
+      # built in another lane (vulns-service V10); until it lands the
+      # image runs `rhythm-tuner serve` and exits with "unknown command",
+      # so the checks are skipped with a notice instead of failing.
+      - name: Smoke-test the image
+        run: |
+          set -uo pipefail
+          image=tuner:smoke
+          docker run --rm "$image" --version
+
+          if ! docker run --rm --entrypoint /usr/local/bin/rhythm-tuner "$image" serve --help >/dev/null 2>&1; then
+            echo "::notice::this build has no serve command yet (vulns-service V10); skipping the health and token checks"
+            exit 0
+          fi
+
+          # Without a token the service must refuse to start on 0.0.0.0:
+          # it exits non-zero on its own, names the variable and leaves no
+          # container behind. A serve that logs the name and keeps serving
+          # is still running at the timeout and fails here.
+          name=tuner-smoke-notoken
+          timeout 20 docker run --name "$name" -e TUNER_SERVE_TOKEN= "$image" > notoken.log 2>&1
+          code=$?
+          cat notoken.log
+          running=$(docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null || echo false)
+          docker rm -f "$name" >/dev/null 2>&1 || true
+          [ "$code" -ne 124 ] && [ "$running" = false ] || { echo "::error::with no token the container kept running"; exit 1; }
+          [ "$code" -ne 0 ] || { echo "::error::serving with no token exited 0"; exit 1; }
+          grep -qi 'TUNER_SERVE_TOKEN' notoken.log || { echo "::error::the refusal does not name TUNER_SERVE_TOKEN"; exit 1; }
+
+          # With a token it answers /v0/health.
+          cid=$(docker run -d -p 127.0.0.1:8080:8080 -e TUNER_SERVE_TOKEN=smoke-token "$image")
+          trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/v0/health >/dev/null 2>&1; then ok=1; break; fi
+            sleep 0.5
+          done
+          [ "${ok:-}" = 1 ] || { echo "::error::/v0/health did not answer"; docker logs "$cid"; exit 1; }
+          echo "/v0/health answered"

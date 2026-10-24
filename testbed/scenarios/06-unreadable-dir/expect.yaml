@@ -1,0 +1,28 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# QA gap 6. A folder the scanning user can't read. The scan carries on
+# with the rest of the tree and says what it skipped.
+title: an unreadable folder is skipped with a warning
+qa: [6]
+xfail: L4
+skip_on: [windows]
+tree:
+  - copy: ../_fixtures/wordpress
+    to: site
+  - write: site/private/.env
+    content: "DB_PASSWORD=scenario-pass\n"
+  - chmod: site/private
+    mode: "000"
+  - write: site/.env
+    content: "DB_PASSWORD=scenario-visible\n"
+steps:
+  - args: [scan, ./site, --no-vulns, --plain, -o, report.json]
+    expect:
+      exit: [0, 1]
+      max_time: 10s
+      output:
+        contains: [private]
+      files:
+        report.json:
+          min_size: 10

@@ -1,0 +1,24 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# QA gap 5, bug 7. A leaked file's first line carries terminal escapes
+# (window title, clear screen, colours). None may reach the terminal or a
+# Markdown report.
+title: escape sequences in a response body never reach the output
+qa: [5]
+xfail: E3 R1
+xfail_covers: ['matches \[\\x00']
+servers:
+  - name: site
+    routes:
+      /: {body: "<html><body>home</body></html>"}
+      /.env: {type: text/plain, body: "X=\e]0;owned\a\e[2J\e[32mclean\e[0m\nAPP_KEY=scenario\n"}
+steps:
+  - args: [scan, "{{url:site}}", --no-vulns, --no-check-updates, --rate, "0", --plain, --id, leak-dotenv, -o, report.md]
+    expect:
+      stdout:
+        contains: [".env file exposed"]
+        not_matches: ['[\x00-\x08\x0b-\x1f\x7f]']
+      files:
+        report.md:
+          not_matches: ['[\x00-\x08\x0b-\x1f\x7f]']

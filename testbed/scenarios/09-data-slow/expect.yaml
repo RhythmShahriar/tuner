@@ -1,0 +1,20 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# QA gap 9. A data service that takes 3 seconds per answer is slow, not
+# down: the scan waits for it and reports the advisory.
+title: a slow vulnerability data service still gives results
+qa: [9]
+data:
+  state: slow
+tree:
+  - copy: ../_fixtures/wordpress
+    to: site
+steps:
+  - args: [scan, ./site, --plain, -o, report.json]
+    timeout: 90s
+    expect:
+      exit: 0
+      files:
+        report.json:
+          finding_ids: [vuln-plugin-gallery]

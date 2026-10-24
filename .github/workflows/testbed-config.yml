@@ -1,0 +1,38 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# Runs make testbed-config-test: the server-config validator must pass the
+# good fixture bundles and fail each broken one, so a validator that stops
+# reading the bundle shows up here. It needs only the pinned nginx and
+# httpd images, not the WordPress testbed.
+name: testbed-config
+on:
+  push:
+    branches: [master]
+    paths:
+      - testbed/validate-config.sh
+      - testbed/validate-config-test.sh
+      - testbed/config-fixtures/**
+      - testbed/apache/**
+      - .github/workflows/testbed-config.yml
+  pull_request:
+    paths:
+      - testbed/validate-config.sh
+      - testbed/validate-config-test.sh
+      - testbed/config-fixtures/**
+      - testbed/apache/**
+      - .github/workflows/testbed-config.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validator self-test
+        run: make testbed-config-test
