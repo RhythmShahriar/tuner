@@ -11,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -178,7 +179,7 @@ func scan(args []string, stdout, stderr io.Writer) int {
 		}
 		fmt.Fprintln(stderr, "rhythm tuner:", err)
 		var ue usageError
-		if errors.As(err, &ue) || strings.HasPrefix(err.Error(), "flag") {
+		if errors.As(err, &ue) {
 			return exitUsage
 		}
 		return exitError
@@ -208,11 +209,19 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 		if err != nil {
 			return nil, err
 		}
-		p.targets = append(p.targets, readTargets(f)...)
+		more, err := readTargets(f, o.list)
 		_ = f.Close()
+		if err != nil {
+			return nil, err
+		}
+		p.targets = append(p.targets, more...)
 	}
 	if o.stdin {
-		p.targets = append(p.targets, readTargets(stdin)...)
+		more, err := readTargets(stdin, "stdin")
+		if err != nil {
+			return nil, err
+		}
+		p.targets = append(p.targets, more...)
 	}
 	p.targets = dedupe(p.targets)
 	if len(p.targets) == 0 {
@@ -306,16 +315,28 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 	if o.rate < 0 || o.concurrency < 1 || o.retries < 0 || o.parallel < 1 || o.timeout <= 0 {
 		return nil, usagef("--rate, --retries must be >= 0; --concurrency, --parallel and --timeout must be positive")
 	}
+	// Go's HTTP client would refuse a line break in a header on every
+	// request, which reads as an unreachable site; catch it here instead.
 	h := http.Header{}
 	for _, raw := range o.headers {
 		name, value, ok := strings.Cut(raw, ":")
-		if name = strings.TrimSpace(name); !ok || name == "" || strings.ContainsAny(name, " \t") {
+		value = strings.TrimSpace(value)
+		if name = strings.TrimSpace(name); !ok || !validHeaderName(name) {
 			return nil, usagef("bad header %q, use \"Name: value\"", raw)
 		}
-		h.Add(name, strings.TrimSpace(value))
+		if !validHeaderValue(value) {
+			return nil, usagef("bad header %q: the value can't hold line breaks or control characters", raw)
+		}
+		h.Add(name, value)
+	}
+	if !validHeaderValue(o.cookie) {
+		return nil, usagef("bad --cookie: it can't hold line breaks or control characters")
 	}
 	if o.cookie != "" {
 		h.Add("Cookie", o.cookie)
+	}
+	if !validHeaderValue(ua) {
+		return nil, usagef("bad --user-agent: it can't hold line breaks or control characters")
 	}
 	p.engine = engine.Options{
 		UserAgent:   ua,
@@ -391,13 +412,14 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 		defer cancel()
 	}
 
-	notice := checkForUpdate(ctx, p.engine.UserAgent)
+	notice := checkForUpdate(ctx, p.engine.UserAgent, o.offline)
 
 	scanner := engine.New(p.checks, p.engine)
 	single := len(p.targets) == 1
 	results := make([]*engine.Result, len(p.targets))
 	failed := make([]string, len(p.targets)) // why each target failed, or ""
 	var outMu sync.Mutex
+	var jsonlErr error // the first failed --jsonl write, guarded by outMu
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, p.o.parallel)
 
@@ -433,7 +455,9 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 				}
 				if p.format == "jsonl" {
 					outMu.Lock()
-					_ = report.JSONLine(out, f)
+					if err := report.JSONLine(out, f); err != nil && jsonlErr == nil {
+						jsonlErr = err // a full disk or closed pipe; reported once at the end
+					}
 					outMu.Unlock()
 				}
 			}
@@ -459,7 +483,7 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 				_, _ = stdout.Write(buf.Bytes())
 			}
 			if err != nil && !errors.Is(err, context.Canceled) {
-				failed[i] = describe(err)
+				failed[i] = describe(ctx, err, o)
 				fmt.Fprintf(stderr, "rhythm tuner: %s: %v\n", target, failed[i])
 			}
 		})
@@ -491,7 +515,10 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 	case len(reports) == 0 && len(p.write.Failed) > 0:
 		keep = "every target failed"
 	}
-	var werr error
+	werr := jsonlErr
+	if werr != nil && file != nil {
+		keep = "the report could not be written in full"
+	}
 	if keep == "" && p.format != "" && p.format != "jsonl" {
 		werr = writeReport(p.format, out, reports, p.write)
 	}
@@ -633,10 +660,18 @@ func writeReport(format string, w io.Writer, reports []report.Report, o writeOpt
 // filtering. It is a seam for report.Stamp, which does nothing yet either.
 func stampFindings(*engine.Result, string) {}
 
-func describe(err error) string {
+// describe explains why a target failed. The run context tells a --max-time
+// stop apart from one slow request, which wraps the same DeadlineExceeded.
+func describe(ctx context.Context, err error, o scanOptions) string {
 	switch {
-	case errors.Is(err, context.DeadlineExceeded):
+	case errors.Is(err, context.DeadlineExceeded) && errors.Is(ctx.Err(), context.DeadlineExceeded):
 		return "stopped by --max-time; results are partial"
+	case isTimeout(err):
+		tries := "once"
+		if o.retries > 0 {
+			tries = fmt.Sprintf("%d times", o.retries+1)
+		}
+		return fmt.Sprintf("no response within %s (tried %s)\n  raise --timeout if the site is just slow", o.timeout, tries)
 	case strings.HasPrefix(err.Error(), "can't reach"):
 		return err.Error() + "\n  check the address and that the site is up"
 	}
@@ -694,29 +729,113 @@ func vulnClient(ua string, proxy *url.URL, offline bool) *vulns.Client {
 	}
 }
 
+// isTimeout reports whether a single request ran out of time. The engine
+// will mark these with its own error; until then, the net package's
+// Timeout flag says the same.
+func isTimeout(err error) bool {
+	var ne interface{ Timeout() bool }
+	return errors.Is(err, context.DeadlineExceeded) || errors.As(err, &ne) && ne.Timeout()
+}
+
+// maxTargetLen bounds one target. No URL or path to a site is this long,
+// so a longer line is a pasted file or a broken export, not a site.
+const maxTargetLen = 4096
+
 // readTargets reads one target per line, skipping blanks and # comments.
-func readTargets(r io.Reader) []string {
+// It accepts files saved on Windows (a byte order mark, CRLF endings).
+// name says where the lines came from, for errors.
+func readTargets(r io.Reader, name string) ([]string, error) {
 	var out []string
 	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 64*1024), 1<<20)
+	n := 0
 	for sc.Scan() {
-		line, _, _ := strings.Cut(sc.Text(), "#")
-		if line = strings.TrimSpace(line); line != "" {
-			out = append(out, line)
+		n++
+		text := sc.Text()
+		if n == 1 {
+			text = strings.TrimPrefix(text, "\uFEFF")
+		}
+		line, _, _ := strings.Cut(text, "#")
+		if line = strings.TrimSpace(line); line == "" {
+			continue
+		}
+		if len(line) > maxTargetLen {
+			return nil, usagef("%s line %d: %d characters is too long for a target", name, n, len(line))
+		}
+		out = append(out, line)
+	}
+	if err := sc.Err(); err != nil {
+		if errors.Is(err, bufio.ErrTooLong) {
+			return nil, usagef("%s line %d: longer than 1 MiB; is this a list of sites?", name, n+1)
+		}
+		return nil, fmt.Errorf("reading %s: %w", name, err)
+	}
+	return out, nil
+}
+
+// dedupe drops targets that name the same site or folder, keeping the
+// first spelling: example.com, https://example.com/ and HTTPS://Example.com
+// are one scan.
+func dedupe(in []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range in {
+		if k := targetKey(s); !seen[k] {
+			seen[k] = true
+			out = append(out, s)
 		}
 	}
 	return out
 }
 
-func dedupe(in []string) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, s := range in {
-		if !seen[s] {
-			seen[s] = true
-			out = append(out, s)
+// targetKey is the form two spellings of one target share. A bare host is
+// scanned over https first, so it matches https://host.
+func targetKey(t string) string {
+	if isLocal, err := classifyTarget(t); err != nil {
+		return t // planScan reports it
+	} else if isLocal {
+		if root, err := local.Root(t); err == nil {
+			return "file:" + root
+		}
+		return t
+	}
+	u, _, err := engine.ParseTarget(t)
+	if err != nil {
+		return t
+	}
+	host := strings.ToLower(u.Hostname())
+	defaultPort := map[string]string{"http": "80", "https": "443"}[u.Scheme]
+	if port := u.Port(); port != "" && port != defaultPort {
+		host = net.JoinHostPort(host, port)
+	} else if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	return u.Scheme + "://" + host + strings.TrimRight(u.EscapedPath(), "/") + "?" + u.RawQuery
+}
+
+// validHeaderName reports whether s is an HTTP token (RFC 9110 5.1).
+func validHeaderName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range []byte(s) {
+		alnum := c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+		if !alnum && strings.IndexByte("!#$%&'*+-.^_`|~", c) < 0 {
+			return false
 		}
 	}
-	return out
+	return true
+}
+
+// validHeaderValue reports whether s can go in a header: no control
+// characters but tab (RFC 9110 5.5), so no CR or LF to split the request.
+func validHeaderValue(s string) bool {
+	for _, c := range []byte(s) {
+		if c < 0x20 && c != '\t' || c == 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 func isTerminal(w io.Writer) bool {

@@ -74,7 +74,8 @@ Output:
       --sarif              SARIF 2.1.0 for GitHub code scanning
       --md                 Markdown for issues and pull requests
   -o, --output <file>      write the report to a file (format from the extension)
-                           and keep the live view on the terminal
+                           and keep the live view on the terminal; an existing
+                           file is replaced only once the new report is complete
   -q, --quiet              findings only
       --plain              no color, boxes or glyphs (screen readers, logs)
       --no-color           no color
@@ -91,7 +92,8 @@ Checks:
       --checks <dir>       load checks from a directory
       --no-check-updates   use the built-in checks, not the latest check pack
       --no-vulns           skip known-vulnerability matching
-      --offline            use cached vulnerability data and check pack only
+      --offline            use cached vulnerability data and check pack only,
+                           and skip the update check (RHYTHM_OFFLINE=1 skips it too)
 
 Requests:
       --rate <n>           max requests per second per site (default 5)

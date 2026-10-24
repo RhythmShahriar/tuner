@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -570,5 +571,157 @@ func TestReportFolderNotWritable(t *testing.T) {
 	}
 	if code, _, errs := tuner(t, "scan", srv.URL, "--json", "-o", t.TempDir()); code != exitError || !strings.Contains(errs, "it is a directory") {
 		t.Errorf("-o a directory: exit %d, stderr %q", code, errs)
+	}
+}
+
+func TestTimeoutMessages(t *testing.T) {
+	hang := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	t.Cleanup(hang.Close)
+	_, _, errs := tuner(t, "scan", hang.URL, "--timeout", "1s", "--retries", "0", "--no-vulns", "--plain")
+	if !strings.Contains(errs, "no response within 1s (tried once)") || strings.Contains(errs, "--max-time;") {
+		t.Errorf("--timeout: %q", errs)
+	}
+	_, _, errs = tuner(t, "scan", hang.URL, "--timeout", "5s", "--max-time", "300ms", "--no-vulns", "--plain")
+	if !strings.Contains(errs, "stopped by --max-time; results are partial") {
+		t.Errorf("--max-time: %q", errs)
+	}
+}
+
+func TestReadTargets(t *testing.T) {
+	got, err := readTargets(strings.NewReader("\uFEFFa.example\r\n# note\r\n\r\nb.example  # client\r\n"), "sites.txt")
+	if err != nil || strings.Join(got, ",") != "a.example,b.example" {
+		t.Errorf("BOM and CRLF: %q, %v", got, err)
+	}
+	for _, c := range []struct {
+		line int
+		long int
+	}{{2, 70_000}, {3, 2 << 20}} {
+		in := "a.example\n" + strings.Repeat("\n", c.line-2) + strings.Repeat("x", c.long) + "\nb.example\n"
+		path := filepath.Join(t.TempDir(), "sites.txt")
+		os.WriteFile(path, []byte(in), 0o600)
+		code, _, errs := tuner(t, "scan", "-l", path, "--json")
+		if want := fmt.Sprintf("%s line %d:", path, c.line); code != exitUsage || !strings.Contains(errs, want) {
+			t.Errorf("%d-byte line: exit %d, stderr %.200q, want %q", c.long, code, errs, want)
+		}
+	}
+}
+
+func TestJSONLWriteError(t *testing.T) {
+	full, err := os.OpenFile("/dev/full", os.O_WRONLY, 0)
+	if err != nil {
+		t.Skip("no /dev/full")
+	}
+	defer full.Close()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("TUNER_CHECKS_URL", "http://127.0.0.1:1")
+	var errb bytes.Buffer
+	code := run([]string{"scan", leakySite(t).URL, "--jsonl", "--no-vulns", "--rate", "0"}, full, &errb)
+	if code != exitError || !strings.Contains(errb.String(), "writing report:") {
+		t.Errorf("exit %d, stderr %q", code, errb.String())
+	}
+}
+
+func TestBadHeaderValues(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits.Add(1) }))
+	defer srv.Close()
+	for _, args := range [][]string{
+		{"-H", "X-Test: a\r\nInjected: 1"},
+		{"-H", "X-Test: a\nb"},
+		{"-H", "X(Test): a"},
+		{"-A", "tuner\r\nX-Injected: 1"},
+		{"--cookie", "a=b\r\nX: y"},
+	} {
+		code, _, errs := tuner(t, append([]string{"scan", srv.URL}, args...)...)
+		if code != exitUsage || !strings.Contains(errs, "bad ") {
+			t.Errorf("%q: exit %d, stderr %q", args, code, errs)
+		}
+	}
+	if hits.Load() != 0 {
+		t.Errorf("bad headers still sent %d requests", hits.Load())
+	}
+	if code, _, errs := tuner(t, "scan", srv.URL, "-H", "X-Test: a\tb", "--no-vulns", "--json"); code != exitOK {
+		t.Errorf("a tab is a valid header value: exit %d: %s", code, errs)
+	}
+}
+
+func TestFlagErrorsAreUsageErrors(t *testing.T) {
+	for _, args := range [][]string{
+		{"scan", "example.com", "--bogus"},
+		{"scan", "example.com", "--rate", "fast"},
+		{"scan", "example.com", "--timeout"},
+	} {
+		if code, _, _ := tuner(t, args...); code != exitUsage {
+			t.Errorf("%v: exit %d, want %d", args, code, exitUsage)
+		}
+	}
+}
+
+func TestOfflineSkipsUpdateCheck(t *testing.T) {
+	var hits atomic.Int32
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Write([]byte(`{"tag_name":"v9.0.0","assets":[]}`))
+	}))
+	defer gh.Close()
+	t.Setenv("RHYTHM_GITHUB_API", gh.URL)
+	t.Setenv("CI", "")
+	t.Setenv("RHYTHM_NO_UPDATE_CHECK", "")
+	old := version
+	version = "0.1.0"
+	defer func() { version = old }()
+
+	site := cleanSite(t).URL
+	if _, _, errs := tuner(t, "scan", site, "--plain", "--offline"); strings.Contains(errs, "new release") {
+		t.Errorf("--offline printed an update notice:\n%s", errs)
+	}
+	t.Setenv("RHYTHM_OFFLINE", "1")
+	if _, _, errs := tuner(t, "scan", site, "--plain"); strings.Contains(errs, "new release") {
+		t.Errorf("RHYTHM_OFFLINE printed an update notice:\n%s", errs)
+	}
+	if hits.Load() != 0 {
+		t.Errorf("offline runs asked GitHub %d times", hits.Load())
+	}
+	t.Setenv("RHYTHM_OFFLINE", "0")
+	if _, _, errs := tuner(t, "scan", site, "--plain"); !strings.Contains(errs, "new release") {
+		t.Errorf("RHYTHM_OFFLINE=0 should still check:\n%s", errs)
+	}
+}
+
+func TestDuplicateTargetForms(t *testing.T) {
+	var homes atomic.Int32
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			homes.Add(1)
+			w.Write([]byte("<html>home</html>"))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	host := strings.TrimPrefix(srv.URL, "https://")
+	code, out, errs := tuner(t, "scan", host, srv.URL+"/", "HTTPS://"+strings.ToUpper(host), "-k", "--no-vulns", "--json")
+	if code != exitOK || !strings.HasPrefix(strings.TrimSpace(out), "{") || homes.Load() != 1 {
+		t.Errorf("exit %d, %d home requests, stderr %s\n%.100s", code, homes.Load(), errs, out)
+	}
+
+	for _, c := range [][2]string{
+		{"example.com", "https://example.com/"},
+		{"Example.COM", "https://example.com:443"},
+		{"http://example.com:80/blog/", "http://example.com/blog"},
+		{"[::1]:443", "https://[::1]"},
+	} {
+		if a, b := targetKey(c[0]), targetKey(c[1]); a != b {
+			t.Errorf("%s and %s differ: %s, %s", c[0], c[1], a, b)
+		}
+	}
+	for _, c := range [][2]string{
+		{"example.com", "http://example.com"},
+		{"example.com", "example.com/blog"},
+		{"example.com:8443", "example.com"},
+	} {
+		if targetKey(c[0]) == targetKey(c[1]) {
+			t.Errorf("%s and %s should stay apart", c[0], c[1])
+		}
 	}
 }
