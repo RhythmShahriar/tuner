@@ -4,6 +4,7 @@
 package checktest
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -73,8 +74,51 @@ func (c Case) bodies() [][]byte {
 	return out
 }
 
-// server starts the mock site and returns a client set up to reach it.
+// server starts the mock site and returns a client that reaches only it.
 func (c Case) server() (*httptest.Server, *http.Client, error) {
+	srv, client, err := c.start()
+	if err != nil {
+		return nil, nil, err
+	}
+	return srv, pin(client, srv.Listener.Addr().String()), nil
+}
+
+// pin returns a copy of client that connects only to addr, the fixture
+// server's listener. Fixtures come from pull requests and third-party
+// checks directories, and the engine follows the home page's redirect, so
+// without this a fixture answering / with a redirect could make CI or a
+// contributor's machine send requests to any host, internal ones included.
+// An off-host redirect is an error, so the case fails and says why.
+func pin(client *http.Client, addr string) *http.Client {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	if base, ok := client.Transport.(*http.Transport); ok {
+		tr = base.Clone()
+	}
+	tr.Proxy = nil
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	tr.DialContext = func(ctx context.Context, network, to string) (net.Conn, error) {
+		if to != addr {
+			return nil, fmt.Errorf("fixture tried to reach %s; only the fixture server %s is allowed", to, addr)
+		}
+		return dialer.DialContext(ctx, network, to)
+	}
+	tr.DialTLSContext = nil
+	return &http.Client{
+		Transport: tr,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if req.URL.Host != addr {
+				return fmt.Errorf("fixture redirects to %s; only the fixture server %s is allowed", req.URL.Redacted(), addr)
+			}
+			if len(via) >= 10 {
+				return fmt.Errorf("stopped after %d redirects", len(via))
+			}
+			return nil
+		},
+	}
+}
+
+// start starts the mock site and returns a client set up to reach it.
+func (c Case) start() (*httptest.Server, *http.Client, error) {
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// A route with a query string (/?rest_route=/wp/v2/users) wins over
 		// its bare path, which still answers any other query, as most

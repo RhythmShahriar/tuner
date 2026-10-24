@@ -4,8 +4,11 @@
 package checktest
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 
@@ -214,5 +217,57 @@ negative:
 		if r.Failed(true) {
 			t.Errorf("%s: problems %q", r, r.Problems)
 		}
+	}
+}
+
+// A fixture that redirects the home page to another host fails, and no
+// request reaches that host.
+func TestFixtureStaysOnItsServer(t *testing.T) {
+	var outside atomic.Int32
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		outside.Add(1)
+		_, _ = w.Write([]byte("DB_PASSWORD=supersecretvalue\n"))
+	}))
+	defer other.Close()
+
+	fixture := `positive:
+  - name: redirected
+    routes:
+      /: {status: 302, headers: {Location: "` + other.URL + `/"}}
+negative:
+  - name: redirected
+    routes:
+      /: {status: 302, headers: {Location: "` + other.URL + `/"}}
+`
+	res := Run(fakeFS(envCheck(`(?m)^[A-Za-z_][A-Za-z0-9_]*=`), fixture))
+	if len(res) != 2 {
+		t.Fatalf("results = %+v", res)
+	}
+	for _, r := range res {
+		if !r.Failed(false) || !strings.Contains(strings.Join(r.Problems, "\n"), "only the fixture server") {
+			t.Errorf("%s: problems %q", r, r.Problems)
+		}
+	}
+	if n := outside.Load(); n != 0 {
+		t.Errorf("the other host got %d requests", n)
+	}
+
+	// The dialer refuses other addresses even without a redirect.
+	srv, client, err := Case{}.server()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	if resp, err := client.Get(other.URL); err == nil {
+		_ = resp.Body.Close()
+		t.Error("client reached another host")
+	}
+	resp, err := client.Get(srv.URL + "/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if outside.Load() != 0 {
+		t.Error("the other host got a request")
 	}
 }
