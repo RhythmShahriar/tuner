@@ -170,7 +170,15 @@ ignore:
     until: 2026-12-31                    # after this day the finding shows again
 ```
 
-A scan reads `.tuner.yml` from the current folder, so a cloned repository or a pull request can bring its own. Headers can only read variables whose names start with `TUNER_`. Every scan prints which file it used and which targets that file chose, also under `-q` and `--json`. Run `scan --no-config` in folders you don't trust.
+Pass the secret to the step under the `TUNER_` name the file uses:
+
+```yaml
+- run: rhythm tuner scan --sarif -o tuner.sarif
+  env:
+    TUNER_STAGING_AUTH: ${{ secrets.STAGING_AUTH }}
+```
+
+A scan reads `.tuner.yml` from the current folder, so a cloned repository or a pull request can bring its own. Headers can only read variables whose names start with `TUNER_`. When the file chooses the targets, `-H` and `--cookie` are refused, so a secret on the command line never goes to a host only the file named: name the targets too, or use `--no-config`. Every scan prints which file it used, which targets that file chose and how many findings its ignore entries and baseline hid, also under `-q` and `--json`. Run `scan --no-config` in folders you don't trust.
 
 More in the [CI guide](https://github.com/RhythmShahriar/rhythm/wiki/Tuner-CI).
 
