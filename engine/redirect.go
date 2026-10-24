@@ -92,19 +92,61 @@ func (ss *session) internalHost(ctx context.Context, host string) bool {
 	return err == nil && slices.ContainsFunc(addrs, internal)
 }
 
-// nat64 is the well-known NAT64 prefix; 64:ff9b::a9fe:a9fe reaches
-// 169.254.169.254 through a NAT64 gateway.
-var nat64 = netip.MustParsePrefix("64:ff9b::/96")
+// Prefixes that carry an IPv4 address inside an IPv6 one. A gateway or
+// relay turns them back into IPv4, so 64:ff9b::a9fe:a9fe reaches
+// 169.254.169.254 through NAT64 and 2002:7f00:1:: is 127.0.0.1 over 6to4.
+var (
+	nat64      = netip.MustParsePrefix("64:ff9b::/96")
+	nat64Local = netip.MustParsePrefix("64:ff9b:1::/48") // RFC 8215; read as /96, the common setup
+	v4Compat   = netip.MustParsePrefix("::/96")          // deprecated IPv4-compatible form
+	sixToFour  = netip.MustParsePrefix("2002::/16")
+	teredo     = netip.MustParsePrefix("2001::/32")
+)
 
-// internal reports whether a is loopback, link-local, private or
-// unspecified (0.0.0.0 reaches the local machine).
+// internalV4 are IPv4 ranges outside what netip's predicates cover that
+// still never lead to a public site. 100.64.0.0/10 is carrier-grade NAT
+// space, where Alibaba Cloud's metadata service lives (100.100.100.200).
+var internalV4 = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),     // "this network"; 0.x.x.x can reach the local machine
+	netip.MustParsePrefix("100.64.0.0/10"), // shared address space (RFC 6598)
+	netip.MustParsePrefix("192.0.0.0/24"),  // IETF protocol assignments
+	netip.MustParsePrefix("198.18.0.0/15"), // benchmarking
+}
+
+// embeddedV4 returns the IPv4 address that a carries for a translation
+// or tunnelling scheme, if any.
+func embeddedV4(a netip.Addr) (netip.Addr, bool) {
+	if !a.Is6() {
+		return netip.Addr{}, false
+	}
+	b := a.As16()
+	switch {
+	case nat64.Contains(a), nat64Local.Contains(a), v4Compat.Contains(a):
+		return netip.AddrFrom4([4]byte(b[12:])), true
+	case sixToFour.Contains(a):
+		return netip.AddrFrom4([4]byte(b[2:6])), true
+	case teredo.Contains(a):
+		// The client address is stored inverted in the last 32 bits.
+		return netip.AddrFrom4([4]byte{^b[12], ^b[13], ^b[14], ^b[15]}), true
+	}
+	return netip.Addr{}, false
+}
+
+// internal reports whether a is loopback, link-local, private, shared
+// (carrier-grade NAT) or otherwise non-public, including when it hides
+// in an IPv6 translation or tunnel address.
 func internal(a netip.Addr) bool {
 	a = a.Unmap()
-	if nat64.Contains(a) {
-		b := a.As16()
-		a = netip.AddrFrom4([4]byte(b[12:]))
+	if a.IsLoopback() || a.IsUnspecified() {
+		return true
 	}
-	return a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() || a.IsUnspecified()
+	if v4, ok := embeddedV4(a); ok {
+		a = v4
+	}
+	if a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() || a.IsUnspecified() {
+		return true
+	}
+	return slices.ContainsFunc(internalV4, func(p netip.Prefix) bool { return p.Contains(a) })
 }
 
 type dialFunc func(ctx context.Context, network, addr string) (net.Conn, error)
