@@ -12,6 +12,7 @@ import (
 // A provider that registers its rules gets its IDs and tags accepted
 // without engine changes.
 func TestRegistryDrivesSelection(t *testing.T) {
+	restoreRules(t)
 	RegisterRules("acme", Rule{ID: "acme-", Prefix: true, Title: "Acme advisories", Tags: []string{"acme"}, Severity: High},
 		Rule{ID: "acme-special", Title: "Acme special", Tags: []string{"acme", "special"}})
 	all := []*Check{mustParse(t, "id: leak-dotenv\nname: env\nseverity: high\nrequest: {path: [/.env]}\nmatch: {all: [{status: 200}]}")}

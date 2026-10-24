@@ -27,11 +27,21 @@ var (
 )
 
 // RegisterRules records the rules a source emits. Sources call it from
-// init(). Registering a source again adds to what it already has.
+// init(). Registering a source again adds to what it already has; a rule
+// whose ID the source already registered replaces the old one, so a
+// source that registers twice still lists each rule once.
 func RegisterRules(source string, rs ...Rule) {
 	rulesMu.Lock()
 	defer rulesMu.Unlock()
-	rules[source] = append(rules[source], rs...)
+	have := rules[source]
+	for _, r := range rs {
+		if i := slices.IndexFunc(have, func(o Rule) bool { return o.ID == r.ID }); i >= 0 {
+			have[i] = r
+			continue
+		}
+		have = append(have, r)
+	}
+	rules[source] = have
 }
 
 // Rules returns every registered rule, sorted by ID.

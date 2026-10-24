@@ -103,9 +103,29 @@ func TestCanceledScanIsIncomplete(t *testing.T) {
 	}
 }
 
+// restoreRules puts the global rule registry back as it was when the
+// test ends, so repeated runs (-count, -cpu) start from the same state.
+func restoreRules(t *testing.T) {
+	t.Helper()
+	rulesMu.Lock()
+	saved := make(map[string][]Rule, len(rules))
+	for k, v := range rules {
+		saved[k] = slices.Clone(v)
+	}
+	rulesMu.Unlock()
+	t.Cleanup(func() {
+		rulesMu.Lock()
+		rules = saved
+		rulesMu.Unlock()
+	})
+}
+
 func TestRules(t *testing.T) {
+	restoreRules(t)
 	RegisterRules("test-b", Rule{ID: "zz-test-rule", Severity: Low})
 	RegisterRules("test-a", Rule{ID: "aa-test-", Prefix: true, Tags: []string{"t"}})
+	// A second registration replaces the rule instead of listing it twice.
+	RegisterRules("test-b", Rule{ID: "zz-test-rule", Severity: High})
 	var ids []string
 	for _, r := range Rules() {
 		if strings.HasSuffix(r.ID, "-test-rule") || strings.HasPrefix(r.ID, "aa-test-") {
@@ -114,5 +134,8 @@ func TestRules(t *testing.T) {
 	}
 	if want := []string{"aa-test-", "zz-test-rule"}; !slices.Equal(ids, want) {
 		t.Errorf("rules %v, want %v", ids, want)
+	}
+	if r, ok := RuleFor("zz-test-rule"); !ok || r.Severity != High {
+		t.Errorf("re-registered rule %+v, want severity high", r)
 	}
 }
