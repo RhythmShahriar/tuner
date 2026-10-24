@@ -174,6 +174,9 @@ type scanPlan struct {
 	// local is the base for local scans; scanTarget copies it and fills in
 	// PHP, Advisor, OSV and Select.
 	local local.Options
+	// localFor lets extensions adjust one local target's options, such as
+	// the nested installs --discover scans on their own.
+	localFor []func(target string, o *local.Options)
 	// write is passed to the report writer.
 	write report.WriteOptions
 }

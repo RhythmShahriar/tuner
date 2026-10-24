@@ -211,6 +211,19 @@ func TestRunEngineStopReachesReport(t *testing.T) {
 	}
 }
 
+// A local scan's own vulnerability status (its Composer match) counts:
+// the worse of it and the advisor's wins.
+func TestRunResultVulnData(t *testing.T) {
+	for _, c := range []struct{ res, want string }{{"partial", VulnPartial}, {"ok", VulnOK}, {"", VulnOff}} {
+		p := &Plan{Targets: []string{"/srv/site"}, Scan: func(context.Context, *engine.Scanner, string, engine.Hooks) (*engine.Result, error) {
+			return &engine.Result{Target: "/srv/site", VulnData: c.res}, nil
+		}}
+		if got := Run(context.Background(), p, Hooks{}).Status[0].VulnData; got != c.want {
+			t.Errorf("result %q: vuln data %q, want %q", c.res, got, c.want)
+		}
+	}
+}
+
 func TestRunCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	p := &Plan{Targets: []string{"ok", "slow"}, Parallel: 2, Scan: fakeScan}

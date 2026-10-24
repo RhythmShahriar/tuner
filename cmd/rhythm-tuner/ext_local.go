@@ -16,13 +16,13 @@ import (
 	"time"
 
 	"github.com/RhythmShahriar/tuner/local"
+	"github.com/RhythmShahriar/tuner/report"
 	"github.com/RhythmShahriar/tuner/vulns"
 )
 
-// localExtension adds the local-scan flags owned by the local-server
-// lane: --integrity and --discover. It follows the scan-extension seam (Help, Flags,
-// then a planning step that edits the local options), so registering it
-// is one init() call once that seam exists.
+func init() { registerScanExtension(&localExtension{}) }
+
+// localExtension adds the local-scan flags --integrity and --discover.
 type localExtension struct {
 	integrity bool
 	discover  bool
@@ -51,6 +51,35 @@ func (e *localExtension) Flags(fs *flag.FlagSet) {
 	fs.BoolVar(&e.discover, "discover", false, "")
 }
 
+// Plan expands --discover folders into their installs, then has each
+// local target's scan skip the installs nested in it and compare
+// checksums under --integrity. What --discover found is shown before the
+// scan.
+func (e *localExtension) Plan(p *scanPlan) error {
+	var found strings.Builder
+	targets, err := e.expand(p.targets, &found)
+	if err != nil {
+		return err
+	}
+	if e.discover {
+		p.targets = targets
+		p.write.Many = len(p.targets) > 1
+		for line := range strings.Lines(found.String()) {
+			p.notes = append(p.notes, strings.TrimSuffix(line, "\n"))
+		}
+	}
+	ua, proxy, offline := p.engine.UserAgent, p.engine.Proxy, p.o.offline
+	p.localFor = append(p.localFor, func(target string, o *local.Options) {
+		e.configure(o, target, ua, proxy, offline)
+	})
+	return nil
+}
+
+// Finished has nothing to add after the scan.
+func (e *localExtension) Finished(*scanPlan, []report.Report, io.Writer) (int, error) {
+	return exitOK, nil
+}
+
 // expand replaces each folder target with the installs found under it
 // when --discover is on, saying how many it found on w. Other targets
 // are kept as they are. A folder with no installs is a usage error, so
@@ -70,7 +99,7 @@ func (e *localExtension) expand(targets []string, w io.Writer) ([]string, error)
 		folders++
 		d, err := local.Discover(t, 0)
 		if err != nil {
-			return nil, usageError{err.Error()}
+			return nil, usageError{Msg: err.Error()}
 		}
 		if len(d.Installs) == 0 {
 			return nil, usagef("--discover found no WordPress or Laravel installs under %s (looked %d folders deep)", d.Root, local.DefaultDiscoverDepth)

@@ -22,6 +22,9 @@ func (p *scanPlan) scanTarget(ctx context.Context, s *engine.Scanner, target str
 	}
 	o := p.local
 	o.PHP, o.Advisor, o.OSV, o.Select = p.o.php, p.engine.Advisor, p.osv, p.sel
+	for _, f := range p.localFor {
+		f(target, &o)
+	}
 	return local.Scan(ctx, target, o, h)
 }
 

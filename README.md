@@ -79,6 +79,8 @@ That's it. Tuner fingerprints the site, learns how it answers "not found", runs 
 | Save a report for a client or an issue | `rhythm tuner scan yoursite.com -o report.md` |
 | A quick look (about 30 requests) | `rhythm tuner scan yoursite.com --profile quick` |
 | Scan a site folder on the server | `rhythm tuner scan /var/www/yoursite` |
+| Check WordPress core and plugin files against the official checksums | `rhythm tuner scan /var/www/yoursite --integrity` |
+| Scan every WordPress and Laravel install on a server, one report each | `rhythm tuner scan /var/www --discover -o all.md` |
 | Scan your own dev server fast (localhost and private addresses get 50 requests a second; `--rate 0` lifts the limit) | `rhythm tuner scan localhost:8080 --rate 0` |
 | Scan a staging site behind basic auth | `rhythm tuner scan staging.yoursite.com -H "Authorization: Basic …"` |
 | Go gentle on a fragile host or firewall | `rhythm tuner scan yoursite.com --rate 2` |

@@ -54,6 +54,22 @@ func TestSessionEntryCap(t *testing.T) {
 	}
 }
 
+// Scan copies the status into the result, where reports read it.
+func TestScanResultCarriesStatus(t *testing.T) {
+	files := map[string]string{}
+	for i := range 50 {
+		files[fmt.Sprintf("lib/f%02d.php", i)] = "<?php echo 1;"
+	}
+	res, err := Scan(context.Background(), tree(t, files), Options{MaxEntries: 10, Exec: fakePHP("8.3.6", nil)}, engine.Hooks{})
+	if err != nil || res.Complete || res.StoppedBy != "budget" {
+		t.Errorf("capped: complete %v, stopped by %q, %v", res.Complete, res.StoppedBy, err)
+	}
+	res, err = Scan(context.Background(), tree(t, map[string]string{"index.php": "<?php"}), Options{Exec: fakePHP("8.3.6", nil)}, engine.Hooks{})
+	if err != nil || !res.Complete || res.StoppedBy != "" || res.VulnData == "" {
+		t.Errorf("whole: complete %v, stopped by %q, vuln data %q, %v", res.Complete, res.StoppedBy, res.VulnData, err)
+	}
+}
+
 func TestSessionSkipsDependencies(t *testing.T) {
 	for _, dir := range []string{"vendor/acme/lib", "node_modules/pkg"} {
 		res := scanTree(t, tree(t, map[string]string{"index.php": "<?php", dir + "/s.php": switchPlugin}), Options{Exec: fakeSessionPHP("8.3.6", unsafeCLI("1"))})

@@ -91,14 +91,18 @@ type Options struct {
 
 // Scan scans the directory root. The fingerprint and then each finding
 // are reported through h.
+// The result says how complete the scan was: Complete, StoppedBy and
+// VulnData.
 func Scan(ctx context.Context, root string, opts Options, h engine.Hooks) (*engine.Result, error) {
-	res, _, err := scanStatus(ctx, root, opts, h)
+	res, st, err := scanStatus(ctx, root, opts, h)
+	if res != nil {
+		res.Complete = st.complete && err == nil
+		res.StoppedBy, res.VulnData = st.stoppedBy, st.vulnData
+	}
 	return res, err
 }
 
-// scanStatus is Scan, also saying how complete the scan was. engine.Result
-// can't carry that yet; once it gains Complete, StoppedBy and VulnData,
-// Scan copies the status into them.
+// scanStatus is Scan, also saying how complete the scan was.
 func scanStatus(ctx context.Context, root string, opts Options, h engine.Hooks) (*engine.Result, status, error) {
 	start := time.Now()
 	abs, err := Root(root)

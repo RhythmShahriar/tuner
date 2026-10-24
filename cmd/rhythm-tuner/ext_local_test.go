@@ -120,3 +120,37 @@ func TestLocalExtensionDiscover(t *testing.T) {
 		t.Error("help doesn't mention --discover")
 	}
 }
+
+// Registered, --discover replaces the folder with its installs in the
+// plan, says what it found before the scan and has each target's scan
+// skip the installs nested in it.
+func TestLocalExtensionPlan(t *testing.T) {
+	root := t.TempDir()
+	for _, f := range []string{"a/wp-includes/version.php", "a/wp-config.php", "a/blog/wp-includes/version.php", "a/blog/wp-config.php"} {
+		p := filepath.Join(root, filepath.FromSlash(f))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p, err := planScan([]string{root, "--discover", "--integrity", "--offline"}, strings.NewReader(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, blog := filepath.Join(root, "a"), filepath.Join(root, "a", "blog")
+	if !slices.Equal(p.targets, []string{a, blog}) || !p.write.Many {
+		t.Fatalf("targets %q, many %v", p.targets, p.write.Many)
+	}
+	if !slices.Contains(p.notes, "found 2 installs under "+root) {
+		t.Errorf("notes %q", p.notes)
+	}
+	var o local.Options
+	for _, f := range p.localFor {
+		f(a, &o)
+	}
+	if !slices.Equal(o.SkipDirs, []string{blog}) || !o.Integrity || o.Checksums == nil || !o.Checksums.Offline {
+		t.Errorf("options for %s: skip %q, integrity %v, checksums %+v", a, o.SkipDirs, o.Integrity, o.Checksums)
+	}
+}

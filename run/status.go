@@ -68,14 +68,19 @@ func (p *Plan) status(ctx context.Context, err error, slot *vulnSlot, res *engin
 			s.Complete, s.StoppedBy = false, res.StoppedBy
 		}
 	}
-	switch {
-	case p.Engine.Advisor != nil:
+	if p.Engine.Advisor != nil {
 		s.VulnData = slot.get()
-	case res != nil && res.VulnData != "":
+	}
+	// A local scan also matches Composer packages on its own and says how
+	// that went; the worse of the two wins.
+	if res != nil && res.VulnData != "" && (vulnRank[res.VulnData] > vulnRank[s.VulnData] || s.VulnData == VulnOff) {
 		s.VulnData = res.VulnData
 	}
 	return s
 }
+
+// vulnRank orders vulnerability data statuses from best to worst.
+var vulnRank = map[string]int{VulnOK: 1, VulnPartial: 2, VulnMissing: 3}
 
 func isCanceled(err error) bool { return errors.Is(err, context.Canceled) }
 
@@ -168,10 +173,9 @@ type vulnSlot struct {
 
 // set records a lookup's status; with several lookups the worst one wins.
 func (s *vulnSlot) set(status string) {
-	rank := map[string]int{VulnOK: 1, VulnPartial: 2, VulnMissing: 3}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if rank[status] > rank[s.status] {
+	if vulnRank[status] > vulnRank[s.status] {
 		s.status = status
 	}
 }
