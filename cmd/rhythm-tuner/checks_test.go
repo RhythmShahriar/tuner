@@ -145,7 +145,7 @@ func TestChecksExportNuclei(t *testing.T) {
 }
 
 // Export replaces a symlink in the target folder instead of writing
-// through it, and counts a single skipped check as one.
+// through it and counts a single skipped check as one.
 func TestChecksExportSymlink(t *testing.T) {
 	dir := t.TempDir()
 	victim := filepath.Join(t.TempDir(), "victim")

@@ -87,9 +87,8 @@ type Bundle struct {
 // Build collects the snippets for server from findings. For an ID that a
 // check in checks has (normally the built-in checks), the check's snippet
 // is used and the report's ignored: a report is only JSON that may have
-// been shared or edited, and the bundle carries Tuner's name, so it must
-// not pass on directives such as proxy_pass or include that no check
-// wrote. A finding from any other check uses the report's own Fixes and
+// been shared or edited. The bundle carries Tuner's name, so it must not
+// pass on directives such as proxy_pass or include that no check wrote. A finding from any other check uses the report's own Fixes and
 // its block says so. Identical
 // snippets, after trimming, become one block listing every check that
 // needs it, so two checks with the same dotfile rule give one rule.

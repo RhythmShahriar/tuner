@@ -280,7 +280,7 @@ func (c *Client) fetch(ctx context.Context, st *state) (*state, error) {
 }
 
 // rollback refuses a fetched manifest older than the usable cached pack.
-// An older pack signed by a trusted key is still genuine, but serving it
+// An older pack signed by a trusted key is still genuine. Serving it
 // again (a stale mirror or a replayed release asset) would undo the fixes
 // in the newer one. The cache is kept.
 func (c *Client) rollback(st *state, m Manifest) error {
