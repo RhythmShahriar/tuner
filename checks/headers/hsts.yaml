@@ -15,12 +15,19 @@ match:
     - missing_header: [Strict-Transport-Security]
 impact: Visitors can be downgraded to plain HTTP on hostile networks.
 fix: |
-  nginx:  add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-  apache: Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+  nginx:  add_header Strict-Transport-Security "max-age=604800" always;
+  apache: Header always set Strict-Transport-Security "max-age=604800"
+  Browsers then refuse plain HTTP for the max-age, so start with a week and
+  raise it to a year (31536000) once HTTPS works everywhere. Add
+  "; includeSubDomains" only when every subdomain serves HTTPS.
 fix_server:
   nginx: |
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    # Start with a week, then raise max-age to 31536000. Add
+    # "; includeSubDomains" only when every subdomain serves HTTPS.
+    add_header Strict-Transport-Security "max-age=604800" always;
   apache: |
-    Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    # Start with a week, then raise max-age to 31536000. Add
+    # "; includeSubDomains" only when every subdomain serves HTTPS.
+    Header always set Strict-Transport-Security "max-age=604800"
 references:
   - https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Strict_Transport_Security_Cheat_Sheet.html

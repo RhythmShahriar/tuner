@@ -18,10 +18,12 @@ fix: |
   Staging belongs on its own host name with access control.
 fix_server:
   nginx: |
-    # Keep only the folders that hold a copy.
+    # Edit the list first: it blocks every folder it names. Keep only the
+    # folders that hold a copy and none your live site uses.
     location ~ ^/(staging|old|wp-old|dev|test|new)/ { deny all; }
   apache: |
-    # Keep only the folders that hold a copy.
+    # Edit the list first: it blocks every folder it names. Keep only the
+    # folders that hold a copy and none your live site uses.
     RedirectMatch 404 ^/(staging|old|wp-old|dev|test|new)/
 references:
   - https://developer.wordpress.org/advanced-administration/security/hardening/
