@@ -128,8 +128,7 @@ func cmdReport(args []string, stdout, stderr io.Writer) int {
 	}
 	if since != "" {
 		if o.Since, o.SinceFailed, err = readSaved(since); err != nil {
-			fmt.Fprintln(stderr, "rhythm tuner:", err)
-			return exitError
+			return usageErr("%s", sinceMsg(since, err))
 		}
 		o.SinceName = sinceName(since)
 	}

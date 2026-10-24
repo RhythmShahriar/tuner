@@ -127,7 +127,10 @@ func (e *reportExtension) Plan(p *scanPlan) error {
 		e.firstRun = true
 		return nil
 	}
-	return err
+	if err != nil {
+		return usageError{Msg: sinceMsg(e.since, err)}
+	}
+	return nil
 }
 
 // planNotify checks the notification flags and URLs. Errors name a URL

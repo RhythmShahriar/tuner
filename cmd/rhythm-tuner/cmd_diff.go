@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 
 	"github.com/RhythmShahriar/rhythm/kit/cli"
@@ -117,7 +118,30 @@ func readSaved(path string) ([]report.Report, []report.TargetError, error) {
 	defer func() { _ = f.Close() }()
 	reports, failed, err := report.ReadJSON(f)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%s: %w", path, err)
+		return nil, nil, savedError{path, err}
 	}
 	return reports, failed, nil
+}
+
+// savedError is a saved report that couldn't be read as one. Error names
+// the file; Unwrap gives the reason alone.
+type savedError struct {
+	path string
+	err  error
+}
+
+func (e savedError) Error() string { return e.path + ": " + e.err.Error() }
+func (e savedError) Unwrap() error { return e.err }
+
+// sinceMsg words a --since file readSaved refused, as --baseline does:
+// "--since old.json: no such file".
+func sinceMsg(path string, err error) string {
+	if errors.Is(err, fs.ErrNotExist) {
+		return fmt.Sprintf("--since %s: no such file", path)
+	}
+	var se savedError
+	if errors.As(err, &se) {
+		err = se.err
+	}
+	return fmt.Sprintf("--since %s: %v", path, unwrapPath(err))
 }

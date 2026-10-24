@@ -110,6 +110,22 @@ func TestMissingBaselineIsUsage(t *testing.T) {
 	}
 }
 
+// A missing or unreadable --since file is a usage error too.
+func TestBadSinceIsUsage(t *testing.T) {
+	code, _, errs := tuner(t, "scan", "example.com", "--since", "nope.json", "--no-config")
+	if code != exitUsage || errs != "rhythm tuner scan: --since nope.json: no such file\n" {
+		t.Errorf("missing: exit %d, stderr %q", code, errs)
+	}
+	path := filepath.Join(t.TempDir(), "obj.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, _, errs = tuner(t, "scan", "example.com", "--since", path, "--no-config")
+	if code != exitUsage || errs != "rhythm tuner scan: --since "+path+": not a Tuner JSON report: no rhythm-tuner schema\n" {
+		t.Errorf("not a report: exit %d, stderr %q", code, errs)
+	}
+}
+
 // A --baseline that isn't a Tuner JSON report, such as a SARIF file Tuner
 // wrote, is a usage error rather than a baseline that hides nothing.
 func TestNotReportBaselineIsUsage(t *testing.T) {

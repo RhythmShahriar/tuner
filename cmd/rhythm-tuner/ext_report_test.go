@@ -92,8 +92,8 @@ func TestReportExtensionPlanErrors(t *testing.T) {
 	if _, err := planned(t, "--since", "x.json", "--fail-on-new", "severe"); !errors.As(err, &ue) {
 		t.Errorf("bad level: %v", err)
 	}
-	if _, err := planned(t, "--since", "/nonexistent/last-week.json"); err == nil || errors.As(err, &ue) {
-		t.Errorf("missing file should be a plain error (exit 3): %v", err)
+	if _, err := planned(t, "--since", "/nonexistent/last-week.json"); !errors.As(err, &ue) || ue.Msg != "--since /nonexistent/last-week.json: no such file" {
+		t.Errorf("missing file should be a usage error (exit 2): %v", err)
 	}
 	e, err := planned(t)
 	if err != nil {
@@ -221,9 +221,10 @@ func TestReportExtensionNotifyFirstRun(t *testing.T) {
 	}
 	<-bodies
 
-	// Without --notify-all-first a missing report is still an error (exit 3).
+	// Without --notify-all-first a missing report is a usage error (exit
+	// 2), as a missing --baseline is.
 	var ue usageError
-	if _, err := notifyPlanned(t, srv, "--since", missing, "--notify", hookURL(srv)); err == nil || errors.As(err, &ue) {
+	if _, err := notifyPlanned(t, srv, "--since", missing, "--notify", hookURL(srv)); !errors.As(err, &ue) || ue.Msg != "--since "+missing+": no such file" {
 		t.Errorf("missing --since file: %v", err)
 	}
 }

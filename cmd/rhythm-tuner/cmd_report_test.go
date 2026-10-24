@@ -180,7 +180,7 @@ func TestCmdReportErrors(t *testing.T) {
 		{[]string{saved, "--html", "--brand-logo", big}, exitUsage, "is over 512 KB"},
 		{[]string{saved, "--html", "--bogus"}, exitUsage, "flag provided but not defined"},
 		{[]string{"/nonexistent/scan.json", "--html"}, exitError, "/nonexistent/scan.json"}, // the OS's wording differs on Windows
-		{[]string{saved, "--html", "--since", "/nonexistent/old.json"}, exitError, "/nonexistent/old.json"},
+		{[]string{saved, "--html", "--since", "/nonexistent/old.json"}, exitUsage, "--since /nonexistent/old.json: no such file\n"},
 		{[]string{saved, "--html", "-o", "/nonexistent/dir/out.html"}, exitError, "/nonexistent/dir/out.html"},
 	} {
 		var errs bytes.Buffer
@@ -193,6 +193,11 @@ func TestCmdReportErrors(t *testing.T) {
 	var errs bytes.Buffer
 	if code := cmdReport([]string{notJSON, "--md"}, &bytes.Buffer{}, &errs); code != exitError || !strings.Contains(errs.String(), "not a Tuner JSON report") {
 		t.Errorf("not a report: exit %d %s", code, errs.String())
+	}
+	errs.Reset()
+	if code := cmdReport([]string{saved, "--html", "--since", notJSON}, &bytes.Buffer{}, &errs); code != exitUsage ||
+		!strings.Contains(errs.String(), "--since "+notJSON+": not a Tuner JSON report: no rhythm-tuner schema\n") {
+		t.Errorf("--since not a report: exit %d %s", code, errs.String())
 	}
 	var out bytes.Buffer
 	if code := cmdReport([]string{"--help"}, &out, &bytes.Buffer{}); code != exitOK || !strings.HasPrefix(out.String(), "Usage:\n  rhythm tuner report") {
