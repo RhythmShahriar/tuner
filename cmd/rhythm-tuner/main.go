@@ -263,14 +263,16 @@ Batch and CI:
       --parallel <n>       sites scanned at once (default 4)
       --fail-on <level>    exit 1 if a finding is at or above this severity
       --min-confidence <c> confirmed or likely (default "likely"); with
-                           confirmed, --fail-on skips likely findings such
-                           as CVEs a distro PHP build may have patched
+                           confirmed, --fail-on and --fail-on-new skip
+                           likely findings such as CVEs a distro PHP build
+                           may have patched
       --baseline <file>    hide findings already in this JSON report
       --allow-missing-vulns
-                           let --fail-on pass a site whose vulnerability data
-                           couldn't be fetched (otherwise exit 3)
-      --allow-partial      let --fail-on pass a scan that was blocked or cut
-                           short (otherwise exit 3)
+                           let --fail-on and --fail-on-new pass a site whose
+                           vulnerability data couldn't be fetched
+                           (otherwise exit 3)
+      --allow-partial      let --fail-on and --fail-on-new pass a scan that
+                           was blocked or cut short (otherwise exit 3)
       --config <file>      read settings from this file instead of .tuner.yml
       --no-config          don't read .tuner.yml; use it in folders you
                            don't trust
@@ -300,8 +302,10 @@ point Tuner at mirrors.
 TUNER_SMTP_PASSWORD is the --notify email password; TUNER_SERVE_TOKEN and
 TUNER_WEBHOOK_SECRET are serve's API token and webhook signing secret.
 
-Exit codes: 0 ok · 1 findings at --fail-on · 2 usage error · 130 interrupted ·
-3 scan error, or --fail-on with missing vulnerability data or a partial scan
+Exit codes: 0 ok · 1 findings at --fail-on or new findings at --fail-on-new ·
+2 usage error · 130 interrupted · 3 scan error, --fail-on or --fail-on-new
+with missing vulnerability data or a partial scan, or a notification that
+failed under --notify-strict
 
 Examples:
   rhythm tuner scan example.com

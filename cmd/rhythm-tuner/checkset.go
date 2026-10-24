@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"net/http"
 	"net/url"
 	"os"
 	"testing/fstest"
@@ -179,12 +178,8 @@ var packKeys []ed25519.PublicKey
 // to serve packs signed by a trusted key; TUNER_CHECKS_INSECURE=1 is the
 // only way around that.
 func packClient(ua string, proxy *url.URL, offline, force bool) *checkpack.Client {
-	tr := http.DefaultTransport.(*http.Transport).Clone()
-	if proxy != nil {
-		tr.Proxy = http.ProxyURL(proxy)
-	}
 	return &checkpack.Client{
-		HTTP:      &http.Client{Transport: tr, Timeout: 30 * time.Second},
+		HTTP:      httpClient(ua, proxy, 30*time.Second),
 		UserAgent: ua,
 		BaseURL:   os.Getenv("TUNER_CHECKS_URL"), // a mirror; default this repo's checks-latest release
 		CacheDir:  checkpack.DefaultCacheDir(),

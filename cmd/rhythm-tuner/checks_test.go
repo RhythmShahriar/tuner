@@ -33,8 +33,8 @@ func TestChecksLintBuiltIn(t *testing.T) {
 	}
 }
 
-// checks new writes a check that passes test and lint straight away, and
-// test and lint then catch what a contributor breaks.
+// checks new writes a check that passes test and lint straight away.
+// Test and lint then catch what a contributor breaks.
 func TestChecksNewTestLint(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "leaks")
 	code, out, errOut := checksCmd("new", "leak-old-backup", dir)

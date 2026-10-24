@@ -12,8 +12,8 @@ import (
 	"github.com/RhythmShahriar/tuner/fingerprint"
 )
 
-// A plugin slug that is a Windows device name still gets a cache file,
-// and update refreshes it under its real slug.
+// A plugin slug that is a Windows device name still gets a cache file
+// that update refreshes under its real slug.
 func TestWindowsReservedSlug(t *testing.T) {
 	f := newFakeAPI(t, map[string]string{"/plugin/con/": `{"error":0,"data":{"name":"Con","vulnerability":[]}}`})
 	dir := t.TempDir()

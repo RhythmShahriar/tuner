@@ -102,6 +102,15 @@ func TestScanVulnDataWiring(t *testing.T) {
 	if p.osv == nil || p.osv.Timeout != 3*time.Second || len(p.engine.ResponseAdvisors) != 1 {
 		t.Errorf("osv client %+v, %d response advisors", p.osv, len(p.engine.ResponseAdvisors))
 	}
+	// A --timeout above the old fixed 20 s limit reaches every request:
+	// the http.Clients have no limit that would cut it.
+	p, err = planScan([]string{site.URL, "--timeout", "30s", "--no-config", "--no-check-updates"}, strings.NewReader(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.vulns.Timeout != 30*time.Second || p.vulns.HTTP.Timeout != 0 || p.osv.Timeout != 30*time.Second || p.osv.HTTP.Timeout != 0 {
+		t.Errorf("--timeout 30s: vulns %v (http %v), osv %v (http %v)", p.vulns.Timeout, p.vulns.HTTP.Timeout, p.osv.Timeout, p.osv.HTTP.Timeout)
+	}
 	p, err = planScan([]string{site.URL, "--no-vulns", "--no-config", "--no-check-updates"}, strings.NewReader(""))
 	if err != nil || p.vulns != nil || len(p.engine.ResponseAdvisors) != 0 {
 		t.Errorf("--no-vulns: %v, %+v, %d response advisors", err, p.vulns, len(p.engine.ResponseAdvisors))

@@ -82,9 +82,12 @@ func TestBrokenLock(t *testing.T) {
 }
 
 func TestParseEnv(t *testing.T) {
-	env := parseEnv([]byte("# c\nexport APP_DEBUG=true # on\nAPP_NAME=\"My App\"\nEMPTY=\nBAD LINE\n"))
+	env, lines := parseEnv([]byte("# c\nexport APP_DEBUG=true # on\nAPP_NAME=\"My App\"\nEMPTY=\nBAD LINE\n"))
 	if env["APP_DEBUG"] != "true" || env["APP_NAME"] != "My App" || env["EMPTY"] != "" || len(env) != 3 {
 		t.Errorf("%q", env)
+	}
+	if lines["APP_DEBUG"] != 2 || lines["EMPTY"] != 4 {
+		t.Errorf("lines %v", lines)
 	}
 }
 

@@ -20,6 +20,7 @@ import (
 	"github.com/RhythmShahriar/tuner/engine"
 	"github.com/RhythmShahriar/tuner/notify"
 	"github.com/RhythmShahriar/tuner/report"
+	scanrun "github.com/RhythmShahriar/tuner/run"
 )
 
 // notifyTimeout bounds each notification, so a receiver that hangs
@@ -226,13 +227,40 @@ func (e *reportExtension) Finished(p *scanPlan, reports []report.Report, stderr 
 	code := exitOK
 	// On a first run nothing is new yet: everything would fail the build
 	// the first time a schedule runs, before there is anything to compare.
-	if e.level != "" && !e.firstRun && res.NewAtOrAbove(e.level) {
-		code = exitFindings
+	if e.level != "" && !e.firstRun {
+		code = e.gateNew(p, res, reports, stderr)
 	}
 	if len(e.notifiers) > 0 && !e.send(res, since, reports, p.o.quiet, stderr) && e.notifyStrict {
 		code = exitError
 	}
 	return code, nil
+}
+
+// gateNew is --fail-on-new's exit code, with the rules of --fail-on. With
+// --min-confidence confirmed only confirmed new findings count. A scan
+// with none still exits 3 when its vulnerability data was missing or it
+// was cut short, unless --allow-missing-vulns or --allow-partial accepts
+// that. It prints each reason to stderr.
+func (e *reportExtension) gateNew(p *scanPlan, res diff.Result, reports []report.Report, stderr io.Writer) int {
+	var fresh []engine.Finding
+	for _, n := range res.New {
+		if n.Finding.Severity.Rank() >= 0 {
+			fresh = append(fresh, n.Finding)
+		}
+	}
+	if w := scanrun.GateWorst(fresh, p.confirmedOnly); w != "" && w.Rank() <= e.level.Rank() {
+		return exitFindings
+	}
+	gate := "--fail-on-new " + string(e.level)
+	code := exitOK
+	for _, r := range reports {
+		s := scanrun.Status{Complete: r.Complete, StoppedBy: r.StoppedBy, BlockedBy: r.BlockedBy, VulnData: r.VulnData}
+		for _, why := range scanrun.Untrusted(r.Target, s, gate, p.o.allowMissingVulns, p.o.allowPartial) {
+			printErr(stderr, "scan", why)
+			code = exitError
+		}
+	}
+	return code
 }
 
 // send delivers the message to every notifier and reports whether all of

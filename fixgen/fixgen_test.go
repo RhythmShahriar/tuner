@@ -139,8 +139,8 @@ func TestOldReportFallsBackToChecks(t *testing.T) {
 }
 
 func TestPlan(t *testing.T) {
-	// Without Tuner's checks every snippet comes from the report, and
-	// the plan says so for each block.
+	// Without Tuner's checks every snippet comes from the report. The
+	// plan says so for each block.
 	b, err := Build(load(t, "batch.json"), "apache", nil)
 	if err != nil {
 		t.Fatal(err)

@@ -165,7 +165,7 @@ func TestWordPressFingerprint(t *testing.T) {
 		t.Fatal(err)
 	}
 	fp := res.Fingerprint
-	if got.String() != fp.String() || fp.String() != "WordPress 6.4.1 · PHP 8.3.6" || fp.PHPBuild != "" {
+	if got.String() != fp.String() || fp.String() != "WordPress 6.4.1 · PHP 8.3.6 (from php on PATH)" || fp.PHPBuild != "" {
 		t.Errorf("fingerprint %q (hook saw %q), build %q", fp, got, fp.PHPBuild)
 	}
 	want := []fingerprint.Component{
@@ -218,6 +218,21 @@ func TestWPConfig(t *testing.T) {
 	}
 	if f := find(res, "local-wp-debug"); !strings.Contains(strings.Join(f.Evidence.Matched, "\n"), "wp-content/debug.log") {
 		t.Errorf("debug evidence: %v", f.Evidence.Matched)
+	}
+	// Findings about one line of wp-config.php carry it (SARIF's region).
+	lineOf := func(text string) int {
+		for i, l := range strings.Split(sampleConfig, "\n") {
+			if strings.Contains(l, text) {
+				return i + 1
+			}
+		}
+		return 0
+	}
+	if f := find(res, "local-wp-debug"); f.Line == 0 || f.Line != lineOf("define( 'WP_DEBUG', true );") {
+		t.Errorf("local-wp-debug line %d, want %d", f.Line, lineOf("define( 'WP_DEBUG', true );"))
+	}
+	if f := find(res, "local-wp-table-prefix"); f.Line == 0 || f.Line != lineOf("$table_prefix = 'wp_';") {
+		t.Errorf("local-wp-table-prefix line %d", f.Line)
 	}
 	if f := find(res, "local-wp-salts"); len(f.Evidence.Matched) != 8 {
 		t.Errorf("salts evidence: %v", f.Evidence.Matched)
@@ -393,7 +408,8 @@ func TestLaravel(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Errorf("findings %v, want %v", got, want)
 	}
-	if f := find(res, "local-laravel-debug"); f.Severity != engine.Medium || !slices.Contains(f.Evidence.Matched, "APP_ENV=production") {
+	if f := find(res, "local-laravel-debug"); f.Severity != engine.Medium || !slices.Contains(f.Evidence.Matched, "APP_ENV=production") ||
+		f.Line != 2 || !slices.Contains(f.Evidence.Matched, "APP_DEBUG=true (line 2)") {
 		t.Errorf("laravel debug: %+v", f)
 	}
 

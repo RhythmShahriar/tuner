@@ -296,6 +296,6 @@ func (c *collector) findings() []engine.Finding {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	out := slices.Clone(c.found)
-	sortFindings(out)
+	engine.SortFindings(out)
 	return out
 }

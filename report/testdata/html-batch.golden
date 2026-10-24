@@ -158,7 +158,7 @@ footer { margin-top: 32px; font-size: 13px; color: var(--muted); }
 </section>
 <section class="card" id="site-2">
 <h2>https://b.test</h2>
-<p class="muted">PHP 8.1.2 · 40 checks · 61 requests</p>
+<p class="muted">PHP 8.1.2 (from x-powered-by /) · 40 checks · 61 requests</p>
 <div class="notes">
 <p>Incomplete: stopped by --max-time</p>
 </div>

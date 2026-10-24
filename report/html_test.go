@@ -57,7 +57,7 @@ func htmlBatch() (now, before []Report) {
 	oldGallery.Advisories = gallery.Advisories[:1]
 	now = []Report{
 		mk("https://a.test", 41, fp, dotenv, gallery, xmlrpc),
-		mk("https://b.test", 85, fingerprint.Result{Tech: []string{"php"}, PHP: "8.1.2"}, php),
+		mk("https://b.test", 85, fingerprint.Result{Tech: []string{"php"}, PHP: "8.1.2", PHPSource: "x-powered-by /"}, php),
 	}
 	now[1].SetStatus(Status{Complete: false, StoppedBy: "max-time", VulnData: "ok"})
 	before = []Report{mk("https://a.test/", 60, fp, oldGallery, xmlrpc, old)}

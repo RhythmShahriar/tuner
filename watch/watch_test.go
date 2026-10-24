@@ -138,7 +138,9 @@ func calls(t *testing.T, argv string) [][]string {
 
 func TestRunTwoTicksCompareWithFirst(t *testing.T) {
 	w, argv := fake(t)
-	w.Extra = []string{"--notify", "slack://hooks.example/x", "--fail-on-new", "high", "--profile=quick"}
+	w.Extra = []string{"--profile=quick"}
+	w.SinceFlags = []string{"--notify", "slack://hooks.example/x", "--fail-on-new", "high"}
+	w.FirstFlags = []string{"--notify", "slack://hooks.example/x", "--notify-all-first"}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	// Two runs: the first at once, then a 24h sleep (in minute steps)
@@ -168,7 +170,7 @@ func TestRunTwoTicksCompareWithFirst(t *testing.T) {
 	}
 	r1 := filepath.Join(w.Dir, "20261024T010000Z.json")
 	r2 := filepath.Join(w.Dir, "20261025T010000Z.json")
-	want1 := []string{"scan", "-l", w.List, "--json", "-o", r1, "--notify", "slack://hooks.example/x", "--fail-on-new", "high", "--profile=quick"}
+	want1 := []string{"scan", "-l", w.List, "--json", "-o", r1, "--notify", "slack://hooks.example/x", "--notify-all-first", "--profile=quick"}
 	want2 := []string{"scan", "-l", w.List, "--json", "-o", r2, "--since", r1, "--notify", "slack://hooks.example/x", "--fail-on-new", "high", "--profile=quick"}
 	if !slices.Equal(got[0], want1) || !slices.Equal(got[1], want2) {
 		t.Errorf("argv:\n%q\n%q\nwant:\n%q\n%q", got[0], got[1], want1, want2)
@@ -315,8 +317,8 @@ func TestFailedRunKeepsBaseline(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := calls(t, argv)[0][5]
-	// A scan that couldn't reach a site (exit 3) still writes a report,
-	// but the next run compares with the last complete one.
+	// A scan that couldn't reach a site (exit 3) still writes a report.
+	// The next run compares with the last complete one all the same.
 	t.Setenv("FAKE_TUNER_EXIT", "3")
 	run, err := w.RunOnce(ctx)
 	if err != nil || run.Exit != 3 || !strings.Contains(run.Line(), "(scan exit 3)") {

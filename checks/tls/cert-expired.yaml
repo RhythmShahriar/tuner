@@ -11,8 +11,8 @@ request:
 match:
   all:
     - tls: {expired: true}
-impact: Browsers show a full-page warning, and visitors who click through are open to interception.
-fix: Renew the certificate now, and automate renewal (e.g. certbot renew in a systemd timer or cron).
+impact: Browsers show a full-page warning. Visitors who click through are open to interception.
+fix: Renew the certificate now and automate renewal (e.g. certbot renew in a systemd timer or cron).
 references:
   - https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html
   - https://certbot.eff.org/

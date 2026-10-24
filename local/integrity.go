@@ -407,7 +407,7 @@ func (s *scan) prepareIntegrity(ctx context.Context) (*integrityVisitor, []engin
 				"A Version header edited to a release that doesn't exist hides changed files from this check.",
 			"Check the version in each plugin's main file against its wordpress.org page. Reinstall the plugin from wordpress.org if it doesn't match.",
 			"integrity", "wordpress", "malware")
-		f.Confidence = confidenceLow
+		f.Confidence = engine.ConfidenceLow
 		f.Caveat = "likely: a development build or a release published minutes ago has no checksums yet either"
 		f.Evidence.Request = "look up checksums"
 		info = append(info, f)

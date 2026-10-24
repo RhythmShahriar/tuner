@@ -18,7 +18,7 @@ match:
 impact: |
   CVE-2026-115560 is an unpatched flaw in PHP's session upload progress. It is reachable when the
   serialize handler is php_binary or php_serialize, the application switches it to php with
-  ini_set() before session_start(), and upload progress is enabled. This page shows the two
+  ini_set() before session_start() and upload progress is enabled. This page shows the two
   configuration conditions hold; whether the code switches the handler can only be checked on the
   server: run `rhythm tuner scan /path/to/site` there.
 fix: |

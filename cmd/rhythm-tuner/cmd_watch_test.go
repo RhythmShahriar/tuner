@@ -57,8 +57,10 @@ func TestWatchOnce(t *testing.T) {
 	if len(got) < 6 || got[5] == "" {
 		t.Fatalf("argv %q", got)
 	}
+	// The first run has no earlier report: no --fail-on-new. Every
+	// finding is sent.
 	want := []string{"scan", "-l", list, "--json", "-o", got[5],
-		"--notify", "webhook+https://hooks.example/x", "--fail-on-new", "high", "--profile", "quick"}
+		"--notify", "webhook+https://hooks.example/x", "--notify-all-first", "--profile", "quick"}
 	if !slices.Equal(got, want) {
 		t.Errorf("argv\n%q\nwant\n%q", got, want)
 	}
@@ -115,6 +117,8 @@ func TestWatchFlags(t *testing.T) {
 		{[]string{"-l", list, "--every", "1h", "--fail-on-new", "severe"}, `--fail-on-new "severe": want one of`},
 		{[]string{"-l", list, "--every", "1h", "--", "-o", "x.json"}, "the watch sets -o itself; drop it after --"},
 		{[]string{"-l", list, "--every", "1h", "--", "--since=old.json"}, "the watch sets --since=old.json itself"},
+		{[]string{"-l", list, "--every", "1h", "--", "--fail-on-new", "high"}, "--fail-on-new is a watch flag; put it before --"},
+		{[]string{"-l", list, "--every", "1h", "--", "--notify-all-first"}, "the watch sets --notify-all-first itself"},
 		{[]string{"-l", list, "--every", "1h", "--keep", "-1"}, "--keep -1: want 0 or more"},
 		{[]string{"-l", list, "--evrey", "1h"}, "unknown flag --evrey; did you mean --every?"},
 	} {
@@ -158,5 +162,39 @@ func TestWatchPassesSince(t *testing.T) {
 	}
 	if args := w.Args("new.json", "old.json"); !slices.Contains(args, "--since") {
 		t.Errorf("args %q lack --since", args)
+	}
+}
+
+// --fail-on-new and --notify need --since, so a run with no earlier report
+// leaves --fail-on-new out and sends every finding.
+func TestWatchFirstRunFlags(t *testing.T) {
+	list := filepath.Join(t.TempDir(), "sites.txt")
+	if err := os.WriteFile(list, []byte("https://example.com\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w, _, err := planWatch([]string{"-l", list, "--every", "1h", "--dir", t.TempDir(),
+		"--notify", "slack://hooks.example/x", "--notify-min", "low", "--fail-on-new", "high", "--", "--profile", "quick"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := w.Args("new.json", "")
+	wantFirst := []string{"scan", "-l", list, "--json", "-o", "new.json",
+		"--notify", "slack://hooks.example/x", "--notify-min", "low", "--notify-all-first", "--profile", "quick"}
+	if !slices.Equal(first, wantFirst) {
+		t.Errorf("first run:\n%q\nwant\n%q", first, wantFirst)
+	}
+	later := w.Args("new.json", "old.json")
+	wantLater := []string{"scan", "-l", list, "--json", "-o", "new.json", "--since", "old.json",
+		"--notify", "slack://hooks.example/x", "--notify-min", "low", "--fail-on-new", "high", "--profile", "quick"}
+	if !slices.Equal(later, wantLater) {
+		t.Errorf("later run:\n%q\nwant\n%q", later, wantLater)
+	}
+
+	w, _, err = planWatch([]string{"-l", list, "--every", "1h", "--dir", t.TempDir(), "--fail-on-new", "high"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args := w.Args("new.json", ""); slices.Contains(args, "--fail-on-new") || slices.Contains(args, "--notify-all-first") {
+		t.Errorf("first run without --notify: %q", args)
 	}
 }

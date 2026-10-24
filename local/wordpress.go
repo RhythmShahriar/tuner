@@ -263,6 +263,7 @@ func (s *scan) wpConfig() []engine.Finding {
 
 	// Keys and salts.
 	var weak []string
+	weakLine := 0 // the first weak key's line, for the finding's Line
 	seen := map[string]bool{}
 	for _, name := range saltNames {
 		v, ok := cfg.defines[name]
@@ -274,20 +275,22 @@ func (s *scan) wpConfig() []engine.Finding {
 			// Computed, e.g. getenv(); can't judge it.
 		case lit == "" || lit == saltPlaceholder:
 			weak = append(weak, name+" is the sample placeholder or empty"+cfg.at(name))
+			weakLine = cmp.Or(weakLine, cfg.lines[name])
 		case seen[lit]:
 			weak = append(weak, name+" repeats another key's value"+cfg.at(name))
+			weakLine = cmp.Or(weakLine, cfg.lines[name])
 		}
 		if isLit {
 			seen[lit] = true
 		}
 	}
 	if len(weak) > 0 {
-		out = append(out, s.maybe(cfg, !slices.ContainsFunc(saltNames, cfg.defined), "local-wp-salts", engine.Medium, path,
+		out = append(out, atLine(s.maybe(cfg, !slices.ContainsFunc(saltNames, cfg.defined), "local-wp-salts", engine.Medium, path,
 			"WordPress keys and salts are not set", weak,
 			"WordPress ignores placeholder, empty and duplicate keys and falls back to random salts stored in the database. "+
 				"Anyone who reads the database (a leaked dump or an SQL injection) can then forge login cookies for any user.",
 			"Generate fresh keys at https://api.wordpress.org/secret-key/1.1/salt/ and paste them into wp-config.php (or run: wp config shuffle-salts). Everyone is logged out once.",
-			"wordpress", "config"))
+			"wordpress", "config"), weakLine))
 	}
 
 	// Debug mode.
@@ -308,39 +311,39 @@ func (s *scan) wpConfig() []engine.Finding {
 				sev = engine.Medium
 			}
 		}
-		out = append(out, s.finding("local-wp-debug", sev, path, "WordPress debug mode is on", ev,
+		out = append(out, atLine(s.finding("local-wp-debug", sev, path, "WordPress debug mode is on", ev,
 			"Error messages reveal file paths, plugin internals and sometimes queries or secrets, which help attackers.",
 			"Set WP_DEBUG to false in production. If you need logs, set WP_DEBUG_DISPLAY to false and point WP_DEBUG_LOG at a file outside the web root.",
-			"wordpress", "config", "disclosure"))
+			"wordpress", "config", "disclosure"), cfg.lines["WP_DEBUG"]))
 	}
 
 	// Dashboard file editor.
 	edit, _ := cfg.truthy("DISALLOW_FILE_EDIT")
 	mods, _ := cfg.truthy("DISALLOW_FILE_MODS")
 	if !edit && !mods {
-		out = append(out, s.maybe(cfg, true, "local-wp-file-edit", engine.Low, path,
+		out = append(out, atLine(s.maybe(cfg, true, "local-wp-file-edit", engine.Low, path,
 			"The dashboard file editor is enabled", []string{"DISALLOW_FILE_EDIT is not set to true" + cfg.at("DISALLOW_FILE_EDIT")},
 			"An attacker who gets into any administrator account can edit plugin and theme PHP and run code on the server.",
 			"Add define( 'DISALLOW_FILE_EDIT', true ); to wp-config.php.",
-			"wordpress", "config", "hardening"))
+			"wordpress", "config", "hardening"), cfg.lines["DISALLOW_FILE_EDIT"]))
 	}
 
 	// Table prefix.
 	if cfg.prefix == "wp_" {
-		out = append(out, s.finding("local-wp-table-prefix", engine.Info, path,
+		out = append(out, atLine(s.finding("local-wp-table-prefix", engine.Info, path,
 			"Database tables use the default wp_ prefix", []string{"$table_prefix = 'wp_'" + lineNote(cfg.prefixLine)},
 			"Automated SQL injection attacks assume wp_ table names. A custom prefix is minor defense in depth, not a fix.",
 			"Use a custom prefix on new installs. Changing it on a live site means renaming tables and options, so only do it with a backup.",
-			"wordpress", "config", "hardening"))
+			"wordpress", "config", "hardening"), cfg.prefixLine))
 	}
 
 	// HTTPS for the dashboard.
 	if ssl, _ := cfg.truthy("FORCE_SSL_ADMIN"); !ssl {
-		out = append(out, s.maybe(cfg, true, "local-wp-force-ssl-admin", engine.Info, path,
+		out = append(out, atLine(s.maybe(cfg, true, "local-wp-force-ssl-admin", engine.Info, path,
 			"FORCE_SSL_ADMIN is not set", []string{"FORCE_SSL_ADMIN is not true" + cfg.at("FORCE_SSL_ADMIN")},
 			"If the site can be reached over plain HTTP, logins and admin cookies could travel unencrypted. Most sites already redirect to HTTPS at the server.",
 			"Add define( 'FORCE_SSL_ADMIN', true ); to wp-config.php once the site has a certificate.",
-			"wordpress", "config", "hardening"))
+			"wordpress", "config", "hardening"), cfg.lines["FORCE_SSL_ADMIN"]))
 	}
 
 	// File permissions.
@@ -361,7 +364,7 @@ func (s *scan) wpConfig() []engine.Finding {
 func (s *scan) maybe(cfg config, absent bool, id string, sev engine.Severity, path, title string, ev []string, impact, fix string, tags ...string) engine.Finding {
 	f := s.finding(id, sev, path, title, ev, impact, fix, tags...)
 	if absent && cfg.includes {
-		f.Confidence = confidenceLow
+		f.Confidence = engine.ConfidenceLow
 		f.Evidence.Matched = append(f.Evidence.Matched, "wp-config.php includes other files, which may set this")
 	}
 	return f
@@ -404,8 +407,18 @@ func parseConfig(src string) config {
 // at renders where name is defined, e.g. " (line 14)", or "" when it isn't.
 func (c config) at(name string) string { return lineNote(c.lines[name]) }
 
-// lineNote renders a 1-based line number for evidence, or "" for 0.
-// Findings have no line field yet, so it goes in the evidence text.
+// atLine sets the finding's Line (1-based; 0 leaves it unset), which
+// SARIF reports as the region's start line.
+func atLine(f engine.Finding, line int) engine.Finding {
+	if line > 0 {
+		f.Line = line
+	}
+	return f
+}
+
+// lineNote renders a 1-based line number for evidence, or "" for 0. The
+// evidence keeps it, as the terminal and Markdown reports show evidence,
+// not Line.
 func lineNote(n int) string {
 	if n <= 0 {
 		return ""

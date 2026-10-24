@@ -167,11 +167,11 @@ func (s *scan) sessionUploadProgress(ctx context.Context, code *sessionVisitor) 
 		f.Title = sessionCVE + " is reachable: all four conditions hold"
 	case cond1:
 		f.Title = sessionCVE + " is likely reachable"
-		f.Confidence = confidenceLow
+		f.Confidence = engine.ConfidenceLow
 		f.Caveat = "likely: the code's order of calls couldn't be confirmed from one file"
 	case len(ctxs) == 0:
 		f.Severity, f.Title = engine.Medium, sessionCVE+": runtime handler switch found, configuration unknown"
-		f.Confidence = confidenceLow
+		f.Confidence = engine.ConfidenceLow
 		f.Caveat = "likely: PHP's configuration couldn't be read; check session.serialize_handler"
 	default:
 		f.Severity, f.Title = engine.Low, sessionCVE+": runtime handler switch found, not reachable now"
@@ -566,7 +566,7 @@ func stripPHPComments(src []byte) []byte {
 }
 
 // scanPHP returns src with comments blanked (see stripPHPComments) and a
-// mask of the bytes that aren't code: inline HTML outside the PHP tags,
+// mask of the bytes that aren't code: inline HTML outside the PHP tags
 // and string literals (quotes, heredocs and nowdocs included). Templates
 // mix the two, so an apostrophe in "<p>Don't miss it</p>" must not open
 // a string that hides the PHP after it.

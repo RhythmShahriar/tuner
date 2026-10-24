@@ -20,6 +20,10 @@ type tlsBreaker struct {
 	ln    net.Listener
 	mu    sync.Mutex
 	plain []*http.Request
+	// hangUp closes a TLS connection without a word instead, as a plain
+	// http server such as Python's http.server does.
+	hangUp bool
+	hellos int
 }
 
 func newTLSBreaker(t *testing.T) *tlsBreaker {
@@ -50,7 +54,13 @@ func (b *tlsBreaker) serve(c net.Conn) {
 		return
 	}
 	if first[0] == 0x16 { // TLS handshake record
-		_, _ = c.Write([]byte{0x15, 0x03, 0x03, 0x00, 0x02, 0x02, 0x28})
+		b.mu.Lock()
+		b.hellos++
+		hangUp := b.hangUp
+		b.mu.Unlock()
+		if !hangUp {
+			_, _ = c.Write([]byte{0x15, 0x03, 0x03, 0x00, 0x02, 0x02, 0x28})
+		}
 		return
 	}
 	for {
@@ -102,6 +112,31 @@ func TestBrokenTLSFallsBackWithoutHeaders(t *testing.T) {
 	}
 	if !strings.HasPrefix(res.Target, "http://") || len(b.plainRequests()) == 0 {
 		t.Errorf("target %q, %d plain requests; want the http fallback", res.Target, len(b.plainRequests()))
+	}
+}
+
+// A plain http server that hangs up on the TLS hello (EOF) is not https:
+// the probe is not retried and counts no error.
+func TestTLSHangUpIsNotHTTPS(t *testing.T) {
+	b := newTLSBreaker(t)
+	b.hangUp = true
+	res, err := New([]*Check{mustParse(t, envCheck)}, Options{Retries: 2}).Scan(context.Background(), b.ln.Addr().String(), Hooks{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.mu.Lock()
+	hellos := b.hellos
+	b.mu.Unlock()
+	if !strings.HasPrefix(res.Target, "http://") || res.Errors != 0 || hellos != 1 {
+		t.Errorf("target %q, %d errors, %d TLS hellos; want http, 0 and 1", res.Target, res.Errors, hellos)
+	}
+
+	// With a cookie it is still no proof of plain http: the headers stay
+	// off http.
+	h := http.Header{}
+	h.Set("Cookie", "session=secret")
+	if _, err := New([]*Check{mustParse(t, envCheck)}, Options{Headers: h}).Scan(context.Background(), b.ln.Addr().String(), Hooks{}); err == nil || !strings.Contains(err.Error(), "over https") {
+		t.Errorf("with a cookie: %v, want the over https error", err)
 	}
 }
 

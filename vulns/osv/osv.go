@@ -109,8 +109,8 @@ type Result struct {
 	Stale  int                // packages answered from a cache past its TTL
 	Err    error              // the first error, explaining Failed
 
-	// Unreachable is set when OSV.dev timed out or refused the connection,
-	// and Oldest is when the oldest stale copy used instead was fetched.
+	// Unreachable is set when OSV.dev timed out or refused the connection.
+	// Oldest is when the oldest stale copy used instead was fetched.
 	Unreachable bool
 	Oldest      time.Time
 }
@@ -141,7 +141,7 @@ func older(a, b time.Time) time.Time {
 	return a
 }
 
-// Query returns the known vulnerabilities for each package that has any,
+// Query returns the known vulnerabilities for each package that has any
 // and how many packages couldn't be checked (the first error explains
 // why).
 func (o *Client) Query(ctx context.Context, pkgs []Package) (map[Package][]Vuln, int, error) {

@@ -21,7 +21,7 @@ import (
 )
 
 // With fakeServeEnv set, the test binary is a fake scan for the server:
-// it prints its arguments as a finding's title, as --jsonl would, and
+// it prints its arguments as a finding's title (as --jsonl would) and
 // exits 0. This runs in init, before the testing package reads flags.
 const fakeServeEnv = "TUNER_TEST_FAKE_SERVE_SCAN"
 

@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/RhythmShahriar/tuner/engine"
 	"github.com/RhythmShahriar/tuner/local"
@@ -30,14 +29,15 @@ func (p *scanPlan) scanTarget(ctx context.Context, s *engine.Scanner, target str
 
 // osvClient builds the OSV.dev client for Composer packages. It caches
 // next to the other vulnerability data, so rhythm tuner update --clear
-// clears it too.
+// clears it too. Like vulnClient's, its http.Client has no limit of its
+// own, so the client's per-request Timeout (--timeout) holds.
 func osvClient(ua string, proxy *url.URL, offline bool) *local.OSV {
 	cache := vulns.DefaultCacheDir()
 	if cache != "" {
 		cache = filepath.Join(cache, "osv")
 	}
 	return &local.OSV{
-		HTTP:      httpClient(ua, proxy, 20*time.Second),
+		HTTP:      httpClient(ua, proxy, 0),
 		UserAgent: ua,
 		Base:      os.Getenv("TUNER_OSV_API"), // a mirror; default api.osv.dev
 		CacheDir:  cache,

@@ -8,7 +8,7 @@
 // public domain under CC0 1.0, which aggregates CVE, Wordfence, WPScan and
 // Patchstack. With an API key, the Wordfence Intelligence feed is a second
 // source, merged by CVE (see Wordfence). Latest-release data comes from
-// the wordpress.org API, and
+// the wordpress.org API and
 // PHP's supported branches from php.net. Every
 // lookup is cached on disk and refreshed automatically once it is older
 // than the TTL; when the network is unavailable, stale data is used.

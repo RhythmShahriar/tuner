@@ -153,3 +153,30 @@ func TestMinConfidence(t *testing.T) {
 		t.Errorf("bad value: exit %d, %s", code, errs)
 	}
 }
+
+// --fail-on-new follows --min-confidence like --fail-on: a new likely
+// finding fails it by default, not with confirmed.
+func TestMinConfidenceFailOnNew(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a shell script as php")
+	}
+	needScanFlags(t, "since", "fail-on-new")
+	distroPHPAPI(t)
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, "wp-includes"), 0o755)
+	os.WriteFile(filepath.Join(root, "wp-includes", "version.php"), []byte("<?php $wp_version = '6.4.1';"), 0o600)
+	php := filepath.Join(t.TempDir(), "php")
+	os.WriteFile(php, []byte("#!/bin/sh\necho 8.1.2-1ubuntu2.23\n"), 0o700) //nolint:gosec // test executable
+	before := filepath.Join(t.TempDir(), "before.json")
+	if code, _, errs := tuner(t, "scan", root, "--php", php, "--id", "local-dotenv", "-o", before, "-q"); code != exitOK {
+		t.Fatalf("before: exit %d: %s", code, errs)
+	}
+
+	args := []string{"scan", root, "--php", php, "--plain", "--id", "vuln-*", "--since", before, "--fail-on-new", "high"}
+	if code, out, errs := tuner(t, args...); code != exitFindings {
+		t.Errorf("default: exit %d, stderr %s\n%s", code, errs, out)
+	}
+	if code, out, errs := tuner(t, append(args, "--min-confidence", "confirmed")...); code != exitOK || !strings.Contains(errs, "new") {
+		t.Errorf("confirmed: exit %d, stderr %s\n%s", code, errs, out)
+	}
+}

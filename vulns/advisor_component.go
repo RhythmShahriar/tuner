@@ -77,7 +77,7 @@ func (componentAdvisor) advise(base *url.URL, a *Advisor, ls []*lookup, now time
 			"Tuner couldn't read their versions, so it can't tell whether the site is affected.",
 			"Check the installed versions in the dashboard, or rerun with the default profile so readme.txt and style.css are read.",
 			"wordpress", "vuln")
-		f.Confidence = confidenceLow
+		f.Confidence = engine.ConfidenceLow
 		out = append(out, f)
 	}
 	return out

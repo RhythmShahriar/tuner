@@ -38,25 +38,26 @@ func (s *scan) laravelEnv() []engine.Finding {
 		return nil
 	}
 	s.checks++
-	env := parseEnv(b)
+	env, lines := parseEnv(b)
 	if on := strings.ToLower(env["APP_DEBUG"]); on != "true" && on != "1" {
 		return nil
 	}
-	ev := []string{"APP_DEBUG=true"}
+	ev := []string{"APP_DEBUG=true" + lineNote(lines["APP_DEBUG"])}
 	if e := env["APP_ENV"]; e != "" {
 		ev = append(ev, "APP_ENV="+e)
 	}
-	return []engine.Finding{s.finding("local-laravel-debug", engine.Medium, path, "Laravel debug mode is on", ev,
+	return []engine.Finding{atLine(s.finding("local-laravel-debug", engine.Medium, path, "Laravel debug mode is on", ev,
 		"Error pages show stack traces, source code and environment values including secrets.",
 		"Set APP_DEBUG=false in .env on production servers, then run: php artisan config:cache",
-		"laravel", "config", "disclosure")}
+		"laravel", "config", "disclosure"), lines["APP_DEBUG"])}
 }
 
-// parseEnv reads KEY=value lines.
-func parseEnv(b []byte) map[string]string {
-	env := map[string]string{}
+// parseEnv reads KEY=value lines. lines maps each key to the 1-based line
+// that set it (the last one, which wins).
+func parseEnv(b []byte) (env map[string]string, lines map[string]int) {
+	env, lines = map[string]string{}, map[string]int{}
 	sc := bufio.NewScanner(bytes.NewReader(b))
-	for sc.Scan() {
+	for n := 1; sc.Scan(); n++ {
 		line := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(sc.Text()), "export "))
 		k, v, ok := strings.Cut(line, "=")
 		if !ok || strings.HasPrefix(k, "#") {
@@ -66,9 +67,11 @@ func parseEnv(b []byte) map[string]string {
 		if i := strings.Index(v, " #"); i >= 0 {
 			v = strings.TrimSpace(v[:i])
 		}
-		env[strings.TrimSpace(k)] = strings.Trim(v, `"'`)
+		k = strings.TrimSpace(k)
+		env[k] = strings.Trim(v, `"'`)
+		lines[k] = n
 	}
-	return env
+	return env, lines
 }
 
 // loadLock reads the packages pinned in composer.lock, if there is one.

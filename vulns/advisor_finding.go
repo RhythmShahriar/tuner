@@ -169,7 +169,7 @@ func (a *Advisor) vulnFinding(base *url.URL, l *lookup) (engine.Finding, bool) {
 	}
 	// Only inferred advisories: likely, not confirmed.
 	if len(l.newer) == len(affected) {
-		f.Confidence = confidenceLow
+		f.Confidence = engine.ConfidenceLow
 		f.Caveat = "inferred from a supported branch's advisories"
 	}
 	if l.kind != "plugin" && l.kind != "theme" && l.kind != "core" {
@@ -216,7 +216,7 @@ func (a *Advisor) eolFinding(base *url.URL, l *lookup, now time.Time) (engine.Fi
 // which backport fixes without changing the upstream version number.
 func (a *Advisor) distroCaveat(f *engine.Finding, build string) {
 	if backported.MatchString(build) {
-		f.Confidence = confidenceLow
+		f.Confidence = engine.ConfidenceLow
 		f.Caveat = "a distro build may already include the fix"
 		f.Impact += " The server reports a distribution build (" + build + "), which may include backported fixes; check the package's security status before acting."
 	}

@@ -159,8 +159,8 @@ type scanPlan struct {
 	confirmedOnly bool
 
 	// config is the settings file in use, or nil. Its ignore entries are
-	// split into ignores, which hide findings like a baseline, and
-	// expired, which hide nothing and get a note on stderr.
+	// split into ignores (they hide findings like a baseline) and
+	// expired (they hide nothing and get a note on stderr).
 	config           *tunerconfig.Config
 	configTargets    []string
 	configBaseline   bool // the baseline was named in the config, not by --baseline
@@ -830,6 +830,7 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 			if live {
 				view = report.NewPretty(w, stderr, report.PrettyOptions{
 					Plain: plain, Quiet: o.quiet, Progress: single && tty && !o.verbose,
+					Command: cmdName(),
 				})
 				view.Header(version, p.header(target))
 			}
@@ -1300,10 +1301,12 @@ func (t uaTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return t.RoundTripper.RoundTrip(r)
 }
 
-// vulnClient builds the vulnerability data client.
+// vulnClient builds the vulnerability data client. Its http.Client has no
+// limit of its own: the client bounds each request with its Timeout (the
+// scan's --timeout), which a shorter http.Client.Timeout would cut.
 func vulnClient(ua string, proxy *url.URL, offline bool) *vulns.Client {
 	return &vulns.Client{
-		HTTP:      httpClient(ua, proxy, 20*time.Second),
+		HTTP:      httpClient(ua, proxy, 0),
 		UserAgent: ua,
 		CacheDir:  vulns.DefaultCacheDir(),
 		Offline:   offline,

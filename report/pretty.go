@@ -37,6 +37,9 @@ type PrettyOptions struct {
 	Quiet    bool // findings and a one-line summary only
 	Progress bool // redraw a progress line; only for interactive terminals
 	Columns  int  // terminal width; 0 reads it from the output, or assumes 80
+	// Command is how the hints name Tuner, as it was started: "rhythm
+	// tuner" (the default) or "rhythm-tuner".
+	Command string
 }
 
 // Pretty renders a scan for a terminal. Its methods match engine.Hooks.
@@ -54,6 +57,9 @@ type Pretty struct {
 	tally   map[engine.Severity]int
 	status  Status
 	width   int // content width of the report
+	// shortFix is set once a fix was cut to its first line, so Summary
+	// points at explain for the full text.
+	shortFix bool
 }
 
 // NewPretty returns a view that writes the report to w and request logs
@@ -241,6 +247,7 @@ func (p *Pretty) Finding(f engine.Finding) {
 	}
 	if fix := fixLine(f.Fix); fix != "" {
 		fmt.Fprintf(p.w, "  fix: %s\n", fix)
+		p.shortFix = p.shortFix || fixShortened(f.Fix)
 	}
 }
 
@@ -257,12 +264,26 @@ func Place(f engine.Finding) string {
 // fixLine is the first line of a fix. When more lines follow it says so,
 // so a fix that leads into a snippet doesn't end on a dangling colon.
 func fixLine(fix string) string {
-	first, rest, more := strings.Cut(strings.TrimSpace(fix), "\n")
+	first, _, _ := strings.Cut(strings.TrimSpace(fix), "\n")
 	first = strings.TrimSpace(first)
-	if more && strings.TrimSpace(rest) != "" {
+	if fixShortened(fix) {
 		return strings.TrimRight(first, ": ") + " (see report)"
 	}
 	return first
+}
+
+// fixShortened reports whether fixLine leaves lines of fix out.
+func fixShortened(fix string) bool {
+	_, rest, more := strings.Cut(strings.TrimSpace(fix), "\n")
+	return more && strings.TrimSpace(rest) != ""
+}
+
+// command is the name the hints give Tuner.
+func (p *Pretty) command() string { return cmp.Or(p.o.Command, "rhythm tuner") }
+
+// explainHint is the footer under a report whose fixes were cut short.
+func (p *Pretty) explainHint() string {
+	return "run " + p.command() + " explain <id> for the full fix"
 }
 
 func advisoryLines(f engine.Finding, n int) []string {
@@ -427,6 +448,9 @@ func (p *Pretty) Summary(res *engine.Result, target string, suppressed int) {
 		for _, n := range notes {
 			fmt.Fprintf(p.w, "note: %s\n", n)
 		}
+		if p.shortFix {
+			fmt.Fprintln(p.w, p.explainHint())
+		}
 		return
 	}
 
@@ -439,8 +463,12 @@ func (p *Pretty) Summary(res *engine.Result, target string, suppressed int) {
 	for _, n := range notes {
 		fmt.Fprintf(p.w, "  %s\n", muted.Render("! "+n))
 	}
-	fmt.Fprintf(p.w, "\n  %s %s\n\n", ui.Brand.Render("→"),
-		muted.Render("full report: rhythm tuner scan "+target+" -o report.md"))
+	fmt.Fprintln(p.w)
+	if p.shortFix {
+		fmt.Fprintf(p.w, "  %s %s\n", ui.Brand.Render("→"), muted.Render(p.explainHint()))
+	}
+	fmt.Fprintf(p.w, "  %s %s\n\n", ui.Brand.Render("→"),
+		muted.Render("full report: "+p.command()+" scan "+target+" -o report.md"))
 }
 
 // scoreText is the score as the summary line shows it. After a baseline it
@@ -490,6 +518,7 @@ func (p *Pretty) report(findings []engine.Finding) {
 		fmt.Fprintln(p.w)
 		for _, f := range fs {
 			if sev.Rank() <= engine.Medium.Rank() {
+				p.shortFix = p.shortFix || fixShortened(f.Fix)
 				fmt.Fprintln(p.w, card(f, p.width))
 				fmt.Fprintln(p.w)
 			} else {

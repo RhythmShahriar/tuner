@@ -192,7 +192,7 @@ func scanStatus(ctx context.Context, root string, opts Options, h engine.Hooks) 
 			h.Finding(f)
 		}
 	}
-	sortFindings(res.Findings)
+	engine.SortFindings(res.Findings)
 	res.Checks = s.checks
 	res.Warnings = s.warnings
 	res.Score = engine.Score(res.Findings)
@@ -261,8 +261,8 @@ func fileURL(abs string) *url.URL { return fileURLSep(abs, filepath.Separator) }
 
 // fileURLSep builds the file URL of a path that uses sep, so tests can
 // cover Windows paths on any OS. A drive letter gets a leading slash
-// (file:///C:/inetpub/wwwroot/.env, not file://C:/… with C: as the host),
-// and a UNC path \\server\share\x becomes file://server/share/x.
+// (file:///C:/inetpub/wwwroot/.env, not file://C:/… with C: as the host).
+// A UNC path \\server\share\x becomes file://server/share/x.
 func fileURLSep(abs string, sep byte) *url.URL {
 	p := abs
 	if sep != '/' {
@@ -324,7 +324,7 @@ func (s *scan) finding(id string, sev engine.Severity, abs, title string, ev []s
 		ID:         id,
 		Title:      cleanText(title, false),
 		Severity:   sev,
-		Confidence: confidenceHigh,
+		Confidence: engine.ConfidenceHigh,
 		URL:        fileURL(abs).String(),
 		Path:       rel,
 		Evidence:   engine.Evidence{Request: "read " + rel, Matched: matched},
@@ -483,21 +483,4 @@ type static []engine.Finding
 
 func (st static) Advise(context.Context, *url.URL, fingerprint.Result) ([]engine.Finding, []string) {
 	return st, nil
-}
-
-// sortFindings orders findings like remote scans: most severe first,
-// confirmed before likely, then by ID and path.
-func sortFindings(fs []engine.Finding) {
-	slices.SortStableFunc(fs, func(a, b engine.Finding) int {
-		if d := a.Severity.Rank() - b.Severity.Rank(); d != 0 {
-			return d
-		}
-		if al, bl := a.Confidence == confidenceLow, b.Confidence == confidenceLow; al != bl {
-			if al {
-				return 1
-			}
-			return -1
-		}
-		return strings.Compare(a.ID+a.Path, b.ID+b.Path)
-	})
 }

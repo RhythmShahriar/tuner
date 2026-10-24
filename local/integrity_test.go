@@ -23,7 +23,7 @@ import (
 	"github.com/RhythmShahriar/tuner/engine"
 )
 
-// pristine is a small WordPress 6.5.2 release: core files by path, and
+// pristine is a small WordPress 6.5.2 release: core files by path and
 // the akismet 5.3 plugin.
 var (
 	pristineCore = map[string]string{

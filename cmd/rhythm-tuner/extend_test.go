@@ -122,8 +122,8 @@ func TestScanExtension(t *testing.T) {
 	}
 }
 
-// Run as rhythm-tuner, subcommand help and errors name rhythm-tuner, and
-// the usage list stays within 80 columns with each command's arguments.
+// Run as rhythm-tuner, subcommand help and errors name rhythm-tuner. The
+// usage list stays within 80 columns with each command's arguments.
 func TestSubcommandsUseTheirName(t *testing.T) {
 	t.Setenv(invokedAsEnv, "")
 	old := argv0

@@ -67,7 +67,7 @@ func localReport(root string) Report {
 	}
 	return New(&engine.Result{Target: root, Score: 60, Checks: 12, Findings: []engine.Finding{
 		{ID: "local-wp-debug", Title: "WordPress debug mode is on", Severity: engine.Medium, Confidence: "high",
-			Target: root, URL: base + "/wp-config.php", Path: "/wp-config.php", Fix: "Turn it off."},
+			Target: root, URL: base + "/wp-config.php", Path: "/wp-config.php", Line: 4, Fix: "Turn it off."},
 		{ID: "local-env-file", Title: ".env file in the web root", Severity: engine.High, Confidence: "high",
 			Target: root, URL: base + "/app%20one/.env", Path: sep + "app one" + sep + ".env",
 			Evidence: engine.Evidence{Matched: []string{"2 secrets (masked below)"},
@@ -88,6 +88,13 @@ func TestSARIFLocalGolden(t *testing.T) {
 		if loc.URI != want || loc.URIBaseID != srcRoot {
 			t.Errorf("result %d location = %+v, want %q under %s", i, loc, want, srcRoot)
 		}
+	}
+	// A finding with a line points at it; one without has no region.
+	if r := run.Results[0].Locations[0].PhysicalLocation.Region; r == nil || r.StartLine != 4 {
+		t.Errorf("wp-config.php region = %+v, want startLine 4", r)
+	}
+	if r := run.Results[1].Locations[0].PhysicalLocation.Region; r != nil {
+		t.Errorf(".env region = %+v, want none", r)
 	}
 	if strings.Contains(string(doc), "masked below") {
 		t.Errorf("the message promises secrets below that SARIF never shows:\n%s", doc)

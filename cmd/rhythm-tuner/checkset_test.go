@@ -229,7 +229,7 @@ func TestScanRefusesUntrustedPack(t *testing.T) {
 	}
 }
 
-// TUNER_CHECKS_INSECURE=1 lets a private fork use its own unsigned pack,
+// TUNER_CHECKS_INSECURE=1 lets a private fork use its own unsigned pack
 // and says so on every run.
 func TestScanInsecurePack(t *testing.T) {
 	retired, _ := json.Marshal(builtInIDs())

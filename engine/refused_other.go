@@ -12,3 +12,6 @@ import (
 
 // connRefused reports whether err is a refused TCP connection.
 func connRefused(err error) bool { return errors.Is(err, syscall.ECONNREFUSED) }
+
+// connReset reports whether err is a TCP connection the peer reset.
+func connReset(err error) bool { return errors.Is(err, syscall.ECONNRESET) }

@@ -55,9 +55,11 @@ Targets and state:
 
 Passed to every scan:
       --notify <url>        tell this destination about new findings
-                            (repeatable; see rhythm tuner scan --help)
+                            (repeatable; see rhythm tuner scan --help);
+                            the first run sends every finding
       --notify-min <level>
-      --fail-on-new <level>
+      --fail-on-new <level> exit 1 if a new finding is at or above this
+                            severity (from the second run on)
   -- <scan flags>           everything after -- goes to scan as written,
                             e.g. -- --profile quick --rate 2
 
@@ -82,7 +84,12 @@ const watchKeep = 30
 
 // watchOwned are the scan flags the watch sets itself. Passing them
 // after -- would break the run-to-run comparison.
-var watchOwned = []string{"o", "output", "json", "jsonl", "sarif", "md", "l", "list", "stdin", "since"}
+var watchOwned = []string{"o", "output", "json", "jsonl", "sarif", "md", "l", "list", "stdin", "since", "notify-all-first"}
+
+// watchPassed are the scan flags the watch has itself: it passes
+// --fail-on-new only on a run with an earlier report and adds
+// --notify-all-first to --notify on a run without one.
+var watchPassed = []string{"fail-on-new", "notify", "notify-min"}
 
 func init() {
 	registerCommand(command{Name: "watch", Args: "-l <file> --every <interval>", Summary: "scan a site list on a schedule and say what changed", Run: cmdWatch})
@@ -205,8 +212,14 @@ func planWatch(args []string) (w *watch.Watcher, once bool, err error) {
 	for _, a := range extra {
 		n := strings.TrimLeft(a, "-")
 		n, _, _ = strings.Cut(n, "=")
-		if strings.HasPrefix(a, "-") && slices.Contains(watchOwned, n) {
+		if !strings.HasPrefix(a, "-") {
+			continue
+		}
+		if slices.Contains(watchOwned, n) {
 			return nil, false, fmt.Errorf("the watch sets %s itself; drop it after --", a)
+		}
+		if slices.Contains(watchPassed, n) {
+			return nil, false, fmt.Errorf("%s is a watch flag; put it before --", a)
 		}
 	}
 
@@ -263,6 +276,9 @@ func planWatch(args []string) (w *watch.Watcher, once bool, err error) {
 		}
 	}
 
+	// --notify and --fail-on-new need --since. A run with no earlier
+	// report sends every finding (--notify-all-first) and fails on
+	// nothing new: there is nothing to compare with yet.
 	var pass []string
 	for _, n := range notify {
 		pass = append(pass, "--notify", n)
@@ -270,13 +286,18 @@ func planWatch(args []string) (w *watch.Watcher, once bool, err error) {
 	if notifyMin != "" {
 		pass = append(pass, "--notify-min", notifyMin)
 	}
+	first := slices.Clone(pass)
+	if len(notify) > 0 {
+		first = append(first, "--notify-all-first")
+	}
 	if failOnNew != "" {
 		pass = append(pass, "--fail-on-new", failOnNew)
 	}
 	return &watch.Watcher{
-		Exe: exe, List: list, Extra: append(pass, extra...), Dir: dir,
+		Exe: exe, List: list, Extra: extra, Dir: dir,
 		Schedule: sched, RunNow: now, Keep: *keep, HTML: html,
-		PassSince: true, // scan has --since, so each run marks its own changes
+		PassSince:  true, // scan has --since, so each run marks its own changes
+		SinceFlags: pass, FirstFlags: first,
 	}, once, nil
 }
 

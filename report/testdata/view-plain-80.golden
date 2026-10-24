@@ -25,3 +25,4 @@ Findings by severity:
 [INFO] No Referrer-Policy header - https://a.test/
 
 Score 12/100 - 1 critical, 2 high, 1 medium, 1 low, 1 info - 40 checks, 61 requests, 0s
+run rhythm tuner explain <id> for the full fix

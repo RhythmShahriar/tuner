@@ -51,24 +51,32 @@ func (o *Outcome) Exit(p *Plan) (code int, why []string) {
 func (o *Outcome) untrusted(p *Plan) []string {
 	var why []string
 	for i, r := range o.Reports {
-		s := o.Status[i]
-		if s.VulnData == VulnMissing && !p.AllowMissingVulns {
-			why = append(why, fmt.Sprintf("%s: no vulnerability data, so --fail-on %s can't pass it\n"+
-				"  rerun when the data source is back, or add --allow-missing-vulns", r.Target, p.FailOn))
-		}
-		if (!s.Complete || s.BlockedBy != "") && !p.AllowPartial {
-			why = append(why, fmt.Sprintf("%s: the scan is incomplete (%s), so --fail-on %s can't pass it\n"+
-				"  add --allow-partial to accept a partial scan", r.Target, s.Reason(), p.FailOn))
-		}
+		why = append(why, Untrusted(r.Target, o.Status[i], "--fail-on "+string(p.FailOn), p.AllowMissingVulns, p.AllowPartial)...)
+	}
+	return why
+}
+
+// Untrusted lists why a gate such as "--fail-on high" can't call one
+// target's report clean: its vulnerability data was missing (unless
+// allowMissingVulns), or its scan was blocked or cut short (unless
+// allowPartial). Each reason is a message with its hint on a second line.
+func Untrusted(target string, s Status, gate string, allowMissingVulns, allowPartial bool) []string {
+	var why []string
+	if s.VulnData == VulnMissing && !allowMissingVulns {
+		why = append(why, fmt.Sprintf("%s: no vulnerability data, so %s can't pass it\n"+
+			"  rerun when the data source is back, or add --allow-missing-vulns", target, gate))
+	}
+	if (!s.Complete || s.BlockedBy != "") && !allowPartial {
+		why = append(why, fmt.Sprintf("%s: the scan is incomplete (%s), so %s can't pass it\n"+
+			"  add --allow-partial to accept a partial scan", target, s.Reason(), gate))
 	}
 	return why
 }
 
 // Confirmed reports whether a finding counts as confirmed. A finding is
 // likely when its check or the advisor marked it low confidence, such as
-// a CVE matched on a distro PHP build that may carry the fix already. It
-// becomes f.Confidence.Confirmed() once the engine types its confidence.
-func Confirmed(f engine.Finding) bool { return f.Confidence != "low" }
+// a CVE matched on a distro PHP build that may carry the fix already.
+func Confirmed(f engine.Finding) bool { return f.Confidence.Confirmed() }
 
 // GateWorst is the worst severity a fail-on gate looks at: among every
 // finding, or only the confirmed ones.

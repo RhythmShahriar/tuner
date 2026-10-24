@@ -84,7 +84,13 @@ type sarifResult struct {
 type sarifLocation struct {
 	PhysicalLocation struct {
 		ArtifactLocation sarifArtifactLocation `json:"artifactLocation"`
+		Region           *sarifRegion          `json:"region,omitempty"`
 	} `json:"physicalLocation"`
+}
+
+// sarifRegion is the line in the file a local finding points at.
+type sarifRegion struct {
+	StartLine int `json:"startLine"`
 }
 
 type sarifArtifactLocation struct {
@@ -208,6 +214,9 @@ func writeSARIF(w io.Writer, reports []Report, o WriteOptions) error {
 				PartialFingerprints: map[string]string{fingerprintKey: Fingerprint(f, root)}}
 			var loc sarifLocation
 			loc.PhysicalLocation.ArtifactLocation = artifactLocation(f, root)
+			if f.Line > 0 {
+				loc.PhysicalLocation.Region = &sarifRegion{StartLine: f.Line}
+			}
 			res.Locations = []sarifLocation{loc}
 			if len(f.Advisories) > 0 {
 				var cves []string

@@ -234,3 +234,25 @@ func TestJSONCarriesFingerprints(t *testing.T) {
 		t.Errorf("root not used:\n%s", b.String())
 	}
 }
+
+// The terminal, Markdown and HTML reports say where the PHP version came
+// from.
+func TestPHPSourceShown(t *testing.T) {
+	res := sampleResult("/var/www/site")
+	res.Fingerprint.PHP, res.Fingerprint.PHPSource = "8.1.2", "php on PATH"
+	want := "PHP 8.1.2 (from php on PATH)"
+	for format, want := range map[string]string{"md": `PHP 8.1.2 \(from php on PATH\)`, "html": want} {
+		var b bytes.Buffer
+		if err := Write(format, &b, []Report{New(res, "0.4.0")}, WriteOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("%s lacks %q:\n%s", format, want, b.String())
+		}
+	}
+	var b bytes.Buffer
+	NewPretty(&b, &b, PrettyOptions{Plain: true}).Fingerprint(res.Fingerprint)
+	if !strings.Contains(b.String(), "Fingerprint: WordPress 6.4 · "+want+" · nginx") {
+		t.Errorf("terminal: %q", b.String())
+	}
+}

@@ -65,8 +65,14 @@ type Watcher struct {
 	// flag: it would reject every run after the first. The digest
 	// compares runs either way.
 	PassSince bool
-	Clock     Clock     // default RealClock
-	Log       io.Writer // one line per run; default io.Discard
+	// SinceFlags go to scan only on a run that compares with an earlier
+	// report, such as --fail-on-new, which a scan without --since
+	// rejects. FirstFlags go only on a run with no earlier report, such
+	// as --notify-all-first. Without PassSince every run is a first run.
+	SinceFlags []string
+	FirstFlags []string
+	Clock      Clock     // default RealClock
+	Log        io.Writer // one line per run; default io.Discard
 
 	mu    sync.Mutex
 	child *os.Process
@@ -173,11 +179,15 @@ func (r Run) Line() string {
 func stamp(t time.Time) string { return t.Format("2006-01-02 15:04 MST") }
 
 // Args returns the scan arguments for a run writing to report and
-// comparing with since (none when since is "" or PassSince is off).
+// comparing with since (none when since is "" or PassSince is off). A
+// comparing run gets SinceFlags, any other run FirstFlags.
 func (w *Watcher) Args(report, since string) []string {
 	args := []string{"scan", "-l", w.List, "--json", "-o", report}
 	if since != "" && w.PassSince {
 		args = append(args, "--since", since)
+		args = append(args, w.SinceFlags...)
+	} else {
+		args = append(args, w.FirstFlags...)
 	}
 	return append(args, w.Extra...)
 }

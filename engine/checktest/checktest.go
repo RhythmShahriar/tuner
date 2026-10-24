@@ -183,7 +183,7 @@ func scan(c *engine.Check, fc Case) (*engine.Result, error) {
 	return res, nil
 }
 
-// masked checks the secrets the engine extracted: every one masked, and
+// masked checks the secrets the engine extracted: every one masked and
 // at least one per finding when the case expects them.
 func masked(res *engine.Result, want bool) []string {
 	var out []string

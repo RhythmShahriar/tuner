@@ -61,10 +61,6 @@ func Rules() []Rule {
 	return out
 }
 
-// Likely findings: engine.ConfidenceLow once the engine has typed
-// confidence values.
-const confidenceLow = "low"
-
 var (
 	serverVersion = regexp.MustCompile(`(?i)^(nginx|apache)/([0-9]+(?:\.[0-9]+)+)`)
 	// Distro builds backport security fixes without changing the version.

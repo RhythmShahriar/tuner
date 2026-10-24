@@ -77,17 +77,17 @@ var embeddedRules embed.FS
 
 // Rule is a declarative local file check.
 type Rule struct {
-	ID         string          `yaml:"id"`
-	Name       string          `yaml:"name"`
-	Severity   engine.Severity `yaml:"severity"`
-	Confidence string          `yaml:"confidence"`
-	Caveat     string          `yaml:"caveat"`
-	Tags       []string        `yaml:"tags"`
-	Scope      string          `yaml:"scope"`
-	Files      []string        `yaml:"files"`
-	Exclude    []string        `yaml:"exclude"`
-	MaxSize    int64           `yaml:"max_size"`
-	Match      RuleMatch       `yaml:"match"`
+	ID         string            `yaml:"id"`
+	Name       string            `yaml:"name"`
+	Severity   engine.Severity   `yaml:"severity"`
+	Confidence engine.Confidence `yaml:"confidence"`
+	Caveat     string            `yaml:"caveat"`
+	Tags       []string          `yaml:"tags"`
+	Scope      string            `yaml:"scope"`
+	Files      []string          `yaml:"files"`
+	Exclude    []string          `yaml:"exclude"`
+	MaxSize    int64             `yaml:"max_size"`
+	Match      RuleMatch         `yaml:"match"`
 	Extract    struct {
 		Secrets  bool            `yaml:"secrets"`
 		Severity engine.Severity `yaml:"severity"`
@@ -147,7 +147,7 @@ func (r *Rule) compile() error {
 		return fmt.Errorf("severity %q isn't one of critical, high, medium, low, info", r.Severity)
 	case r.Extract.Severity != "" && !slices.Contains(engine.Severities, r.Extract.Severity):
 		return fmt.Errorf("extract.severity %q isn't one of critical, high, medium, low, info", r.Extract.Severity)
-	case r.Confidence != confidenceHigh && r.Confidence != confidenceLow:
+	case r.Confidence != engine.ConfidenceHigh && r.Confidence != engine.ConfidenceLow:
 		return fmt.Errorf("confidence %q must be high or low", r.Confidence)
 	case len(r.Files) == 0:
 		return errors.New("files is required")
@@ -494,7 +494,7 @@ func (r *Rule) finding(s *scan, e *entry, f *fileData, at int) engine.Finding {
 	}
 	title := strings.ReplaceAll(r.Name, "{file}", e.name)
 	out := s.finding(r.ID, sev, e.path, title, ev, r.Impact, r.Fix, r.Tags...)
-	out.Confidence, out.Caveat = engine.Confidence(r.Confidence), r.Caveat
+	out.Confidence, out.Caveat = r.Confidence, r.Caveat
 	out.Evidence.Secrets = sec
 	out.References = r.References
 	return out

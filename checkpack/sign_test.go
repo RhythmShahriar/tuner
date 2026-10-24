@@ -31,8 +31,8 @@ func cachedGood(t *testing.T, rel *release) *Client {
 }
 
 // A newer release than the cached pack, with its signature broken in
-// different ways. Each must leave the cached pack in use, with a warning,
-// and nothing about the bad pack cached.
+// different ways. Each must leave the cached pack in use with a warning
+// and cache nothing about the bad pack.
 func TestBadSignatureKeepsCache(t *testing.T) {
 	src := source("0.2.0", map[string]string{"a/x.yaml": goodCheck})
 	good := build(t, src, t0)

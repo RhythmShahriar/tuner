@@ -19,3 +19,11 @@ const wsaeConnRefused = syscall.Errno(10061)
 func connRefused(err error) bool {
 	return errors.Is(err, wsaeConnRefused) || errors.Is(err, syscall.ECONNREFUSED)
 }
+
+// wsaeConnReset is WSAECONNRESET, the Winsock code of a reset connection.
+const wsaeConnReset = syscall.Errno(10054)
+
+// connReset reports whether err is a TCP connection the peer reset.
+func connReset(err error) bool {
+	return errors.Is(err, wsaeConnReset) || errors.Is(err, syscall.ECONNRESET)
+}

@@ -151,7 +151,7 @@ func checksDir(dir string) (fs.FS, string, error) {
 	if dir == "" {
 		return checks.FS, "built-in checks", nil
 	}
-	// A missing directory is a bad argument, not a failing check, and
+	// A missing directory is a bad argument, not a failing check. Also
 	// os.DirFS would only say "stat .".
 	switch st, err := os.Stat(dir); { //nolint:gosec // the user names the directory to read
 	case errors.Is(err, fs.ErrNotExist):

@@ -15,12 +15,6 @@ import (
 // Reference page of the wiki, one anchor per ID.
 const HelpBase = "https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Finding-Reference#"
 
-// Confidence values for findings, until engine has typed constants.
-const (
-	confidenceHigh = "high"
-	confidenceLow  = "low"
-)
-
 // RuleInfo describes one finding ID local scans report, so selection,
 // listings and SARIF know it without running a scan. Its fields match
 // engine.Rule, so registering the catalog is a conversion.

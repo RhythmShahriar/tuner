@@ -1004,6 +1004,35 @@ func TestFailOnNeedsVulnData(t *testing.T) {
 	}
 }
 
+// --fail-on-new can't pass a scan with no vulnerability data either.
+func TestFailOnNewNeedsVulnData(t *testing.T) {
+	needScanFlags(t, "since", "fail-on-new")
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if conn, _, err := w.(http.Hijacker).Hijack(); err == nil {
+			conn.Close()
+		}
+	}))
+	defer api.Close()
+	t.Setenv("TUNER_VULN_API", api.URL)
+	t.Setenv("TUNER_WPORG_API", api.URL)
+	t.Setenv("TUNER_PHPNET_API", api.URL)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	site := pluginSite(t).URL
+	before := filepath.Join(t.TempDir(), "before.json")
+	if code, _, errs := tuner(t, "scan", site, "--no-vulns", "-o", before, "-q"); code != exitOK {
+		t.Fatalf("before: exit %d: %s", code, errs)
+	}
+
+	code, _, errs := tuner(t, "scan", site, "--json", "--since", before, "--fail-on-new", "low")
+	if code != exitError || !strings.Contains(errs, "no vulnerability data, so --fail-on-new low can't pass it") ||
+		!strings.Contains(errs, "--allow-missing-vulns") {
+		t.Errorf("exit %d, stderr %q", code, errs)
+	}
+	if code, _, errs := tuner(t, "scan", site, "--json", "--since", before, "--fail-on-new", "low", "--allow-missing-vulns"); code != exitOK {
+		t.Errorf("--allow-missing-vulns: exit %d: %s", code, errs)
+	}
+}
+
 func TestVulnDataOK(t *testing.T) {
 	states, err := os.ReadFile("../../vulns/testdata/phpnet-states.json")
 	if err != nil {
@@ -1107,6 +1136,16 @@ func TestHTTPClientUsesProxy(t *testing.T) {
 	if req.Header.Get("User-Agent") != "" {
 		t.Error("the default User-Agent changed the caller's request")
 	}
+
+	// The check pack client goes through the same helper: proxy and
+	// User-Agent.
+	pc := packClient("rhythm-tuner/pack", u, false, false).HTTP
+	if resp, err := pc.Get("http://checks.example.invalid/checks.tar.gz"); err == nil {
+		resp.Body.Close()
+	}
+	if g := seen(); g.url != "http://checks.example.invalid/checks.tar.gz" || g.ua != "rhythm-tuner/pack" || pc.Timeout != 30*time.Second {
+		t.Errorf("pack client: proxy saw %+v, timeout %v", g, pc.Timeout)
+	}
 }
 
 // The help and README promise only what the code does today. Each claim
@@ -1155,8 +1194,17 @@ func TestMain(m *testing.M) {
 	}
 	// No test sends a DNS query; TestOwnNetworkRate fakes the names it needs.
 	lookupIP = func(context.Context, string) ([]net.IPAddr, error) { return nil, errors.New("no DNS in tests") }
+	if os.Getenv(asTunerEnv) == "1" {
+		// A child process a test started as the Tuner binary (watch runs
+		// each scan as one).
+		os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+	}
 	os.Exit(m.Run())
 }
+
+// asTunerEnv makes the test binary run as the Tuner binary, so watch's
+// child scans can run in tests.
+const asTunerEnv = "TUNER_TEST_AS_BINARY"
 
 func TestCommandName(t *testing.T) {
 	old := argv0
@@ -1933,6 +1981,71 @@ func TestEndToEndWatchAndServe(t *testing.T) {
 				t.Errorf("%s --no-such-flag: exit %d, want %d", c.name, code, exitUsage)
 			}
 		})
+	}
+}
+
+// A fresh watch with --fail-on-new and --notify runs its first scan (no
+// earlier report) without failing, sends every finding, then fails and
+// notifies on what is new in the next run.
+func TestEndToEndWatchFirstRun(t *testing.T) {
+	needCommand(t, "watch")
+	srv := leakySite(t)
+	list := filepath.Join(t.TempDir(), "sites.txt")
+	if err := os.WriteFile(list, []byte(srv.URL+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var posts []string
+	hook := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		posts = append(posts, string(body))
+		mu.Unlock()
+	}))
+	t.Cleanup(hook.Close)
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(asTunerEnv, "1")
+	var dir string
+	watchOnce := func(scan ...string) (int, string, string) {
+		args := append([]string{"watch", "-l", list, "--once", "--dir", dir, "--exec", exe,
+			"--fail-on-new", "high", "--notify", "webhook+" + hook.URL + "/hook",
+			"--", "--no-vulns", "--rate", "0", "--retries", "0"}, scan...)
+		return tuner(t, args...)
+	}
+	logs := func() string {
+		var b strings.Builder
+		matches, _ := filepath.Glob(filepath.Join(dir, "*.log"))
+		for _, m := range matches {
+			data, _ := os.ReadFile(m)
+			b.Write(data)
+		}
+		return b.String()
+	}
+	sent := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(posts)
+	}
+
+	// A fresh watch: every finding is sent, nothing fails the run.
+	dir = filepath.Join(t.TempDir(), "fresh")
+	code, out, errs := watchOnce()
+	if got := sent(); code != exitOK || len(got) != 1 || !strings.Contains(got[0], "leak-dotenv") {
+		t.Fatalf("fresh run: exit %d, posts %q\n%s%s\n%s", code, got, out, errs, logs())
+	}
+
+	// A second watch whose first run misses the leak: the next run finds
+	// it new, fails and sends it.
+	dir = filepath.Join(t.TempDir(), "second")
+	if code, out, errs := watchOnce("--exclude-id", "leak-dotenv"); code != exitOK {
+		t.Fatalf("first run: exit %d\n%s%s\n%s", code, out, errs, logs())
+	}
+	code, out, errs = watchOnce()
+	if got := sent(); code != exitFindings || len(got) != 2 || !strings.Contains(got[1], "leak-dotenv") || !strings.Contains(out, "1 new") {
+		t.Errorf("second run: exit %d, posts %d\n%s%s\n%s", code, len(got), out, errs, logs())
 	}
 }
 

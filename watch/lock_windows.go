@@ -33,6 +33,6 @@ func lockFile(path string) (*os.File, error) {
 	return os.NewFile(uintptr(h), path), nil
 }
 
-// releaseLock does nothing: closing the file released the OS lock, and
-// the file stays so the next run locks the same one.
+// releaseLock does nothing: closing the file released the OS lock. The
+// file stays so the next run locks the same one.
 func releaseLock(string) {}

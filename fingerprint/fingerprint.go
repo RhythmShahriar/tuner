@@ -97,7 +97,8 @@ func (c Component) String() string {
 // Has reports whether tech was detected.
 func (r Result) Has(tech string) bool { return slices.Contains(r.Tech, tech) }
 
-// String renders e.g. "WordPress 6.9.3 · PHP 8.1 · nginx".
+// String renders e.g. "WordPress 6.9.3 · PHP 8.1 (from x-powered-by /) ·
+// nginx". The PHP version says where it came from when PHPSource is set.
 func (r Result) String() string {
 	var parts []string
 	switch {
@@ -110,7 +111,11 @@ func (r Result) String() string {
 		if r.PHP == "" {
 			parts = append(parts, "PHP (version unknown)")
 		} else {
-			parts = append(parts, "PHP "+r.PHP)
+			php := "PHP " + r.PHP
+			if r.PHPSource != "" {
+				php += " (from " + r.PHPSource + ")"
+			}
+			parts = append(parts, php)
 		}
 	}
 	if r.Server != "" {

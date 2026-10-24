@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -150,6 +151,9 @@ func TestNotHTTPS(t *testing.T) {
 		{&url.Error{Op: "Get", Err: &net.OpError{Op: "dial", Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)}}, true},
 		{&url.Error{Op: "Get", Err: context.DeadlineExceeded}, false},
 		{errors.New("connection reset by peer"), false},
+		{&url.Error{Op: "Get", Err: io.EOF}, true},
+		{&url.Error{Op: "Get", Err: io.ErrUnexpectedEOF}, true},
+		{&url.Error{Op: "Get", Err: &net.OpError{Op: "read", Err: os.NewSyscallError("read", syscall.ECONNRESET)}}, true},
 	} {
 		if got := notHTTPS(tc.err); got != tc.want {
 			t.Errorf("notHTTPS(%v) = %v, want %v", tc.err, got, tc.want)

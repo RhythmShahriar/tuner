@@ -8,7 +8,7 @@
 // It follows rhythm's kit/cache (Store, Load, ReadJSON, WriteJSON,
 // WriteFile) and adds what Tuner needs on top: a format number in every
 // entry, checks that an entry actually holds data, file names that are
-// safe on Windows, a bounded in-memory memo for long-running processes, and
+// safe on Windows, a bounded in-memory memo for long-running processes and
 // the age of a stale copy for warnings.
 package cache
 

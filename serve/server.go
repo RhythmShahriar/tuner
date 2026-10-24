@@ -229,7 +229,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	return cerr
 }
 
-// CheckListen refuses to serve without a token anywhere but loopback,
+// CheckListen refuses to serve without a token anywhere but loopback
 // and refuses a short token anywhere.
 func CheckListen(addr, token string) error {
 	if token != "" && len(token) < MinTokenLength {

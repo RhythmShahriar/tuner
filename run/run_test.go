@@ -351,3 +351,26 @@ func TestVulnStatusFromWarnings(t *testing.T) {
 		t.Errorf("worst status should win, got %s", s.get())
 	}
 }
+
+// Untrusted names the gate it was asked about and honors each allowance.
+func TestUntrusted(t *testing.T) {
+	missing := Status{Complete: true, VulnData: VulnMissing}
+	partial := Status{StoppedBy: "max-time", VulnData: VulnOK}
+	if why := Untrusted("https://a.example", missing, "--fail-on-new low", false, false); len(why) != 1 ||
+		!strings.HasPrefix(why[0], "https://a.example: no vulnerability data, so --fail-on-new low can't pass it\n") {
+		t.Errorf("missing data: %q", why)
+	}
+	if why := Untrusted("https://a.example", partial, "--fail-on-new low", false, false); len(why) != 1 ||
+		!strings.Contains(why[0], "the scan is incomplete (stopped by --max-time), so --fail-on-new low can't pass it") {
+		t.Errorf("partial: %q", why)
+	}
+	if why := Untrusted("https://a.example", missing, "--fail-on high", true, false); len(why) != 0 {
+		t.Errorf("--allow-missing-vulns: %q", why)
+	}
+	if why := Untrusted("https://a.example", partial, "--fail-on high", false, true); len(why) != 0 {
+		t.Errorf("--allow-partial: %q", why)
+	}
+	if why := Untrusted("https://a.example", Status{Complete: true, VulnData: VulnOK}, "--fail-on high", false, false); len(why) != 0 {
+		t.Errorf("complete: %q", why)
+	}
+}

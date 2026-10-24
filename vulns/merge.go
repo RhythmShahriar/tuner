@@ -190,7 +190,7 @@ func union(a, b []string) []string {
 	return out
 }
 
-// source credits the data behind advisories: WPVulnerability, and
+// source credits the data behind advisories: WPVulnerability, plus
 // Wordfence Intelligence when it contributed one.
 func (a *Advisor) source(vs []Vuln) string {
 	w := a.Client.Wordfence

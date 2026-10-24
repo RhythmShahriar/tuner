@@ -3,8 +3,8 @@
 
 package engine
 
-// The vulns, osv and local packages register their rules from init(),
-// but they import engine, so engine's own tests can't load them. These
+// The vulns, osv and local packages register their rules from init().
+// They import engine, so engine's own tests can't load them. These
 // stand in with the same IDs and tags.
 func init() {
 	RegisterRules("test-vulns",

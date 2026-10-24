@@ -66,6 +66,9 @@
                 "artifactLocation": {
                   "uri": "wp-config.php",
                   "uriBaseId": "SRCROOT"
+                },
+                "region": {
+                  "startLine": 4
                 }
               }
             }

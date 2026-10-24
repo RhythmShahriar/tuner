@@ -42,5 +42,6 @@
  ╰────────────────────────────────────────────────────────────────────╯
   40 checks · 61 requests · 0s
 
+  → run rhythm tuner explain <id> for the full fix
   → full report: rhythm tuner scan https://a.test -o report.md
 

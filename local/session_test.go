@@ -15,7 +15,7 @@ import (
 	"github.com/RhythmShahriar/tuner/engine"
 )
 
-// fakeSessionPHP answers both php queries a local scan makes: the version,
+// fakeSessionPHP answers both php queries a local scan makes: the version
 // and the session settings (nil cfg means php can't report them).
 func fakeSessionPHP(version string, cfg map[string]any) func(context.Context, string, ...string) ([]byte, error) {
 	return func(_ context.Context, _ string, args ...string) ([]byte, error) {
@@ -132,8 +132,8 @@ func TestSessionHandlerSetInCode(t *testing.T) {
 	}
 }
 
-// On Debian and Ubuntu the web server's settings live next to the CLI's,
-// and they win: here the CLI is safe but the FPM pool isn't.
+// On Debian and Ubuntu the web server's settings live next to the CLI's.
+// They win: here the CLI is safe but the FPM pool isn't.
 func TestSessionDebianFPMPool(t *testing.T) {
 	etc := tree(t, map[string]string{
 		"etc/php/8.3/cli/php.ini":           "session.serialize_handler = php\n",

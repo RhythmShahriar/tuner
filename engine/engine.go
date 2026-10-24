@@ -755,8 +755,8 @@ func RedactURL(raw string) string {
 }
 
 // usesProxy reports whether proxy sends requests for u through a proxy,
-// for either scheme: a scan of an http:// site usually moves to https,
-// and HTTPS_PROXY alone then proxies the rest of it. The dial guard must
+// for either scheme: a scan of an http:// site usually moves to https.
+// HTTPS_PROXY alone then proxies the rest of it. The dial guard must
 // stay off for the whole scan in that case, or it refuses the proxy's
 // own address when the proxy runs on this machine.
 func usesProxy(proxy func(*http.Request) (*url.URL, error), u *url.URL) bool {
@@ -857,13 +857,16 @@ func refused(err error) bool {
 
 // notHTTPS reports whether err shows that a host given without a scheme
 // does not serve https: the TLS handshake failed (often a plain http
-// server answering) or nothing listens on the port. Open then falls back
-// to http, so retrying would only add noise and an error to the count.
+// server answering), the server hung up on the TLS hello (EOF or a reset,
+// as many plain http dev servers do) or nothing listens on the port. Open
+// then falls back to http, so retrying would only add noise and an error
+// to the count.
 func notHTTPS(err error) bool {
 	var rh tls.RecordHeaderError
 	var alert tls.AlertError
 	var cv *tls.CertificateVerificationError
-	return plainHTTPOnly(err) || errors.As(err, &rh) || errors.As(err, &alert) || errors.As(err, &cv)
+	return plainHTTPOnly(err) || errors.As(err, &rh) || errors.As(err, &alert) || errors.As(err, &cv) ||
+		errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || connReset(err)
 }
 
 // plainHTTPOnly reports whether err shows that the host has no https at

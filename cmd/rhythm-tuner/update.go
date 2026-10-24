@@ -21,6 +21,7 @@ import (
 	"github.com/RhythmShahriar/tuner/engine"
 	"github.com/RhythmShahriar/tuner/fingerprint"
 	"github.com/RhythmShahriar/tuner/local"
+	"github.com/RhythmShahriar/tuner/report"
 	"github.com/RhythmShahriar/tuner/vulns"
 	"github.com/RhythmShahriar/tuner/vulns/osv"
 )
@@ -226,8 +227,11 @@ func prefetchTargets(ctx context.Context, targets []string, php string, c *vulns
 		if ctx.Err() != nil {
 			return exitCanceled
 		}
+		// The target, the fingerprint and the warnings can hold names from
+		// the site (file names, plugin versions): never raw escapes.
+		shown := report.SafeText(shownTarget(t))
 		if err != nil {
-			fmt.Fprintf(stderr, "rhythm tuner: %s: %v\n", t, err)
+			fmt.Fprintf(stderr, "rhythm tuner: %s: %s\n", shown, report.SafeText(err.Error()))
 			ok = false
 			continue
 		}
@@ -252,9 +256,9 @@ func prefetchTargets(ctx context.Context, targets []string, php string, c *vulns
 				sources = append(sources, osv.Source)
 			}
 		}
-		fmt.Fprintf(stdout, "Prefetched %s: %s\n", t, what)
+		fmt.Fprintf(stdout, "Prefetched %s: %s\n", shown, report.SafeText(what))
 		for _, w := range append(res.Warnings, warnings...) {
-			fmt.Fprintf(stderr, "rhythm tuner: %s: %s\n", t, w)
+			fmt.Fprintf(stderr, "rhythm tuner: %s: %s\n", shown, report.SafeText(w))
 		}
 		// Local warnings (no php on PATH, say) don't fail a prefetch;
 		// missing vulnerability data does.

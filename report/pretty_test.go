@@ -196,3 +196,27 @@ func TestContentWidth(t *testing.T) {
 		}
 	}
 }
+
+// The explain hint shows only when a fix was cut short and names Tuner
+// as it was started.
+func TestExplainHint(t *testing.T) {
+	long := engine.Finding{ID: "x", Title: "X", Severity: engine.High, Fix: "Do this:\n\n    block it"}
+	short := engine.Finding{ID: "y", Title: "Y", Severity: engine.High, Fix: "Block it."}
+	for _, plain := range []bool{true, false} {
+		for _, c := range []struct {
+			f    engine.Finding
+			want bool
+		}{{long, true}, {short, false}} {
+			var b bytes.Buffer
+			p := NewPretty(&b, &b, PrettyOptions{Plain: plain, Columns: 80, Command: "rhythm-tuner"})
+			p.Finding(c.f)
+			p.Summary(&engine.Result{Findings: []engine.Finding{c.f}, Score: 80}, "https://a.test", 0)
+			if got := strings.Contains(b.String(), "run rhythm-tuner explain <id> for the full fix"); got != c.want {
+				t.Errorf("plain %v, fix %q: hint %v, want %v\n%s", plain, c.f.Fix, got, c.want, b.String())
+			}
+			if !plain && !strings.Contains(b.String(), "full report: rhythm-tuner scan https://a.test -o report.md") {
+				t.Errorf("full report hint names the wrong command:\n%s", b.String())
+			}
+		}
+	}
+}

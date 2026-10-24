@@ -19,7 +19,7 @@ func TestDetect(t *testing.T) {
 	h.Set("X-Powered-By", "PHP/8.1.2")
 	r := &matchers.Response{Status: 200, Header: h, Body: []byte(`<meta name="generator" content="WordPress 6.9.3" />`)}
 	got := Detect(r)
-	if want := "WordPress 6.9.3 · PHP 8.1.2 · nginx"; got.String() != want {
+	if want := "WordPress 6.9.3 · PHP 8.1.2 (from x-powered-by /) · nginx"; got.String() != want {
 		t.Errorf("String() = %q, want %q", got, want)
 	}
 
@@ -136,7 +136,7 @@ func TestDetectPHPEvidence(t *testing.T) {
 	}{
 		{"python static server", home, http.Header{"Server": {"SimpleHTTP/0.6 Python/3.12.3"}, "Content-Type": {"text/html"}}, []byte("<html>hi</html>"), false, "", "", "SimpleHTTP/0.6 Python/3.12.3"},
 		{"express", home, http.Header{"X-Powered-By": {"Express"}}, []byte("x"), false, "", "", "unknown"},
-		{"version header", home, http.Header{"X-Powered-By": {"PHP/8.2.1"}}, []byte("x"), true, "8.2.1", "x-powered-by /", "PHP 8.2.1"},
+		{"version header", home, http.Header{"X-Powered-By": {"PHP/8.2.1"}}, []byte("x"), true, "8.2.1", "x-powered-by /", "PHP 8.2.1 (from x-powered-by /)"},
 		{"bare header", home, http.Header{"X-Powered-By": {"PHP"}}, []byte("x"), true, "", "x-powered-by /", "PHP (version unknown)"},
 		{"session cookie", home, http.Header{"Set-Cookie": {"PHPSESSID=abc; path=/"}}, []byte("x"), true, "", "cookie", "PHP (version unknown)"},
 		{"laravel cookie", home, http.Header{"Set-Cookie": {"laravel_session=abc; path=/"}}, []byte("x"), true, "", "cookie", "Laravel · PHP (version unknown)"},
@@ -144,7 +144,7 @@ func TestDetectPHPEvidence(t *testing.T) {
 		{"php source served as a file", php, http.Header{"Content-Type": {"text/html"}}, []byte("<?php echo 1;"), false, "", "", "unknown"},
 		{"php file with a download type", php, http.Header{"Content-Type": {"application/x-httpd-php"}}, []byte("x"), false, "", "", "unknown"},
 		{"wordpress without a php header", home, http.Header{}, wp, true, "", "", "WordPress 6.9.3 · PHP (version unknown)"},
-		{"wordpress with a php header", home, http.Header{"X-Powered-By": {"PHP/8.1.2"}}, wp, true, "8.1.2", "x-powered-by /", "WordPress 6.9.3 · PHP 8.1.2"},
+		{"wordpress with a php header", home, http.Header{"X-Powered-By": {"PHP/8.1.2"}}, wp, true, "8.1.2", "x-powered-by /", "WordPress 6.9.3 · PHP 8.1.2 (from x-powered-by /)"},
 	}
 	for _, c := range cases {
 		got := Detect(&matchers.Response{URL: c.url, Status: 200, Header: c.header, Body: c.body})
