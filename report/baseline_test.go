@@ -251,11 +251,27 @@ func TestBaselineBatchIsPerSite(t *testing.T) {
 		t.Errorf("client-a with a new advisory: %+v", a.Findings)
 	}
 
-	// An array with one report and a failed target is a single-site
-	// baseline, so it still matches across hosts.
-	one := filepath.Join(t.TempDir(), "one.json")
+	// A batch saved while only client-a was reachable is still a batch
+	// baseline: it must not hide client-a's finding on client-b.
+	partial := filepath.Join(t.TempDir(), "partial.json")
 	var buf bytes.Buffer
-	if err := Write("json", &buf, []Report{New(site("staging.test", critSQLi), "test")}, WriteOptions{Many: true, Failed: []TargetError{{Target: "https://down.test", Error: "timeout"}}}); err != nil {
+	if err := Write("json", &buf, []Report{New(site("client-a.test", critSQLi), "test")}, WriteOptions{Many: true, Failed: []TargetError{{Target: "https://client-b.test", Error: "timeout"}}}); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(partial, buf.Bytes(), 0o600)
+	base, _ = LoadBaseline(partial)
+	if b := site("client-b.test", critSQLi); base.Filter(b) != 0 {
+		t.Errorf("batch with a failed target hid client-a's finding on client-b: left %+v", b.Findings)
+	}
+	if a := site("client-a.test", critSQLi); base.Filter(a) != 2 {
+		t.Errorf("batch with a failed target: client-a left %+v", a.Findings)
+	}
+
+	// A one-element array is a single-site baseline, so it still matches
+	// across hosts.
+	one := filepath.Join(t.TempDir(), "one.json")
+	buf.Reset()
+	if err := Write("json", &buf, []Report{New(site("staging.test", critSQLi), "test")}, WriteOptions{Many: true}); err != nil {
 		t.Fatal(err)
 	}
 	_ = os.WriteFile(one, buf.Bytes(), 0o600)

@@ -70,10 +70,14 @@ func LoadBaseline(path string) (Baseline, error) {
 		}
 		many = append(many, one)
 	}
-	// A batch also lists the targets it could not reach; they have no
-	// findings and don't make the baseline a batch one.
+	// A batch also lists the targets it could not reach. They have no
+	// findings but still make the baseline a batch one: a batch saved
+	// while only client-a was up must not hide client-a's findings on
+	// client-b next time. Only one object or a one-element array is
+	// host-agnostic.
+	scoped := len(many) > 1
 	many = slices.DeleteFunc(many, func(r saved) bool { return r.Error != nil })
-	b := Baseline{keys: map[string]bool{}, legacy: map[string]bool{}, scoped: len(many) > 1}
+	b := Baseline{keys: map[string]bool{}, legacy: map[string]bool{}, scoped: scoped}
 	for _, r := range many {
 		scope := b.scope(r.Target)
 		for _, f := range r.Findings {
