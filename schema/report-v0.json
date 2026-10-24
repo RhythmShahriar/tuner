@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/RhythmShahriar/tuner/master/schema/report-v0.json",
   "title": "rhythm-tuner JSON report",
-  "description": "What rhythm-tuner scan --json writes. One target gives a Report object; several targets (or --json-array) give an array of Report and TargetError entries. Schema rhythm-tuner/v0 may still change before v1.0; new optional fields can appear in any release.",
+  "description": "What rhythm-tuner scan --json writes. One target gives a Report object; several targets (or --json-array) give an array of Report and TargetError entries. Schema rhythm-tuner/v0 may still change before v1.0; new optional fields can appear in any release, so validators should allow unknown properties.",
   "anyOf": [
     { "$ref": "#/$defs/Report" },
     {
@@ -20,7 +20,6 @@
       "type": "object",
       "required": ["schema", "tool", "version", "duration_ms", "summary", "baselined", "complete",
         "target", "fingerprint", "soft_404", "score", "checks", "requests", "errors", "throttled", "findings"],
-      "additionalProperties": false,
       "properties": {
         "schema": { "type": "string", "enum": ["rhythm-tuner/v0"] },
         "tool": { "type": "string", "enum": ["rhythm-tuner"] },
@@ -30,7 +29,6 @@
           "description": "Findings per severity. Every severity is present, 0 when there are none.",
           "type": "object",
           "required": ["critical", "high", "medium", "low", "info"],
-          "additionalProperties": false,
           "properties": {
             "critical": { "type": "integer", "minimum": 0 },
             "high": { "type": "integer", "minimum": 0 },
@@ -66,7 +64,6 @@
       "description": "A target that could not be scanned. Array output lists these after the reports.",
       "type": "object",
       "required": ["target", "error"],
-      "additionalProperties": false,
       "properties": {
         "target": { "type": "string" },
         "error": { "type": "string" }
@@ -75,7 +72,6 @@
     "Finding": {
       "type": "object",
       "required": ["id", "title", "severity", "confidence", "target", "url", "path", "evidence", "fingerprint"],
-      "additionalProperties": false,
       "properties": {
         "id": { "type": "string", "description": "The check or advisor ID, e.g. leak-dotenv or vuln-plugin-contact-form-7." },
         "title": { "type": "string" },
@@ -109,7 +105,6 @@
       "description": "Why a finding fired. Secrets are always masked.",
       "type": "object",
       "required": ["request", "status"],
-      "additionalProperties": false,
       "properties": {
         "request": { "type": "string" },
         "status": { "type": "integer" },
@@ -120,7 +115,6 @@
     "Secret": {
       "type": "object",
       "required": ["kind", "masked"],
-      "additionalProperties": false,
       "properties": {
         "kind": { "type": "string" },
         "name": { "type": "string" },
@@ -131,7 +125,6 @@
       "description": "One known vulnerability behind a vuln-* finding.",
       "type": "object",
       "required": ["id", "title"],
-      "additionalProperties": false,
       "properties": {
         "id": { "type": "string" },
         "title": { "type": "string" },
@@ -147,7 +140,6 @@
       "description": "What the scan learned about the target.",
       "type": "object",
       "required": ["tech"],
-      "additionalProperties": false,
       "properties": {
         "tech": { "type": ["array", "null"], "items": { "type": "string" } },
         "wordpress_version": { "type": "string" },
@@ -161,7 +153,6 @@
     "Component": {
       "type": "object",
       "required": ["type", "slug"],
-      "additionalProperties": false,
       "properties": {
         "type": { "type": "string", "enum": ["plugin", "theme"] },
         "slug": { "type": "string" },
@@ -174,7 +165,6 @@
     "TLS": {
       "type": "object",
       "required": ["version", "not_after"],
-      "additionalProperties": false,
       "properties": {
         "version": { "type": "string" },
         "not_after": { "type": "string", "format": "date-time" },

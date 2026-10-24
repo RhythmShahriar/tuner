@@ -29,6 +29,12 @@ import (
 type validator struct {
 	root map[string]any
 	errs []string
+	// strict treats an object schema with properties and no
+	// additionalProperties as closed. The published schemas stay open so
+	// a release that adds a field doesn't break other people's
+	// validators; the tests stay strict so the schema can't fall behind
+	// the writer.
+	strict bool
 }
 
 var supported = []string{"$schema", "$id", "$defs", "title", "description", "format",
@@ -49,14 +55,21 @@ func loadSchema(t *testing.T, path string) map[string]any {
 }
 
 // validate returns every way doc breaks schema, or nil.
-func validate(schema map[string]any, doc []byte) []string {
+func validate(schema map[string]any, doc []byte) []string { return validateWith(schema, doc, false) }
+
+// validateStrict is validate with unlisted properties refused.
+func validateStrict(schema map[string]any, doc []byte) []string {
+	return validateWith(schema, doc, true)
+}
+
+func validateWith(schema map[string]any, doc []byte, strict bool) []string {
 	var v any
 	d := json.NewDecoder(bytes.NewReader(doc))
 	d.UseNumber()
 	if err := d.Decode(&v); err != nil {
 		return []string{err.Error()}
 	}
-	val := &validator{root: schema}
+	val := &validator{root: schema, strict: strict}
 	val.check(schema, v, "$")
 	return val.errs
 }
@@ -84,7 +97,7 @@ func (val *validator) check(s map[string]any, v any, path string) {
 		var all []string
 		matched := false
 		for _, alt := range alts {
-			sub := &validator{root: val.root}
+			sub := &validator{root: val.root, strict: val.strict}
 			sub.check(alt.(map[string]any), v, path)
 			if len(sub.errs) == 0 {
 				matched = true
@@ -130,7 +143,11 @@ func (val *validator) check(s map[string]any, v any, path string) {
 				val.check(ps, sub, path+"."+k)
 				continue
 			}
-			switch extra := s["additionalProperties"].(type) {
+			extra, ok := s["additionalProperties"]
+			if !ok && val.strict && props != nil {
+				extra = false
+			}
+			switch extra := extra.(type) {
 			case bool:
 				if !extra {
 					val.fail(path, "unexpected property %q", k)
@@ -252,7 +269,7 @@ func TestJSONMatchesSchema(t *testing.T) {
 		"all failed":    encodeJSON(t, nil, WriteOptions{Failed: failed}),
 		"empty":         encodeJSON(t, nil, WriteOptions{}),
 	} {
-		if errs := validate(schema, doc); len(errs) > 0 {
+		if errs := validateStrict(schema, doc); len(errs) > 0 {
 			t.Errorf("%s: %s\n%s", name, strings.Join(errs, "\n"), doc)
 		}
 	}
@@ -274,9 +291,14 @@ func TestSchemaRejectsDrift(t *testing.T) {
 		if doc == good {
 			t.Fatalf("%s: the replacement did nothing", name)
 		}
-		if errs := validate(schema, []byte(doc)); len(errs) == 0 {
+		if errs := validateStrict(schema, []byte(doc)); len(errs) == 0 {
 			t.Errorf("%s: validated, want an error", name)
 		}
+	}
+	// The published schema itself lets a later release add fields.
+	extra := strings.Replace(good, `"complete": true,`, `"complete": true, "surprise": 1,`, 1)
+	if errs := validate(schema, []byte(extra)); len(errs) > 0 {
+		t.Errorf("published schema refuses a new field: %s", strings.Join(errs, "\n"))
 	}
 }
 

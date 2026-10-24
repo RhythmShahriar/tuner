@@ -2,10 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/RhythmShahriar/tuner/master/schema/notify-v0.json",
   "title": "rhythm-tuner notification",
-  "description": "What rhythm-tuner scan --notify webhook+https://... posts: the findings that are new since the --since report, at or above --notify-min. No evidence or response bodies are included and anything that looks like a secret is masked. Schema rhythm-tuner-notify/v0 may still change before v1.0; new optional fields can appear in any release.",
+  "description": "What rhythm-tuner scan --notify webhook+https://... posts: the findings that are new since the --since report, at or above --notify-min. No evidence or response bodies are included and anything that looks like a secret is masked. Schema rhythm-tuner-notify/v0 may still change before v1.0; new optional fields can appear in any release, so validators should allow unknown properties.",
   "type": "object",
   "required": ["schema", "tool", "version", "min_severity", "summary", "counts", "targets", "findings"],
-  "additionalProperties": false,
   "properties": {
     "schema": { "type": "string", "enum": ["rhythm-tuner-notify/v0"] },
     "tool": { "type": "string", "enum": ["rhythm-tuner"] },
@@ -17,7 +16,6 @@
       "description": "New findings per severity. Every severity is present, 0 when there are none.",
       "type": "object",
       "required": ["critical", "high", "medium", "low", "info"],
-      "additionalProperties": false,
       "properties": {
         "critical": { "type": "integer", "minimum": 0 },
         "high": { "type": "integer", "minimum": 0 },
@@ -35,7 +33,6 @@
     "Item": {
       "type": "object",
       "required": ["target", "fingerprint", "id", "title", "severity", "confidence", "location"],
-      "additionalProperties": false,
       "properties": {
         "target": { "type": "string" },
         "fingerprint": { "type": "string", "pattern": "^v1:[0-9a-f]{32}$", "description": "The finding's fingerprint, the same as in the JSON report." },
