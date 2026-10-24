@@ -1,0 +1,12 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+positive:
+  - name: info page public
+    routes:
+      /server-info: {body: "<html><head><title>Server Information</title></head><body><h1 style=\"text-align: center\">Apache Server Information</h1></body></html>"}
+negative:
+  - name: not found
+    routes: {}
+  - name: catch-all that serves the info page for every path
+    default: {status: 200, body: "<h1>Apache Server Information</h1>"}

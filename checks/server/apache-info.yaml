@@ -1,0 +1,27 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: srv-apache-info
+name: Apache server-info page public
+severity: medium
+tags: [server, disclosure]
+request:
+  path: ["/server-info"]
+match:
+  all:
+    - status: 200
+    - regex: 'Apache Server Information'
+    - not_baseline: true
+impact: The page shows the full server configuration, loaded modules and file paths.
+fix: |
+  Allow mod_info from localhost only, or turn it off (a2dismod info).
+fix_server:
+  nginx: |
+    # Only when nginx proxies to Apache.
+    location = /server-info { deny all; }
+  apache: |
+    <Location "/server-info">
+      Require local
+    </Location>
+references:
+  - https://httpd.apache.org/docs/2.4/mod/mod_info.html

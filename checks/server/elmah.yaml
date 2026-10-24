@@ -1,0 +1,21 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: srv-elmah
+name: ELMAH error log public
+severity: high
+tags: [server, debug, leak]
+request:
+  path: ["/elmah.axd"]
+match:
+  all:
+    - status: 200
+    - regex: '(?i)Error log for'
+    - regex: '(?i)elmah'
+    - not_baseline: true
+impact: The log shows every recent exception with its request, cookies and server variables, so sessions can be hijacked.
+fix: |
+  Set allowRemoteAccess="false" in the elmah security section of web.config,
+  or protect elmah.axd with an authorization rule.
+references:
+  - https://cwe.mitre.org/data/definitions/215.html

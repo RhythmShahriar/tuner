@@ -1,0 +1,19 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: MIT
+
+id: srv-crossdomain
+name: crossdomain.xml allows every domain
+severity: low
+tags: [server, cors]
+request:
+  path: ["/crossdomain.xml"]
+match:
+  all:
+    - status: 200
+    - regex: '<allow-access-from\s+domain="\*"'
+    - not_baseline: true
+impact: Any other site's Flash or Silverlight client, and some PDF readers, may read this site with the visitor's cookies.
+fix: |
+  Delete crossdomain.xml (Flash is gone), or list only your own domains.
+references:
+  - https://cwe.mitre.org/data/definitions/942.html
