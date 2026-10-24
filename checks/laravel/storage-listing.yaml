@@ -12,7 +12,7 @@ match:
     - status: 200
     - regex: '<title>Index of /storage/(?:logs|framework)'
     - not_baseline: true
-impact: Logs, cached views and session files can be browsed, and they hold errors, queries and session data.
+impact: Logs, cached views and session files can be browsed. They hold errors, queries and session data.
 fix: |
   Point the document root at public/, so storage/ is out of reach. The
   public disk link at /storage serves storage/app/public only.

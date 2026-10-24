@@ -16,7 +16,7 @@ match:
     - regex: 'class="sf-toolbar'
 impact: The profiler shows every recent request with its headers, session, queries and environment, secrets included.
 fix: |
-  Run production with APP_ENV=prod and APP_DEBUG=0, and install
+  Run production with APP_ENV=prod and APP_DEBUG=0 and install
   symfony/web-profiler-bundle with --dev only.
 fix_server:
   nginx: |

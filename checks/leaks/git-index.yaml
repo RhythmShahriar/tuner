@@ -12,7 +12,7 @@ match:
     - status: 200
     - magic: "44495243"
     - not_baseline: true
-impact: The index lists every file in the repository, and with the rest of .git the full source and history can be rebuilt.
+impact: The index lists every file in the repository. With the rest of .git the full source and history can be rebuilt.
 fix: |
   Deny access to .git, or deploy without it.
 fix_server:

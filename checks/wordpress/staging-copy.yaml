@@ -12,7 +12,7 @@ match:
     - status: 200
     - regex: '<form[^>]+id="loginform"'
     - not_baseline: true
-impact: A second WordPress install is live next to the site. Copies are rarely updated, so their core and plugins are easy targets, and they often share the database password.
+impact: A second WordPress install is live next to the site. Copies are rarely updated, so their core and plugins are easy targets. They often share the database password.
 fix: |
   Delete the copy, or put it behind a password or an IP allow list.
   Staging belongs on its own host name with access control.

@@ -17,7 +17,7 @@ match:
     - regex: '\AArguments: \r?\n\s+\S*node'
 extract:
   secrets: true
-impact: Build logs show local paths, package versions and environment details, and sometimes registry tokens.
+impact: Build logs show local paths, package versions, environment details and sometimes registry tokens.
 fix: |
   Delete the log from the server and deploy without build logs.
 fix_server:

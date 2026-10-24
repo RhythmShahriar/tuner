@@ -14,7 +14,7 @@ match:
     - regex: '(?i)\bduplicator\b'
     - regex: '(?i)\binstall'
     - not_baseline: true
-impact: The Duplicator installer can overwrite the site and its database, and it reveals paths and the name of the package archive.
+impact: The Duplicator installer can overwrite the site and its database. It also reveals paths and the name of the package archive.
 fix: |
   Delete installer.php, installer-backup.php, the dup-installer folder and
   any *_archive.zip or *.daf file from the web root. Duplicator's "Remove

@@ -14,7 +14,7 @@ match:
     - regex: '<title>Index of /wp-content/uploads'
     - regex: '(?i)href="[^"?]+\.(?:php[0-9]?|phtml|phar)"'
     - not_baseline: true
-impact: Uploads should hold media only. A PHP file there is often a web shell left by an attacker, and the open listing shows it to anyone.
+impact: Uploads should hold media only. A PHP file there is often a web shell left by an attacker. The open listing shows it to anyone.
 fix: |
   Check every PHP file in wp-content/uploads, remove the ones you did not
   put there and find out how they got in. Then stop PHP from running in

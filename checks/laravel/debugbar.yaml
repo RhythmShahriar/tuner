@@ -13,7 +13,7 @@ match:
     - regex: '"utime"\s*:'
     - regex: '"(?:method|uri)"\s*:'
     - not_baseline: true
-impact: Debugbar keeps recent requests with their queries, session data and headers, and this endpoint hands them to anyone.
+impact: Debugbar keeps recent requests with their queries, session data and headers. This endpoint hands them to anyone.
 fix: |
   Set APP_DEBUG=false and DEBUGBAR_ENABLED=false in production and install
   barryvdh/laravel-debugbar with --dev.

@@ -14,7 +14,7 @@ match:
   any:
     - regex: '<title>phpMyAdmin\b'
     - regex: 'name="pma_username"'
-impact: The database admin login is open to the internet, so anyone can guess passwords against it, and old phpMyAdmin versions have known flaws.
+impact: The database admin login is open to the internet, so anyone can guess passwords against it. Old phpMyAdmin versions have known flaws.
 fix: |
   Limit phpMyAdmin to your IP address or a VPN, add HTTP authentication in
   front of it, or remove it and reach the database over an SSH tunnel.

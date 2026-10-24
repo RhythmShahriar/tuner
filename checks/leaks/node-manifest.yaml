@@ -17,7 +17,7 @@ match:
     - regex: '"(?:dependencies|devDependencies)"\s*:\s*\{'
     - regex: '"lockfileVersion"\s*:'
     - regex: '(?m)^# yarn lockfile v1'
-impact: The front-end build's packages and versions are public, which points at known flaws, and the files show the deploy copies the whole project.
+impact: The front-end build's packages and versions are public, which points at known flaws. The files also show the deploy copies the whole project.
 fix: |
   Deploy only the built assets, or deny the files.
 fix_server:
