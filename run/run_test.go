@@ -4,10 +4,13 @@
 package run
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -93,9 +96,18 @@ func TestRunFailOn(t *testing.T) {
 func TestRunBaselineAndIgnores(t *testing.T) {
 	srv := leakySite(t)
 	first := Run(context.Background(), leakPlan(t, srv.URL), Hooks{})
-	base := report.Baseline{}
-	for _, f := range first.Reports[0].Findings {
-		base[f.ID+" "+f.URL] = true
+	// A baseline is a saved JSON report of an earlier scan.
+	saved := filepath.Join(t.TempDir(), "baseline.json")
+	var buf bytes.Buffer
+	if err := report.JSON(&buf, first.Reports, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(saved, buf.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	base, err := report.LoadBaseline(saved)
+	if err != nil {
+		t.Fatal(err)
 	}
 	for name, edit := range map[string]func(*Plan){
 		"baseline": func(p *Plan) { p.Baseline = base },
@@ -114,6 +126,9 @@ func TestRunBaselineAndIgnores(t *testing.T) {
 		}
 		if want := len(p.Ignores); tg.Ignored != want {
 			t.Errorf("%s: ignored %d, want %d", name, tg.Ignored, want)
+		}
+		if want := 1 - len(p.Ignores); out.Reports[0].Baselined != want {
+			t.Errorf("%s: report baselined %d, want %d", name, out.Reports[0].Baselined, want)
 		}
 		if code, _ := out.Exit(p); code != ExitOK {
 			t.Errorf("%s: exit %d", name, code)
@@ -170,6 +185,29 @@ func TestRunPartialAndFailedTargets(t *testing.T) {
 	p.FailOn = engine.Info
 	if code, _ := out.Exit(p); code != ExitError {
 		t.Errorf("failed target with --fail-on and no findings: exit %d", code)
+	}
+}
+
+// A firewall stop the engine saw reaches the target's Status and the
+// report, and every finding gets its fingerprint before the baseline runs.
+func TestRunEngineStopReachesReport(t *testing.T) {
+	p := &Plan{Targets: []string{"https://example.com"}, Scan: func(context.Context, *engine.Scanner, string, engine.Hooks) (*engine.Result, error) {
+		return &engine.Result{
+			Target: "https://example.com", StoppedBy: "waf", BlockedBy: "cloudflare",
+			Findings: []engine.Finding{{ID: "xmlrpc", URL: "https://example.com/xmlrpc.php", Path: "/xmlrpc.php", Severity: engine.Low}},
+		}, nil
+	}}
+	out := Run(context.Background(), p, Hooks{})
+	want := Status{Complete: false, StoppedBy: "waf", BlockedBy: "cloudflare", VulnData: VulnOff}
+	if out.Targets[0].Status != want || out.Status[0] != want {
+		t.Errorf("status %+v, want %+v", out.Targets[0].Status, want)
+	}
+	if got := out.Reports[0].Status(); got != report.Status(want) {
+		t.Errorf("report status %+v, want %+v", got, want)
+	}
+	f := out.Reports[0].Findings[0]
+	if f.Fingerprint == "" || f.Fingerprint != report.Fingerprint(f, "") {
+		t.Errorf("fingerprint %q", f.Fingerprint)
 	}
 }
 

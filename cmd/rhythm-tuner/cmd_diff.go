@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/RhythmShahriar/rhythm/kit/cli"
 	"github.com/RhythmShahriar/tuner/diff"
 	"github.com/RhythmShahriar/tuner/engine"
 	"github.com/RhythmShahriar/tuner/report"
@@ -32,6 +33,10 @@ Flags:
 Exit codes: 0 ok · 1 new findings at --fail-on-new · 2 usage error · 3 a report couldn't be read
 `
 
+func init() {
+	registerCommand(command{Name: "diff", Summary: "compare two JSON reports: what is new and what was fixed", Run: cmdDiff})
+}
+
 // cmdDiff runs rhythm tuner diff. It is registered with registerCommand
 // (cmd/rhythm-tuner/extend.go) once that lands; until then only tests call
 // it.
@@ -45,7 +50,7 @@ func cmdDiff(args []string, stdout, stderr io.Writer) int {
 	flags.BoolVar(&asJSON, "json", false, "")
 	flags.BoolVar(&asMD, "md", false, "")
 	flags.StringVar(&failOnNew, "fail-on-new", "", "")
-	pos, err := parseInterspersed(flags, args)
+	pos, err := cli.ParseInterspersed(flags, args)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			fmt.Fprint(stdout, diffUsage)

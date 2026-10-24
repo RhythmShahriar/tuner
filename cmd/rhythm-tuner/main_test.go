@@ -1063,6 +1063,15 @@ func TestMaxTimeReportSaysSo(t *testing.T) {
 	}
 }
 
+// The terminal view says a --max-time scan is incomplete above its score.
+func TestMaxTimeViewSaysSo(t *testing.T) {
+	srv, _ := hangingSite(t)
+	_, out, errs := tuner(t, "scan", srv.URL, "--plain", "--no-vulns", "--max-time", "500ms")
+	if !strings.Contains(out, "Incomplete: stopped by --max-time") {
+		t.Errorf("no incomplete note, stderr %q\n%s", errs, out)
+	}
+}
+
 func TestHTTPClientUsesProxy(t *testing.T) {
 	var mu sync.Mutex
 	var got struct{ url, ua string }
@@ -1336,7 +1345,7 @@ func TestConfigFile(t *testing.T) {
 	// An ignore hides the finding and counts as baselined.
 	writeConfig(t, "targets: ["+srv.URL+"]\nfail_on: high\nignore:\n  - id: leak-dotenv\n    path: /.env\n    reason: demo keys\n    until: 2026-10-24\n")
 	code, out, errs = tuner(t, "scan", "--plain")
-	if code != exitOK || strings.Contains(out, ".env file exposed") || !strings.Contains(out, "1 baselined") {
+	if code != exitOK || strings.Contains(out, ".env file exposed") || !strings.Contains(out, "after baseline (1 hidden)") {
 		t.Errorf("ignored: exit %d, stderr %s\n%s", code, errs, out)
 	}
 	code, out, _ = tuner(t, "scan", "--json")
@@ -1651,8 +1660,11 @@ func TestDeepProfileHidden(t *testing.T) {
 	var help bytes.Buffer
 	usage(&help)
 	scanUsage(&help)
-	if strings.Contains(help.String(), "deep") {
-		t.Error("help still offers --profile deep")
+	// --plugins names its own deep mode; only the profile is hidden.
+	for _, line := range strings.Split(help.String(), "\n") {
+		if strings.Contains(line, "--profile") && strings.Contains(line, "deep") {
+			t.Errorf("help still offers --profile deep: %s", line)
+		}
 	}
 	srv := leakySite(t)
 	code, _, errs := tuner(t, "scan", srv.URL, "--json", "--profile", "Deep")
@@ -1712,7 +1724,7 @@ func TestEndToEndDiff(t *testing.T) {
 	needCommand(t, "diff")
 	_, before, after := laneReports(t)
 	code, out, errs := tuner(t, "diff", before, after, "--fail-on-new", "high")
-	if code != exitFindings || !strings.Contains(out, "leak-dotenv") {
+	if code != exitFindings || !strings.Contains(out, "1 new, 0 fixed") || !strings.Contains(out, ".env file exposed") {
 		t.Errorf("new leak: exit %d, stderr %s\n%s", code, errs, out)
 	}
 	if code, out, errs := tuner(t, "diff", after, before, "--fail-on-new", "high"); code != exitOK {
@@ -1844,7 +1856,7 @@ func TestEndToEndSinceAndNotify(t *testing.T) {
 	t.Cleanup(hook.Close)
 
 	code, _, errs := tuner(t, "scan", srv.URL, "--no-vulns", "--since", before, "--fail-on-new", "high",
-		"--notify", "webhook+"+hook.URL, "-q")
+		"--notify", "webhook+"+hook.URL+"/hook", "-q")
 	mu.Lock()
 	defer mu.Unlock()
 	if code != exitFindings || len(posts) != 1 || !strings.Contains(posts[0], "leak-dotenv") || strings.Contains(posts[0], rawSecret) {

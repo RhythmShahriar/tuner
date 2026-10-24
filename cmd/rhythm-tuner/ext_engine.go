@@ -11,9 +11,9 @@ import (
 	"github.com/RhythmShahriar/tuner/report"
 )
 
+func init() { registerScanExtension(&engineExtension{}) }
+
 // engineExtension adds the scan engine's safety flags to rhythm tuner scan.
-// It has the scanExtension shape from extend.go; it is registered with
-// registerScanExtension once that registry is in this tree.
 type engineExtension struct {
 	followHost    bool
 	plugins       string

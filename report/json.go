@@ -44,8 +44,9 @@ type Report struct {
 }
 
 // stampedFinding is a finding as the JSON report writes it, with its
-// fingerprint. Once engine.Finding has its own Fingerprint field (contract
-// D1) this field shadows it with the same value.
+// fingerprint. It shadows engine.Finding.Fingerprint, which Stamp sets, so
+// a result that was never stamped still gets one and WriteOptions.Root
+// applies.
 type stampedFinding struct {
 	engine.Finding
 	Fingerprint string `json:"fingerprint"`
@@ -85,15 +86,18 @@ func New(res *engine.Result, version string) Report {
 		res.Findings = []engine.Finding{}
 	}
 	clean := sanitized(*res)
-	return Report{
+	r := Report{
 		Schema:     Schema,
 		Tool:       "rhythm-tuner",
 		Version:    SafeText(version),
 		DurationMS: res.Duration.Milliseconds(),
 		Summary:    summary(&clean),
-		Complete:   true, // until engine.Result says otherwise (contract D1)
 		Result:     &clean,
 	}
+	// The result's own early stop, if any. A canceled run leaves StoppedBy
+	// empty, so callers that know why record it with SetStatus.
+	r.SetStatus(Status{Complete: res.StoppedBy == "", StoppedBy: res.StoppedBy, BlockedBy: res.BlockedBy, VulnData: res.VulnData})
+	return r
 }
 
 // summary counts findings per severity with every severity present, so

@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -325,5 +326,20 @@ func TestReportExtensionNotifyIncomplete(t *testing.T) {
 	if err := json.Unmarshal(<-bodies, &msg); err != nil || len(msg.Findings) != 0 ||
 		len(msg.Incomplete) != 1 || msg.Incomplete[0] != "Incomplete: blocked by Sucuri challenge" {
 		t.Errorf("%v: %+v", err, msg)
+	}
+}
+
+// -o client.html writes the HTML report through the writer registry, with
+// the brand from the extension's flags.
+func TestScanOutputHTMLWithBrand(t *testing.T) {
+	srv := leakySite(t)
+	out := filepath.Join(t.TempDir(), "client.html")
+	code, _, errs := tuner(t, "scan", srv.URL, "--no-vulns", "--no-config", "-o", out, "--brand-name", "Acme Web", "-q")
+	body, err := os.ReadFile(out)
+	if code != exitOK || err != nil {
+		t.Fatalf("exit %d, %v, stderr %s", code, err, errs)
+	}
+	if !strings.HasPrefix(strings.ToLower(string(body)), "<!doctype html") || !strings.Contains(string(body), "Acme Web") || strings.Contains(string(body), rawSecret) {
+		t.Errorf("not a branded HTML report:\n%.400s", body)
 	}
 }

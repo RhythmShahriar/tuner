@@ -7,7 +7,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -176,7 +175,7 @@ type scanPlan struct {
 	// PHP, Advisor, OSV and Select.
 	local local.Options
 	// write is passed to the report writer.
-	write writeOptions
+	write report.WriteOptions
 }
 
 func scan(args []string, stdout, stderr io.Writer) int {
@@ -276,8 +275,8 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 	case len(chosen) == 1:
 		p.format = chosen[0]
 	case o.output != "":
-		if p.format = formatFromExt(o.output); p.format == "" {
-			return nil, usagef("can't tell the format of %s; add --json, --jsonl, --sarif or --md", o.output)
+		if p.format = report.FormatForExt(o.output); p.format == "" {
+			return nil, usagef("can't tell the format of %s; add --json, --jsonl, --sarif or --md, or end the name in .html", o.output)
 		}
 	}
 
@@ -373,7 +372,7 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 	if vulnsOn {
 		p.osv = osvClient(ua, p.engine.Proxy, o.offline)
 	}
-	p.write = writeOptions{Many: len(p.targets) > 1, Array: o.jsonArray, Version: version}
+	p.write = report.WriteOptions{Many: len(p.targets) > 1, Array: o.jsonArray, Version: version}
 
 	for _, e := range scanExtensions {
 		if err := e.Plan(p); err != nil {
@@ -806,6 +805,7 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 		},
 		Done: func(i int, t *scanrun.Target) {
 			if t.Result != nil && live {
+				views[i].SetStatus(report.Status(t.Status)) // a partial scan says so above its score
 				views[i].Summary(t.Result, t.Target, t.Suppressed)
 			}
 			outMu.Lock()
@@ -826,10 +826,12 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 	watch.Wait()
 
 	reports := outcome.Reports
-	p.write.Status = outcome.Status
+	// A target that stopped early but has results is in the reports,
+	// which say it is incomplete; only targets with nothing to show are
+	// listed as failed.
 	for i, why := range failed {
-		if why != "" {
-			p.write.Failed = append(p.write.Failed, targetError{Target: p.targets[i], Error: why})
+		if why != "" && outcome.Targets[i].Result == nil {
+			p.write.Failed = append(p.write.Failed, report.TargetError{Target: p.targets[i], Error: why})
 		}
 	}
 	// A file keeps its previous report unless this run has a better one.
@@ -846,7 +848,7 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 		keep = "the report could not be written in full"
 	}
 	if keep == "" && p.format != "" && p.format != "jsonl" {
-		werr = writeReport(p.format, out, reports, p.write)
+		werr = report.Write(p.format, out, reports, p.write)
 	}
 	switch {
 	case keep != "":
@@ -1112,69 +1114,6 @@ func (r *reportFile) discard() {
 	}
 }
 
-// targetError and writeOptions mirror report.TargetError and
-// report.WriteOptions from the report writer registry. Until that registry
-// is released, writeReport dispatches to the existing writers; then all
-// three become report.TargetError, report.WriteOptions and report.Write.
-type targetError struct {
-	Target string `json:"target"`
-	Error  string `json:"error"`
-}
-
-type writeOptions struct {
-	Many    bool          // several targets: JSON is an array
-	Array   bool          // JSON is an array even for one target (--json-array)
-	Failed  []targetError // targets that could not be scanned
-	Version string        // the rhythm-tuner version
-
-	// Status holds each report's runStatus, in order. It goes once
-	// report.Report carries its own status (report.SetStatus).
-	Status []runStatus
-}
-
-func writeReport(format string, w io.Writer, reports []report.Report, o writeOptions) error {
-	switch format {
-	case "json":
-		if len(o.Status) == len(reports) {
-			return statusJSON(w, reports, o)
-		}
-		return report.JSON(w, reports, o.Many || o.Array)
-	case "sarif":
-		return report.SARIF(w, reports, o.Version)
-	case "md":
-		return report.Markdown(w, reports)
-	}
-	return fmt.Errorf("no writer for %s reports", format)
-}
-
-// runStatus says how much of a target one run saw; statusJSON adds it to
-// JSON reports.
-type runStatus = scanrun.Status
-
-// statusJSON is report.JSON with each report's runStatus added. An array
-// ends with one {"target", "error"} entry per target that could not be
-// scanned, so a script sees every target it asked for.
-func statusJSON(w io.Writer, reports []report.Report, o writeOptions) error {
-	type withStatus struct {
-		report.Report
-		runStatus
-	}
-	enc := json.NewEncoder(w)
-	enc.SetEscapeHTML(false)
-	enc.SetIndent("", "  ")
-	if len(reports) == 1 && !o.Many && !o.Array {
-		return enc.Encode(withStatus{reports[0], o.Status[0]})
-	}
-	all := make([]any, 0, len(reports)+len(o.Failed))
-	for i, r := range reports {
-		all = append(all, withStatus{r, o.Status[i]})
-	}
-	for _, f := range o.Failed {
-		all = append(all, f)
-	}
-	return enc.Encode(all)
-}
-
 // describe explains why a target failed. A --max-time stop and one slow
 // request both wrap DeadlineExceeded; the target's status tells them
 // apart.
@@ -1193,20 +1132,6 @@ func describe(t *scanrun.Target, o scanOptions) string {
 		return err.Error() + "\n  check the address and that the site is up"
 	}
 	return err.Error()
-}
-
-func formatFromExt(path string) string {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".json":
-		return "json"
-	case ".jsonl", ".ndjson":
-		return "jsonl"
-	case ".sarif":
-		return "sarif"
-	case ".md", ".markdown":
-		return "md"
-	}
-	return ""
 }
 
 // wantsVulns reports whether a selection includes vulnerability matching:

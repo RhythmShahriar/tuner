@@ -16,14 +16,14 @@ import (
 	"github.com/RhythmShahriar/tuner/fingerprint"
 )
 
-// Status says how much of a target one run saw. It mirrors report.Status
-// from the report writer work: until engine.Result and report.Report carry
-// these fields, Run fills them in from the run context and the
-// vulnerability advisor. The CLI adds them to JSON.
+// Status says how much of a target one run saw. Run works it out from the
+// run context, the scan's own result (a firewall, a home page error or a
+// request budget) and the vulnerability advisor, then records it on each
+// report with report.SetStatus.
 type Status struct {
 	Complete  bool   `json:"complete"`
-	StoppedBy string `json:"stopped_by,omitempty"` // interrupted or max-time
-	BlockedBy string `json:"blocked_by,omitempty"` // a firewall, once the engine detects them
+	StoppedBy string `json:"stopped_by,omitempty"` // interrupted, max-time, waf, home-status or budget
+	BlockedBy string `json:"blocked_by,omitempty"` // the firewall that challenged the scan
 	VulnData  string `json:"vuln_data,omitempty"`  // one of the Vuln* values below
 }
 
@@ -52,8 +52,9 @@ func (s Status) Reason() string {
 // status works out a finished target's Status. err is what the scan
 // returned: a target that finished before Ctrl-C is still complete. ctx
 // is the run's context, which tells a MaxTime stop apart from one slow
-// request: both wrap DeadlineExceeded.
-func (p *Plan) status(ctx context.Context, err error, slot *vulnSlot) Status {
+// request: both wrap DeadlineExceeded. res, when not nil, adds what the
+// scan itself saw: a firewall (BlockedBy) or an early stop of its own.
+func (p *Plan) status(ctx context.Context, err error, slot *vulnSlot, res *engine.Result) Status {
 	s := Status{Complete: true, VulnData: VulnOff}
 	switch {
 	case isCanceled(err):
@@ -61,8 +62,17 @@ func (p *Plan) status(ctx context.Context, err error, slot *vulnSlot) Status {
 	case errors.Is(err, context.DeadlineExceeded) && errors.Is(ctx.Err(), context.DeadlineExceeded):
 		s.Complete, s.StoppedBy = false, "max-time"
 	}
-	if p.Engine.Advisor != nil {
+	if res != nil {
+		s.BlockedBy = res.BlockedBy
+		if res.StoppedBy != "" && s.StoppedBy == "" {
+			s.Complete, s.StoppedBy = false, res.StoppedBy
+		}
+	}
+	switch {
+	case p.Engine.Advisor != nil:
 		s.VulnData = slot.get()
+	case res != nil && res.VulnData != "":
+		s.VulnData = res.VulnData
 	}
 	return s
 }

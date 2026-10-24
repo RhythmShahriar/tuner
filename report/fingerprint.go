@@ -63,14 +63,18 @@ func cleanPath(p string) string {
 	return p
 }
 
-// Stamp gives every finding in res its stable fingerprint. root is the
-// folder a local scan started from ("" for remote scans). Call it before a
-// baseline filters res.
-//
-// Until engine.Finding has a Fingerprint field (contract D1), the JSON
-// writer and baselines compute fingerprints with Fingerprint when they
-// need them, so Stamp has nothing to store yet.
-func Stamp(res *engine.Result, root string) {}
+// Stamp gives every finding in res its stable fingerprint, stored in
+// Finding.Fingerprint. root is the folder a local scan started from; ""
+// uses each finding's own Target, which local scans set to that folder.
+// Call it before a baseline filters res.
+func Stamp(res *engine.Result, root string) {
+	if res == nil {
+		return
+	}
+	for i := range res.Findings {
+		res.Findings[i].Fingerprint = Fingerprint(res.Findings[i], root)
+	}
+}
 
 // TargetKey pairs a target across scans: a URL by host and path without
 // scheme or trailing slash, a folder as written. Batch baselines, diffs

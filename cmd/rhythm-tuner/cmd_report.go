@@ -11,6 +11,7 @@ import (
 	"os"
 	"slices"
 
+	"github.com/RhythmShahriar/rhythm/kit/cli"
 	"github.com/RhythmShahriar/tuner/report"
 )
 
@@ -41,6 +42,10 @@ Exit codes: 0 ok · 2 usage error · 3 a report couldn't be read or written
 // list them. jsonl streams during a scan, so a saved report can't become it.
 var reportFormats = []string{"html", "md", "sarif", "json"}
 
+func init() {
+	registerCommand(command{Name: "report", Summary: "render saved JSON reports as HTML, Markdown or SARIF", Run: cmdReport})
+}
+
 // cmdReport runs rhythm tuner report. It is registered with
 // registerCommand (cmd/rhythm-tuner/extend.go) once that lands; until then
 // only tests call it.
@@ -57,7 +62,7 @@ func cmdReport(args []string, stdout, stderr io.Writer) int {
 	flags.StringVar(&since, "since", "", "")
 	flags.StringVar(&brandName, "brand-name", "", "")
 	flags.StringVar(&brandLogo, "brand-logo", "", "")
-	pos, err := parseInterspersed(flags, args)
+	pos, err := cli.ParseInterspersed(flags, args)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			fmt.Fprint(stdout, reportUsage)

@@ -84,3 +84,17 @@ func TestEngineExtensionPlugins(t *testing.T) {
 		}
 	}
 }
+
+// The extension is registered, so scan parses its flags and lists them.
+func TestEngineExtensionRegistered(t *testing.T) {
+	p, err := planScan([]string{"example.com", "--follow-host", "--plugins", "deep", "--request-budget", "50"}, strings.NewReader(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.engine.FollowHost || p.engine.Plugins != engine.PluginsDeep || p.engine.RequestBudget != 50 {
+		t.Errorf("engine options %+v", p.engine)
+	}
+	if _, out, _ := tuner(t, "scan", "--help"); !strings.Contains(out, "--follow-host") || !strings.Contains(out, "--request-budget N") {
+		t.Errorf("scan help lacks the engine flags:\n%s", out)
+	}
+}

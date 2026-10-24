@@ -50,6 +50,7 @@
         "target": { "type": "string" },
         "fingerprint": { "$ref": "#/$defs/Fingerprint" },
         "soft_404": { "type": "boolean" },
+        "soft_404_unknown": { "type": "boolean", "description": "True when the soft-404 probe hit a block page or the home page failed, so soft_404 says nothing about the site." },
         "tls": { "$ref": "#/$defs/TLS" },
         "score": { "type": "integer", "minimum": 0, "maximum": 100 },
         "checks": { "type": "integer", "minimum": 0 },

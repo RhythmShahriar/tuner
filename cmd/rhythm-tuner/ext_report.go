@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/RhythmShahriar/rhythm/kit/cli"
 	"github.com/RhythmShahriar/tuner/diff"
 	"github.com/RhythmShahriar/tuner/engine"
 	"github.com/RhythmShahriar/tuner/notify"
@@ -25,17 +26,17 @@ import (
 // doesn't hold up a scheduled scan.
 const notifyTimeout = 30 * time.Second
 
+func init() { registerScanExtension(&reportExtension{}) }
+
 // reportExtension adds change tracking to rhythm tuner scan: --since
 // compares the scan with an earlier JSON report, --fail-on-new fails CI
 // only on what is new, --notify sends what is new to chat or email and
-// --html writes a client-ready report. It has the scanExtension shape from extend.go;
-// it is registered with registerScanExtension once that registry is in
-// this tree.
+// --html writes a client-ready report.
 type reportExtension struct {
 	since     string
 	failOnNew string
 
-	notify         repeatFlag
+	notify         cli.RepeatFlag
 	notifyMin      string
 	notifyAllFirst bool
 	notifyStrict   bool
@@ -93,17 +94,19 @@ func (e *reportExtension) Flags(fs *flag.FlagSet) {
 // Plan checks the flags and reads the old report before the scan starts,
 // so a typo in the file name or a notification URL doesn't cost a whole
 // scan.
-func (e *reportExtension) Plan(*scanPlan) error {
+func (e *reportExtension) Plan(p *scanPlan) error {
 	var err error
 	if e.level, err = severityFlag("--fail-on-new", e.failOnNew); err != nil {
-		return usageError{err.Error()}
+		return usageError{Msg: err.Error()}
 	}
 	if err := e.planNotify(); err != nil {
 		return err
 	}
-	if err := checkBrand(e.html != "", e.brandName, e.brandLogo); err != nil {
+	if err := checkBrand(e.html != "" || p.format == "html", e.brandName, e.brandLogo); err != nil {
 		return err
 	}
+	// -o client.html gets the brand too.
+	p.write.Brand = report.Brand{Name: e.brandName, LogoPath: e.brandLogo}
 	if e.since == "" {
 		if e.level != "" {
 			return usagef("--fail-on-new needs --since <file>, the report to compare with")
@@ -126,7 +129,7 @@ func (e *reportExtension) Plan(*scanPlan) error {
 func (e *reportExtension) planNotify() error {
 	lowest, err := severityFlag("--notify-min", e.notifyMin)
 	if err != nil {
-		return usageError{err.Error()}
+		return usageError{Msg: err.Error()}
 	}
 	if len(e.notify) == 0 {
 		switch {
@@ -163,7 +166,7 @@ func checkBrand(html bool, name, logo string) error {
 	}
 	if logo != "" {
 		if _, err := report.LogoDataURI(logo); err != nil {
-			return usageError{err.Error()}
+			return usageError{Msg: err.Error()}
 		}
 	}
 	return nil
@@ -174,7 +177,8 @@ func checkBrand(html bool, name, logo string) error {
 // 3 for a notification that failed under --notify-strict.
 func (e *reportExtension) Finished(p *scanPlan, reports []report.Report, stderr io.Writer) (int, error) {
 	if e.html != "" {
-		o := report.WriteOptions{Many: len(p.targets) > 1, Brand: report.Brand{Name: e.brandName, LogoPath: e.brandLogo}}
+		o := p.write // the scan's failed targets and version reach the HTML file too
+		o.Brand = report.Brand{Name: e.brandName, LogoPath: e.brandLogo}
 		if !e.firstRun {
 			o.Since, o.SinceName = e.before, sinceName(e.since)
 		}

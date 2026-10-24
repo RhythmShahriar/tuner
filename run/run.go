@@ -81,8 +81,8 @@ type Target struct {
 	// the run was canceled. A target with a Result may have one too.
 	Err error
 	// Suppressed counts the findings the baseline and ignores hid;
-	// Ignored counts the ignores' share of them.
-	Suppressed, Ignored int
+	// Baselined and Ignored count each one's share of them.
+	Suppressed, Baselined, Ignored int
 }
 
 // Failed reports whether the target ran into an error of its own, rather
@@ -139,12 +139,13 @@ func Run(ctx context.Context, p *Plan, hooks Hooks) *Outcome {
 			slot := &vulnSlot{}
 			res, err := p.safeScan(context.WithValue(ctx, vulnSlotKey{}, slot), s, target, h)
 			t := &out.Targets[i]
-			*t = Target{Target: target, Err: err, Status: p.status(ctx, err, slot)}
+			*t = Target{Target: target, Err: err, Status: p.status(ctx, err, slot, res)}
 			if res != nil {
-				stampFindings(res, target)
+				report.Stamp(res, "")
 				// Ignored findings count with the baselined ones.
 				t.Ignored = p.filterIgnored(res)
-				t.Suppressed = p.Baseline.Filter(res) + t.Ignored
+				t.Baselined = p.Baseline.Filter(res)
+				t.Suppressed = t.Baselined + t.Ignored
 				t.Result = res
 			}
 			if hooks.Done != nil {
@@ -160,6 +161,8 @@ func Run(ctx context.Context, p *Plan, hooks Hooks) *Outcome {
 		}
 		r := report.New(t.Result, p.Version)
 		r.CheckSet, r.CheckPack = p.CheckSet, p.CheckPack
+		r.Baselined = t.Baselined
+		r.SetStatus(report.Status(t.Status))
 		out.Reports = append(out.Reports, r)
 		out.Status = append(out.Status, t.Status)
 	}
@@ -218,7 +221,3 @@ func (p *Plan) filterIgnored(res *engine.Result) int {
 	res.Score = engine.Score(kept)
 	return n
 }
-
-// stampFindings gives each finding a stable fingerprint before baseline
-// filtering. It is a seam for report.Stamp, which does nothing yet either.
-func stampFindings(*engine.Result, string) {}
