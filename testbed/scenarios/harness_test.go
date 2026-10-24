@@ -193,8 +193,8 @@ func build(dir string) (string, error) {
 }
 
 // statSources stats every source file the binary is built from. go test
-// caches a passing run until the files the test touched change, and the
-// build happens in a child process it can't see; stat'ing the sources
+// caches a passing run until the files the test touched change. The
+// build happens in a child process it can't see, so stat'ing the sources
 // makes an edit anywhere in Tuner rerun the suite. It has to run inside a
 // test: go test only records file access once TestMain calls m.Run.
 func statSources(root string) error {
@@ -485,7 +485,7 @@ func execStep(t *testing.T, st step, work, home, data string, expand func(string
 }
 
 // environ isolates a run: its own home, cache and config folders, every
-// data service on the loopback fake, and a proxy on the same fake for
+// data service on the loopback fake plus a proxy on the same fake for
 // anything else, so a request that would leave the machine lands there
 // instead (Go never proxies loopback addresses).
 func environ(home, data string) []string {

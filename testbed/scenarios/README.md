@@ -18,11 +18,11 @@ covers QA gap 14). `-short` skips it.
 
 - Fixture servers listen only on 127.0.0.1 or [::1], on ports
   20240 to 20259 (`TUNER_SCENARIO_PORTS=30000-30019` to move them).
-- Every run gets its own home, cache and config folders, and on Unix an
-  empty `PATH` (no php from the machine).
+- Every run gets its own home, cache and config folders. On Unix it
+  also gets an empty `PATH` (no php from the machine).
 - Every data service (`TUNER_VULN_API`, `TUNER_WPORG_API`,
   `TUNER_PHPNET_API`, `TUNER_OSV_API`, `TUNER_CHECKS_URL`,
-  `RHYTHM_GITHUB_API`) points at a fake on loopback, and so do
+  `RHYTHM_GITHUB_API`) points at a fake on loopback. So do
   `HTTP_PROXY` and `HTTPS_PROXY`. Go never proxies loopback, so any
   request for another host lands on the fake and fails the scenario with
   "tried to leave the machine".
@@ -87,8 +87,8 @@ steps:
         data: {max: 0}               # the fake data services
 ```
 
-Placeholders work in arguments, env, bodies, headers, tree paths and
-contents, and expectations: `{{url:name}}`, `{{host:name}}` (host:port),
+Placeholders work in arguments, env, bodies, headers, tree paths,
+contents and expectations: `{{url:name}}`, `{{host:name}}` (host:port),
 `{{port:name}}`, `{{work}}` (the run's folder), `{{home}}`, `{{cache}}`
 (rhythm-tuner's cache folder on this OS) and `{{x:N}}` (N x's, for long
 lines). YAML escapes such as `"\e"` give control bytes.

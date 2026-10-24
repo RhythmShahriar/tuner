@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 
 # QA gap 10, bug 16. The check pack host never answers. A scan must not
-# wait 10 seconds for it every time, and must say it used other checks.
+# wait 10 seconds for it every time. It must say it used other checks.
 title: a hanging check pack host doesn't hold up every scan
 qa: [10]
 xfail: C4

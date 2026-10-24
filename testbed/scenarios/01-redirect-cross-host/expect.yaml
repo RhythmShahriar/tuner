@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 
 # QA gap 1, bug 1. The home page redirects to a host the user never
-# named. Tuner must stop there instead of probing the other host, and the
+# named. Tuner must stop there instead of probing the other host. The
 # user's -H and --cookie must never reach it.
 title: a cross-host redirect does not move the scan
 qa: [1]

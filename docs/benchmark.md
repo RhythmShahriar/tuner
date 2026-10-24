@@ -4,7 +4,7 @@
 
 The testbed (`testbed/docker-compose.yml`) is a WordPress site with 30 plugins, an old core and files left on show, served by nginx and Apache, plus a subfolder install and a WAF-challenge front. `testbed/ground-truth.yaml` says what is really installed and really exposed. For every tool the benchmark runs one scan per site and scores it against that truth: plugins found, false positives, requests and time. Only Tuner looks for exposed files, so those are Tuner's columns alone.
 
-This file is a placeholder. The real table is published by the nightly `benchmark` workflow as a job artifact and committed from there; the numbers depend on live tool versions and are not reproducible in an offline check. Run it yourself with:
+This file is a placeholder. The real table is published by the nightly `benchmark` workflow as its job summary and as a job artifact named `benchmark`. Nothing commits it here. The numbers depend on live tool versions and are not reproducible in an offline check. Run it yourself with:
 
 ```sh
 make testbed      # start the testbed (needs Docker)

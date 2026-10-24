@@ -3,7 +3,7 @@
 
 # QA gap 12, bug 11. A target list saved on Windows: a BOM, CRLF line
 # endings, a comment line over 64 KiB and the same site twice in
-# different forms. Every target is read, and the duplicate scanned once.
+# different forms. Every target is read and the duplicate scanned once.
 title: target lists with a BOM, CRLF, long lines and duplicates
 qa: [12]
 xfail: U3

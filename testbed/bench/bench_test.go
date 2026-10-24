@@ -48,7 +48,7 @@ func TestScorePlugins(t *testing.T) {
 		{Slug: "jetpack", Version: "1", Vulnerable: true},
 	}}
 	// Reported: one installed non-vulnerable, one installed vulnerable,
-	// one false positive, and a duplicate in a different case.
+	// one false positive and a duplicate in a different case.
 	found, missed, falsePos, vuln := scorePlugins(m, []string{"akismet", "Elementor", "ghost-plugin", "AKISMET"})
 	if !slices.Equal(found, []string{"akismet", "elementor"}) {
 		t.Errorf("found = %v", found)
@@ -211,8 +211,8 @@ func TestScoreboardRenders(t *testing.T) {
 			t.Errorf("scoreboard is missing %q", want)
 		}
 	}
-	// Ground truth leaks must never appear verbatim; the testbed holds no
-	// real secrets, but the scoreboard should still name files, not values.
+	// Ground truth leaks must never appear verbatim. The testbed holds no
+	// real secrets; even so the scoreboard names files, not values.
 	if strings.Contains(md, "ghost") && !strings.Contains(md, "False") {
 		t.Error("false positives should be counted, not pasted")
 	}

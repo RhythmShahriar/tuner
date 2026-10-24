@@ -90,7 +90,7 @@ plugins:
   - {slug: autoptimize, version: 2.9.0, discoverable: readme, vulnerable: true, active: true}
   - {slug: loginizer, version: 1.7.0, discoverable: readme, vulnerable: true, active: false}
   - {slug: wp-mail-smtp, version: 3.3.0, discoverable: readme, vulnerable: true, active: false}
-  # REST-only: no readable readme, but the plugin appears in the REST API.
+  # REST-only: no readable readme; the plugin appears in the REST API.
   - {slug: advanced-custom-fields, version: 5.11.0, discoverable: rest, vulnerable: true, active: true}
   - {slug: classic-editor, version: 1.6.2, discoverable: rest, vulnerable: false, active: true}
   - {slug: wp-fastest-cache, version: 0.9.5, discoverable: rest, vulnerable: true, active: false}

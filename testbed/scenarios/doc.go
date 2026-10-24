@@ -7,7 +7,7 @@
 // and fixture trees, run the binary and check its exit code, output, report
 // files and what the fixture servers were asked.
 //
-// Nothing leaves the machine: every server listens on 127.0.0.1 or [::1],
+// Nothing leaves the machine: every server listens on 127.0.0.1 or [::1]
 // and every data service Tuner talks to (vulnerability data, the check
 // pack, the release check) points at a local fake. See README.md for the
 // expect.yaml format.

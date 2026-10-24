@@ -1,6 +1,6 @@
 # Tuner testbed
 
-A deliberately broken WordPress site for proving what Tuner finds, and a
+A deliberately broken WordPress site for proving what Tuner finds, plus a
 reproducible benchmark against WPScan, wpprobe and Nuclei. Everything is
 self-contained and thrown away on `make testbed-down`. Nothing here is a
 real secret and no plugin holds a working exploit.
