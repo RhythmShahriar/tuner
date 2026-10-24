@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -336,5 +337,88 @@ func TestBatchJSONStaysArray(t *testing.T) {
 	var reps []struct{ Target string }
 	if err := json.Unmarshal([]byte(out), &reps); err != nil || len(reps) != 1 {
 		t.Errorf("want an array with the one reachable site, got %v:\n%.200s", err, out)
+	}
+}
+
+func TestClassifyTarget(t *testing.T) {
+	t.Chdir(t.TempDir())
+	for _, d := range []string{"example.com", "wordpress", "sites/shop"} {
+		os.MkdirAll(d, 0o755)
+	}
+	cases := []struct {
+		target    string
+		local     bool
+		ambiguous bool
+	}{
+		{"example.com", false, true},
+		{"wordpress", false, true},
+		{"./example.com", true, false},
+		{"../example.com", true, false},
+		{".", true, false},
+		{"..", true, false},
+		{"~", true, false},
+		{"~/sites/shop", true, false},
+		{"/var/www/example.com", true, false},
+		{`C:\inetpub\wwwroot`, true, false},
+		{"c:/sites", true, false},
+		{`.\example.com`, true, false},
+		{"sites/shop", true, false},
+		{"sites/missing", true, false}, // a path, so local.Root reports it missing
+		{"https://example.com", false, false},
+		{"http://example.com/blog", false, false},
+		{"example.org", false, false},       // no folder by that name
+		{"example.org/blog", false, false},  // host and path
+		{"localhost:8080/wp", false, false}, // host with a port
+		{"example.com/blog", false, false},  // no folder by that path
+		{"127.0.0.1:20220", false, false},   // not a drive letter
+	}
+	for _, c := range cases {
+		local, err := classifyTarget(c.target)
+		if local != c.local || (err != nil) != c.ambiguous {
+			t.Errorf("%s: local %v, err %v; want local %v, ambiguous %v", c.target, local, err, c.local, c.ambiguous)
+		}
+	}
+}
+
+// A folder named like the site must not turn a remote scan into a local
+// one, or the other way round.
+func TestFolderNamedLikeHost(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("folder names can't hold a colon")
+	}
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	host := strings.TrimPrefix(srv.URL, "http://")
+	t.Chdir(t.TempDir())
+	for _, d := range []string{host, "example.com"} {
+		os.MkdirAll(filepath.Join(d, "wp-includes"), 0o755)
+		os.WriteFile(filepath.Join(d, "wp-includes", "version.php"), []byte("<?php $wp_version = '6.4.1';"), 0o600)
+	}
+
+	for _, target := range []string{"example.com", host} {
+		code, _, errs := tuner(t, "scan", target, "--json")
+		want := target + " is both a folder here and a hostname; use ./" + target + " or https://" + target
+		if code != exitUsage || !strings.Contains(errs, want) {
+			t.Errorf("%s: exit %d, stderr %q", target, code, errs)
+		}
+	}
+	if hits.Load() != 0 {
+		t.Fatalf("an ambiguous target sent %d requests", hits.Load())
+	}
+
+	code, out, errs := tuner(t, "scan", "./"+host, "--json", "--no-vulns", "--php", "/nonexistent/php")
+	if code != exitOK || !strings.Contains(out, `"wordpress_version": "6.4.1"`) || hits.Load() != 0 {
+		t.Errorf("./%s: exit %d, %d requests, stderr %s\n%.300s", host, code, hits.Load(), errs, out)
+	}
+	if code, _, errs := tuner(t, "scan", srv.URL, "--json", "--no-vulns"); code != exitOK || hits.Load() == 0 {
+		t.Errorf("%s: exit %d, %d requests: %s", srv.URL, code, hits.Load(), errs)
+	}
+	p, err := planScan([]string{"https://example.com", "--no-vulns", "--no-check-updates"}, nil)
+	if err != nil || isLocalPath(p.targets[0]) {
+		t.Errorf("https://example.com: %v", err)
 	}
 }

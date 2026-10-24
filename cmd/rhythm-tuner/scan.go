@@ -220,7 +220,11 @@ func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 	}
 	allLocal := true
 	for _, t := range p.targets {
-		if isLocalPath(t) {
+		isLocal, err := classifyTarget(t)
+		if err != nil {
+			return nil, err
+		}
+		if isLocal {
 			if _, err := local.Root(t); err != nil {
 				return nil, usageError{err.Error()}
 			}
@@ -645,10 +649,51 @@ func isTerminal(w io.Writer) bool {
 	return ok && term.IsTerminal(f.Fd())
 }
 
+// isLocalPath reports whether t names a folder to scan in place. Only
+// path-shaped targets are local, so a folder that happens to share a
+// site's name never turns a remote scan into a local one.
 func isLocalPath(t string) bool {
-	if strings.HasPrefix(t, ".") || strings.HasPrefix(t, "/") || strings.HasPrefix(t, "~") {
-		return true
+	local, _ := classifyTarget(t)
+	return local
+}
+
+// classifyTarget reports whether t is a local folder. A target that could
+// be read either way is a usage error, because guessing wrong either skips
+// the site or sends requests to a host the user never meant to scan.
+func classifyTarget(t string) (local bool, err error) {
+	if strings.Contains(t, "://") {
+		return false, nil
 	}
+	if t == "." || t == ".." || t == "~" || hasAnyPrefix(t, "./", "../", ".\\", "..\\", "/", "\\", "~/", "~\\") || isDrivePath(t) {
+		return true, nil
+	}
+	first, _, hasSep := strings.Cut(strings.ReplaceAll(t, "\\", "/"), "/")
+	if hasSep && !looksLikeHost(first) {
+		return true, nil // sites/example: a relative path
+	}
+	// A bare name, or host/path such as example.com/blog.
+	if isDir(t) {
+		return false, usagef("%s is both a folder here and a hostname; use ./%s or https://%s", t, t, t)
+	}
+	return false, nil
+}
+
+// looksLikeHost reports whether the first path segment reads as a host
+// (example.com, localhost, 127.0.0.1:8080) rather than a folder name.
+func looksLikeHost(s string) bool {
+	return s == "localhost" || strings.ContainsAny(s, ".:")
+}
+
+func isDrivePath(t string) bool {
+	return len(t) >= 2 && t[1] == ':' && (t[0]|0x20 >= 'a' && t[0]|0x20 <= 'z') &&
+		(len(t) == 2 || t[2] == '/' || t[2] == '\\')
+}
+
+func hasAnyPrefix(s string, prefixes ...string) bool {
+	return slices.ContainsFunc(prefixes, func(p string) bool { return strings.HasPrefix(s, p) })
+}
+
+func isDir(t string) bool {
 	fi, err := os.Stat(t) //nolint:gosec // only checks whether the user's target is a local directory
 	return err == nil && fi.IsDir()
 }

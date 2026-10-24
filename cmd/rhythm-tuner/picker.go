@@ -30,8 +30,10 @@ func pick(stdout, stderr io.Writer) int {
 				if s == "" {
 					return errors.New("enter a URL, a hostname, or a site folder")
 				}
-				if isLocalPath(s) {
-					_, err := local.Root(s)
+				if isLocal, err := classifyTarget(s); err != nil || isLocal {
+					if err == nil {
+						_, err = local.Root(s)
+					}
 					return err
 				}
 				_, _, err := engine.ParseTarget(s)
