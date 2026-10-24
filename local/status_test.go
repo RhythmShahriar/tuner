@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -68,6 +69,9 @@ func TestSessionSkipsDependencies(t *testing.T) {
 }
 
 func TestSessionUnreadableFolder(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod 0 doesn't stop Windows listing a folder")
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("root reads everything")
 	}

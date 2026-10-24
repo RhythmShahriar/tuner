@@ -6,6 +6,7 @@ package local
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 )
@@ -131,6 +132,9 @@ func TestDiscoverNone(t *testing.T) {
 }
 
 func TestDiscoverUnreadable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod 0 doesn't stop Windows listing a folder")
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("root reads every folder")
 	}
