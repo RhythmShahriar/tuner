@@ -1427,10 +1427,10 @@ func TestConfigFile(t *testing.T) {
 		t.Fatalf("fail_on from config: exit %d, stderr %s\n%s", code, errs, out)
 	}
 
-	// An ignore hides the finding and counts as baselined.
+	// An ignore hides the finding and the score says ignores, not baseline.
 	writeConfig(t, "targets: ["+srv.URL+"]\nfail_on: high\nignore:\n  - id: leak-dotenv\n    path: /.env\n    reason: demo keys\n    until: 2026-10-24\n")
 	code, out, errs = tuner(t, "scan", "--plain")
-	if code != exitOK || strings.Contains(out, ".env file exposed") || !strings.Contains(out, "after baseline (1 hidden)") {
+	if code != exitOK || strings.Contains(out, ".env file exposed") || !strings.Contains(out, "after ignores (1 hidden)") {
 		t.Errorf("ignored: exit %d, stderr %s\n%s", code, errs, out)
 	}
 	code, out, _ = tuner(t, "scan", "--json")

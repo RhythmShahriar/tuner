@@ -38,7 +38,7 @@ func render(res *engine.Result) (map[string][]byte, error) {
 	for _, f := range res.Findings {
 		p.Finding(f)
 	}
-	p.Summary(res, res.Target, 0)
+	p.Summary(res, res.Target, report.Hidden{})
 	out["plain"] = plain.Bytes()
 
 	var js, sarif, md bytes.Buffer

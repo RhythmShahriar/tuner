@@ -73,13 +73,13 @@ func ascii(t *testing.T) {
 
 // render runs a whole scan through the view: the streamed findings, then
 // the summary.
-func render(o PrettyOptions, res *engine.Result, suppressed int) string {
+func render(o PrettyOptions, res *engine.Result, hidden Hidden) string {
 	var b bytes.Buffer
 	p := NewPretty(&b, &b, o)
 	for _, f := range res.Findings {
 		p.Finding(f)
 	}
-	p.Summary(res, res.Target, suppressed)
+	p.Summary(res, res.Target, hidden)
 	return b.String()
 }
 
@@ -89,7 +89,7 @@ func TestViewGolden(t *testing.T) {
 		for _, plain := range []bool{false, true} {
 			mode := map[bool]string{false: "tty", true: "plain"}[plain]
 			name := fmt.Sprintf("view-%s-%d.golden", mode, cols)
-			out := render(PrettyOptions{Plain: plain, Columns: cols}, viewResult(), 0)
+			out := render(PrettyOptions{Plain: plain, Columns: cols}, viewResult(), Hidden{})
 			golden(t, name, out)
 			if !strings.Contains(out, longURL) {
 				t.Errorf("%s: the long URL was cut:\n%s", name, out)
@@ -116,15 +116,15 @@ func TestPartsGolden(t *testing.T) {
 				b.WriteString(compact(f, w) + "\n")
 			}
 		}
-		b.WriteString(scorePanel(100, 0, map[engine.Severity]int{}, w) + "\n")
-		b.WriteString(scorePanel(42, 0, map[engine.Severity]int{engine.High: 1, engine.Low: 3}, w) + "\n")
-		b.WriteString(scorePanel(100, 15, map[engine.Severity]int{}, w) + "\n")
+		b.WriteString(scorePanel(100, Hidden{}, map[engine.Severity]int{}, w) + "\n")
+		b.WriteString(scorePanel(42, Hidden{}, map[engine.Severity]int{engine.High: 1, engine.Low: 3}, w) + "\n")
+		b.WriteString(scorePanel(100, Hidden{Baselined: 15}, map[engine.Severity]int{}, w) + "\n")
 		golden(t, fmt.Sprintf("parts-%d.golden", cols), b.String())
 	}
 }
 
 func TestPlainPrintsEveryFix(t *testing.T) {
-	out := render(PrettyOptions{Plain: true}, viewResult(), 0)
+	out := render(PrettyOptions{Plain: true}, viewResult(), Hidden{})
 	for _, want := range []string{
 		// medium and low get fixes too; a multi-line fix says there is more
 		"  fix: Turn off WP_DEBUG_LOG on production or point it outside the web root (see report)\n",
@@ -155,7 +155,7 @@ func TestPlainPrintsEveryFix(t *testing.T) {
 func TestQuietKeepsOneLineSummary(t *testing.T) {
 	ascii(t)
 	for _, plain := range []bool{true, false} {
-		out := render(PrettyOptions{Plain: plain, Quiet: true}, viewResult(), 0)
+		out := render(PrettyOptions{Plain: plain, Quiet: true}, viewResult(), Hidden{})
 		if !strings.Contains(out, "\nScore 12/100 - 1 critical, 2 high, 1 medium, 1 low, 1 info - 40 checks, 61 requests, 0s\n") {
 			t.Errorf("plain=%v: -q lost the summary line:\n%s", plain, out)
 		}
@@ -168,13 +168,27 @@ func TestQuietKeepsOneLineSummary(t *testing.T) {
 func TestBaselinedScoreSaysSo(t *testing.T) {
 	ascii(t)
 	clean := &engine.Result{Target: "https://a.test", Score: 100, Checks: 40}
-	plain := render(PrettyOptions{Plain: true}, clean, 15)
+	plain := render(PrettyOptions{Plain: true}, clean, Hidden{Baselined: 15})
 	if !strings.Contains(plain, "Score 100/100 after baseline (15 hidden) - no findings - 40 checks, 0s\n") {
 		t.Errorf("plain:\n%s", plain)
 	}
-	tty := render(PrettyOptions{}, clean, 15)
+	tty := render(PrettyOptions{}, clean, Hidden{Baselined: 15})
 	if !strings.Contains(tty, "100 / 100 after baseline (15 hidden)") || strings.Contains(tty, "baselined") {
 		t.Errorf("tty:\n%s", tty)
+	}
+
+	// Ignore entries alone are not a baseline: the score names what hid.
+	for h, want := range map[Hidden]string{
+		{Ignored: 8}:               "Score 100/100 after ignores (8 hidden) - ",
+		{Baselined: 1, Ignored: 8}: "Score 100/100 after baseline and ignores (9 hidden) - ",
+		{Baselined: 1}:             "Score 100/100 after baseline (1 hidden) - ",
+	} {
+		if out := render(PrettyOptions{Plain: true}, clean, h); !strings.Contains(out, want) {
+			t.Errorf("%+v: want %q in\n%s", h, want, out)
+		}
+		if tty := render(PrettyOptions{}, clean, h); !strings.Contains(tty, "100 / 100"+strings.TrimSuffix(strings.TrimPrefix(want, "Score 100/100"), " - ")) {
+			t.Errorf("%+v tty:\n%s", h, tty)
+		}
 	}
 }
 
@@ -210,7 +224,7 @@ func TestExplainHint(t *testing.T) {
 			var b bytes.Buffer
 			p := NewPretty(&b, &b, PrettyOptions{Plain: plain, Columns: 80, Command: "rhythm-tuner"})
 			p.Finding(c.f)
-			p.Summary(&engine.Result{Findings: []engine.Finding{c.f}, Score: 80}, "https://a.test", 0)
+			p.Summary(&engine.Result{Findings: []engine.Finding{c.f}, Score: 80}, "https://a.test", Hidden{})
 			if got := strings.Contains(b.String(), "run rhythm-tuner explain <id> for the full fix"); got != c.want {
 				t.Errorf("plain %v, fix %q: hint %v, want %v\n%s", plain, c.f.Fix, got, c.want, b.String())
 			}

@@ -58,7 +58,7 @@ func TestSummaryShowsIncomplete(t *testing.T) {
 		var b bytes.Buffer
 		p := NewPretty(&b, &b, PrettyOptions{Plain: plain})
 		p.SetStatus(partial)
-		p.Summary(partialResult(), "https://a.test", 0)
+		p.Summary(partialResult(), "https://a.test", Hidden{})
 		name := map[bool]string{true: "summary-partial-plain.golden", false: "summary-partial-tty.golden"}[plain]
 		golden(t, name, b.String())
 
@@ -84,7 +84,7 @@ func TestSummaryCompleteHasNoNotes(t *testing.T) {
 	p := NewPretty(&b, &b, PrettyOptions{Plain: true})
 	res := partialResult()
 	res.Errors = 3
-	p.Summary(res, "https://a.test", 0)
+	p.Summary(res, "https://a.test", Hidden{})
 	if strings.Contains(b.String(), "Incomplete") || strings.Contains(b.String(), "excludes") || !strings.Contains(b.String(), "3 errors") {
 		t.Errorf("got:\n%s", b.String())
 	}

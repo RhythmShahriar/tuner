@@ -217,7 +217,7 @@ func TestEveryFormatIsInert(t *testing.T) {
 			p.Finding(f)
 		}
 		p.Request(engine.RequestLog{Method: "GET", URL: "https://a.test/" + evil, Status: 200, Err: errors.New("read " + evil)})
-		p.Summary(res, res.Target, 0)
+		p.Summary(res, res.Target, Hidden{})
 		name := map[bool]string{true: "plain", false: "tty"}[plain]
 		if !strings.Contains(out.String(), "nginx") || !strings.Contains(errs.String(), "ERR read") {
 			t.Fatalf("%s: rendering lost content:\n%s\n%s", name, out.String(), errs.String())

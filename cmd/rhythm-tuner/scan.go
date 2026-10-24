@@ -863,7 +863,7 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 		Done: func(i int, t *scanrun.Target) {
 			if t.Result != nil && live {
 				views[i].SetStatus(report.Status(t.Status)) // a partial scan says so above its score
-				views[i].Summary(t.Result, shownTarget(t.Target), t.Suppressed)
+				views[i].Summary(t.Result, shownTarget(t.Target), report.Hidden{Baselined: t.Baselined, Ignored: t.Ignored})
 			}
 			outMu.Lock()
 			defer outMu.Unlock()

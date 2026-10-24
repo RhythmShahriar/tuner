@@ -388,11 +388,34 @@ func section(sev engine.Severity, n, width int) string {
 	return "  " + label + " " + rule
 }
 
+// Hidden counts the findings a scan hid: by a --baseline file and by
+// ignore entries in .tuner.yml.
+type Hidden struct {
+	Baselined, Ignored int
+}
+
+// text is what the score adds for h: " after baseline (2 hidden)", " after
+// ignores (8 hidden)" or " after baseline and ignores (10 hidden)", or "".
+func (h Hidden) text() string {
+	var by string
+	switch {
+	case h.Baselined > 0 && h.Ignored > 0:
+		by = "baseline and ignores"
+	case h.Baselined > 0:
+		by = "baseline"
+	case h.Ignored > 0:
+		by = "ignores"
+	default:
+		return ""
+	}
+	return fmt.Sprintf(" after %s (%d hidden)", by, h.Baselined+h.Ignored)
+}
+
 // Summary prints the grouped report (in plain mode a severity-sorted list
-// after the stream), the score panel and totals. suppressed counts
-// findings hidden by a baseline file. With Quiet it prints the findings
+// after the stream), the score panel and totals. hidden counts the
+// findings a baseline and ignores hid. With Quiet it prints the findings
 // and a one-line summary, so a quiet CI log still has the score.
-func (p *Pretty) Summary(res *engine.Result, target string, suppressed int) {
+func (p *Pretty) Summary(res *engine.Result, target string, hidden Hidden) {
 	clean := sanitized(*res)
 	res, target = &clean, SafeText(target)
 	p.clear()
@@ -434,7 +457,7 @@ func (p *Pretty) Summary(res *engine.Result, target string, suppressed int) {
 	if len(parts) == 0 {
 		parts = []string{"no findings"}
 	}
-	line := fmt.Sprintf("Score %s - %s - %s", scoreText(res.Score, suppressed), strings.Join(parts, ", "), strings.Join(stats, ", "))
+	line := fmt.Sprintf("Score %s - %s - %s", scoreText(res.Score, hidden), strings.Join(parts, ", "), strings.Join(stats, ", "))
 
 	if p.o.Plain || p.o.Quiet {
 		fmt.Fprintln(p.w)
@@ -458,7 +481,7 @@ func (p *Pretty) Summary(res *engine.Result, target string, suppressed int) {
 	for _, n := range p.status.Notes() {
 		fmt.Fprintf(p.w, "  %s\n", warn.Render("! "+n))
 	}
-	fmt.Fprintln(p.w, scorePanel(res.Score, suppressed, counts, p.width))
+	fmt.Fprintln(p.w, scorePanel(res.Score, hidden, counts, p.width))
 	fmt.Fprintf(p.w, "  %s\n", muted.Render(strings.Join(stats, " · ")))
 	for _, n := range notes {
 		fmt.Fprintf(p.w, "  %s\n", muted.Render("! "+n))
@@ -471,13 +494,10 @@ func (p *Pretty) Summary(res *engine.Result, target string, suppressed int) {
 		muted.Render("full report: "+p.command()+" scan "+target+" -o report.md"))
 }
 
-// scoreText is the score as the summary line shows it. After a baseline it
-// says so: a run with every finding baselined is not an all-clear.
-func scoreText(score, suppressed int) string {
-	if suppressed > 0 {
-		return fmt.Sprintf("%d/100 after baseline (%d hidden)", score, suppressed)
-	}
-	return fmt.Sprintf("%d/100", score)
+// scoreText is the score as the summary line shows it. After a baseline or
+// ignores it says so: a run with every finding hidden is not an all-clear.
+func scoreText(score int, hidden Hidden) string {
+	return fmt.Sprintf("%d/100", score) + hidden.text()
 }
 
 // sorted lists the findings most severe first, one line each, after the
@@ -532,8 +552,9 @@ func (p *Pretty) report(findings []engine.Finding) {
 }
 
 // scorePanel draws the Tune score: the number, a proportional bar and a
-// colored severity breakdown. suppressed findings were hidden by a baseline.
-func scorePanel(score, suppressed int, counts map[engine.Severity]int, width int) string {
+// colored severity breakdown. hidden findings were hidden by a baseline or
+// ignores.
+func scorePanel(score int, hidden Hidden, counts map[engine.Severity]int, width int) string {
 	color := ui.Ok
 	switch {
 	case score < 50:
@@ -551,8 +572,8 @@ func scorePanel(score, suppressed int, counts map[engine.Severity]int, width int
 
 	label := bold.Render("TUNE SCORE")
 	num := accent.Render(fmt.Sprint(score)) + muted.Render(" / 100")
-	if suppressed > 0 {
-		num += muted.Render(fmt.Sprintf(" after baseline (%d hidden)", suppressed))
+	if t := hidden.text(); t != "" {
+		num += muted.Render(t)
 	}
 	top := label + strings.Repeat(" ", max(1, barW-lipgloss.Width(label)-lipgloss.Width(num))) + num
 
