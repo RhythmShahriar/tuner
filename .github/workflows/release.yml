@@ -20,8 +20,99 @@ jobs:
     uses: RhythmShahriar/.github/.github/workflows/release-go.yml@master
     permissions:
       contents: write
-      id-token: write # keyless cosign over checksums.txt and the images
-      packages: write # push and sign ghcr.io/rhythmshahriar/tuner (.goreleaser.yaml dockers)
+      id-token: write # keyless cosign over checksums.txt
+
+  # The container image for `serve`, built here rather than by GoReleaser
+  # in release-go.yml: that workflow never logs in to ghcr.io and its
+  # token has no packages: write, so a push from it would fail after the
+  # GitHub release is out. This job uses the release's own signed linux
+  # binaries, so the image runs exactly what checksums.txt covers. A
+  # failure here leaves the release and the major tag as they are; rerun
+  # the job.
+  image:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # push ghcr.io/rhythmshahriar/tuner
+      id-token: write # keyless cosign over the image
+    env:
+      IMAGE: ghcr.io/rhythmshahriar/tuner
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.3
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # Same checks as the Action's install: the signature over
+      # checksums.txt, then each archive's SHA-256. The context gets the
+      # <os>/<arch>/rhythm-tuner layout the Dockerfile expects.
+      - name: Fetch and verify the linux binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rel="$RUNNER_TEMP/release"
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -D "$rel" \
+            -p checksums.txt -p checksums.txt.sigstore.json -p 'rhythm-tuner_linux_*.tar.gz'
+          cosign verify-blob "$rel/checksums.txt" \
+            --bundle "$rel/checksums.txt.sigstore.json" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity-regexp '^https://github\.com/RhythmShahriar/\.github/\.github/workflows/release-go\.yml@' \
+            --certificate-github-workflow-repository "$GITHUB_REPOSITORY" \
+            --certificate-github-workflow-ref "refs/tags/$TAG"
+          (cd "$rel" && sha256sum --ignore-missing --strict -c checksums.txt)
+          for arch in amd64 arm64; do
+            [ -f "$rel/rhythm-tuner_linux_$arch.tar.gz" ] || { echo "::error::the release has no linux/$arch archive"; exit 1; }
+            mkdir -p "ctx/linux/$arch"
+            tar -xzf "$rel/rhythm-tuner_linux_$arch.tar.gz" -C "ctx/linux/$arch" rhythm-tuner
+          done
+          cp Dockerfile ctx/Dockerfile
+      # :<version> always. :v<major> and :latest move only for a stable
+      # tag that is the newest of its line (and of all, for latest), like
+      # the major-tag job, so a patch to an older line doesn't take them.
+      - name: Build, push and sign
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ver=${TAG#v}
+          major=${TAG%%.*}
+          tags=(-t "$IMAGE:$ver")
+          if [[ "$TAG" != *-* ]]; then
+            stable() { gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$1" --jq '.[].ref' |
+              sed 's|^refs/tags/||' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1; }
+            [ "$(stable "$major.")" = "$TAG" ] && tags+=(-t "$IMAGE:$major")
+            [ "$(stable v)" = "$TAG" ] && tags+=(-t "$IMAGE:latest")
+          fi
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker buildx build ctx --platform linux/amd64,linux/arm64 --push \
+            "${tags[@]}" \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.version=$ver" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label org.opencontainers.image.licenses=AGPL-3.0-only \
+            --metadata-file meta.json
+          digest=$(jq -r '."containerimage.digest"' meta.json)
+          case "$digest" in
+            sha256:*) ;;
+            *) echo "::error::buildx reported no image digest"; exit 1 ;;
+          esac
+          # One signature on the multi-arch index covers every tag above.
+          # Verify with:
+          #   cosign verify ghcr.io/rhythmshahriar/tuner:<version> \
+          #     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+          #     --certificate-identity https://github.com/RhythmShahriar/tuner/.github/workflows/release.yml@refs/tags/v<version>
+          cosign sign --yes "$IMAGE@$digest"
+          docker logout ghcr.io
+          {
+            echo "Pushed and signed $IMAGE@$digest as:"
+            printf '%s\n' "${tags[@]}" | grep -v '^-t$' | sed 's/^/- /'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # Moves the major tag (v0 for v0.x) that `uses: RhythmShahriar/tuner@v0`
   # follows. Neither a prerelease nor a patch to an older line (once a

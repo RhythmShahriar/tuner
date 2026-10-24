@@ -1,18 +1,19 @@
 # Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
 # SPDX-License-Identifier: AGPL-3.0-only
 
-# Builds the container image with GoReleaser in snapshot mode (no push)
-# and smoke-tests it, so a change to the Dockerfile or the goreleaser
-# docker config is caught before a release. The real multi-arch push and
-# signing happen on a tag through release.yml. Every uses: is pinned by
-# SHA (make pins).
+# Builds the container image for both architectures (no push) and
+# smoke-tests it, so a change to the Dockerfile or the release image job's
+# layout is caught before a release. The real multi-arch push and signing
+# happen on a tag in release.yml's image job, from the same Dockerfile and
+# context layout (make image-context). Every uses: is pinned by SHA (make
+# pins).
 name: image
 on:
   push:
     branches: [master]
-    paths: [Dockerfile, .goreleaser.yaml, .github/workflows/image.yml]
+    paths: [Dockerfile, Makefile, .github/workflows/image.yml, .github/workflows/release.yml]
   pull_request:
-    paths: [Dockerfile, .goreleaser.yaml, .github/workflows/image.yml]
+    paths: [Dockerfile, Makefile, .github/workflows/image.yml, .github/workflows/release.yml]
   workflow_dispatch:
 
 permissions:
@@ -30,14 +31,13 @@ jobs:
           go-version-file: go.mod
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      # --snapshot builds the images from .goreleaser.yaml for both
-      # architectures without pushing. --skip=sign leaves cosign out: no
-      # signing happens off a real tag.
-      - name: Build the image (snapshot)
-        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
-        with:
-          version: v2.18.3
-          args: release --snapshot --clean --skip=sign,archive,announce,publish
+      # Both architectures must build; only amd64 is loaded to run below.
+      - name: Build the image
+        run: |
+          set -euo pipefail
+          make image-context IMAGE_VERSION=snapshot
+          docker buildx build --platform linux/arm64 dist/image
+          docker buildx build --platform linux/amd64 --load -t tuner:smoke dist/image
       # /v0/health answers. With no TUNER_SERVE_TOKEN the container
       # refuses to serve on 0.0.0.0. Both need the serve command, which is
       # built in another lane (vulns-service V10); until it lands the
@@ -46,10 +46,8 @@ jobs:
       - name: Smoke-test the image
         run: |
           set -uo pipefail
-          image=$(docker images --format '{{.Repository}}:{{.Tag}}' \
-            | grep '^ghcr.io/rhythmshahriar/tuner:' | grep -- '-amd64$' | head -n1)
-          [ -n "$image" ] || { echo "::error::no amd64 image was built"; exit 1; }
-          echo "built $image"
+          image=tuner:smoke
+          docker run --rm "$image" --version
 
           if ! docker run --rm --entrypoint /usr/local/bin/rhythm-tuner "$image" serve --help >/dev/null 2>&1; then
             echo "::notice::this build has no serve command yet (vulns-service V10); skipping the health and token checks"

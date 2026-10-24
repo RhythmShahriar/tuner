@@ -28,61 +28,11 @@ archives:
 checksum:
   name_template: checksums.txt
 
-# One image per architecture on distroless (see Dockerfile), stitched into
-# a multi-arch manifest below. Pushed only on a real release; CI builds
-# them with --snapshot and never pushes (.github/workflows/image.yml).
-dockers:
-  - use: buildx
-    goos: linux
-    goarch: amd64
-    dockerfile: Dockerfile
-    image_templates:
-      - "ghcr.io/rhythmshahriar/tuner:{{ .Version }}-amd64"
-    build_flag_templates:
-      - "--platform=linux/amd64"
-      - "--label=org.opencontainers.image.source=https://github.com/RhythmShahriar/tuner"
-      - "--label=org.opencontainers.image.version={{ .Version }}"
-      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
-      - "--label=org.opencontainers.image.licenses=AGPL-3.0-only"
-  - use: buildx
-    goos: linux
-    goarch: arm64
-    dockerfile: Dockerfile
-    image_templates:
-      - "ghcr.io/rhythmshahriar/tuner:{{ .Version }}-arm64"
-    build_flag_templates:
-      - "--platform=linux/arm64"
-      - "--label=org.opencontainers.image.source=https://github.com/RhythmShahriar/tuner"
-      - "--label=org.opencontainers.image.version={{ .Version }}"
-      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
-      - "--label=org.opencontainers.image.licenses=AGPL-3.0-only"
-
-docker_manifests:
-  - name_template: "ghcr.io/rhythmshahriar/tuner:{{ .Version }}"
-    image_templates:
-      - "ghcr.io/rhythmshahriar/tuner:{{ .Version }}-amd64"
-      - "ghcr.io/rhythmshahriar/tuner:{{ .Version }}-arm64"
-  # A stable release also moves the floating major tag and :latest.
-  - name_template: "ghcr.io/rhythmshahriar/tuner:v{{ .Major }}"
-    skip_push: auto # goreleaser skips this for a prerelease
-    image_templates:
-      - "ghcr.io/rhythmshahriar/tuner:{{ .Version }}-amd64"
-      - "ghcr.io/rhythmshahriar/tuner:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/rhythmshahriar/tuner:latest"
-    skip_push: auto
-    image_templates:
-      - "ghcr.io/rhythmshahriar/tuner:{{ .Version }}-amd64"
-      - "ghcr.io/rhythmshahriar/tuner:{{ .Version }}-arm64"
-
-# Keyless Sigstore signature over each image's manifest, like the one over
-# checksums.txt. Verify with the same identity:
-#   cosign verify ghcr.io/rhythmshahriar/tuner:<version> \
-#     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-#     --certificate-identity-regexp '^https://github\.com/RhythmShahriar/\.github/\.github/workflows/release-go\.yml@'
-docker_signs:
-  - cmd: cosign
-    artifacts: manifests
-    args: [sign, "--yes", "${artifact}@${digest}"]
+# The container image is not built here. The shared release-go.yml runs
+# GoReleaser with no registry login and no packages: write, so a docker
+# section would fail the publish after the GitHub release exists. The
+# image job in .github/workflows/release.yml builds it from this release's
+# signed linux archives, pushes it to ghcr.io and signs it.
 
 # A tag like v0.4.0-rc1 is published as a prerelease, which GitHub never
 # reports as "latest", so rhythm update and the installers don't offer it.

@@ -2,10 +2,9 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 
 # The Tuner container image, for `rhythm-tuner serve` (the HTTP API, PRD
-# v0.4). It carries the GoReleaser-built static binary on a distroless
-# base, so there is no shell and no package manager in the image. One
-# image per architecture; GoReleaser stitches them into a multi-arch
-# manifest at ghcr.io/rhythmshahriar/tuner.
+# v0.4). It carries the release's static binary on a distroless base, so
+# there is no shell and no package manager in the image. One multi-arch
+# image (linux/amd64 and linux/arm64) at ghcr.io/rhythmshahriar/tuner.
 #
 # The binary is CGO-free and static, so distroless static is enough.
 # Non-root (the distroless "nonroot" user, uid 65532). The default
@@ -13,14 +12,17 @@
 # without TUNER_SERVE_TOKEN, so an image run with no token stops at once
 # instead of serving unauthenticated.
 #
-# This Dockerfile is the context GoReleaser's dockers build: it copies the
-# already-built rhythm-tuner from the build context, so there is no Go
-# toolchain step here. To build it by hand for one architecture:
-#   go build -o rhythm-tuner ./cmd/rhythm-tuner
-#   docker build -t rhythm-tuner .
+# There is no Go toolchain step: the context holds the already-built
+# binary at <os>/<arch>/rhythm-tuner, and buildx picks the one for the
+# platform it builds. On a release the image job in
+# .github/workflows/release.yml fills the context from the signed release
+# archives. To build it by hand:
+#   make image-context
+#   docker buildx build --platform linux/amd64 --load -t rhythm-tuner dist/image
 FROM gcr.io/distroless/static-debian12:nonroot
 
-COPY rhythm-tuner /usr/local/bin/rhythm-tuner
+ARG TARGETPLATFORM
+COPY ${TARGETPLATFORM}/rhythm-tuner /usr/local/bin/rhythm-tuner
 
 USER nonroot:nonroot
 EXPOSE 8080

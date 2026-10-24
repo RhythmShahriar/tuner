@@ -12,7 +12,7 @@ PIN_FILES ?= $(wildcard .github/workflows/*.yml .github/workflows/*.yaml action.
 #   checks-pack.yml        maintained with the check pack; remove once pinned
 PIN_EXEMPT := release-go\.yml@master$$|^\.github/workflows/checks-pack\.yml:
 
-.PHONY: build test test-all testbed-fast testbed testbed-down testbed-config benchmark benchmark-test vuln checks-lint lint fmt check hooks pack pins actionlint init-ci-lint release-check
+.PHONY: build test test-all testbed-fast testbed testbed-down testbed-config benchmark benchmark-test vuln checks-lint lint fmt check hooks pack pins actionlint init-ci-lint release-check image-context
 
 build: ## build bin/rhythm-tuner
 	go build -o bin/rhythm-tuner ./cmd/rhythm-tuner
@@ -102,3 +102,16 @@ init-ci-lint: ## actionlint the workflows that rhythm tuner init ci generates
 
 release-check: ## validate .goreleaser.yaml with the pinned GoReleaser
 	$(GORELEASER) check
+
+# The Dockerfile copies <os>/<arch>/rhythm-tuner from its context, the
+# layout buildx's TARGETPLATFORM names. CI (image.yml) builds from this;
+# a release fills the same layout from its signed archives instead.
+IMAGE_VERSION ?= dev
+image-context: ## build the linux binaries and Dockerfile into dist/image for docker buildx
+	rm -rf dist/image
+	for arch in amd64 arm64; do \
+		CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath \
+			-ldflags "-s -w -X main.version=$(IMAGE_VERSION)" \
+			-o dist/image/linux/$$arch/rhythm-tuner ./cmd/rhythm-tuner || exit 1; \
+	done
+	cp Dockerfile dist/image/Dockerfile
