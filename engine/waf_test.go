@@ -5,6 +5,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -79,6 +80,9 @@ func TestBlockedHomeMarksScanPartial(t *testing.T) {
 			if baseline {
 				t.Error("baseline reported behind a block page")
 			}
+			if b, _ := json.Marshal(res); !res.Soft404Unknown || !strings.Contains(string(b), `"soft_404_unknown":true`) {
+				t.Errorf("soft-404 not marked unknown: %s", b)
+			}
 			if res.Checks != 1 || res.Requests < 2 {
 				t.Errorf("scan did not continue: %d checks, %d requests", res.Checks, res.Requests)
 			}
@@ -107,6 +111,9 @@ match: {all: [{status: 200}]}
 	if baseline {
 		t.Error("baseline reported although the soft-404 probe hit a block page")
 	}
+	if !res.Soft404Unknown || res.Soft404 {
+		t.Errorf("soft_404 %v unknown %v, want unknown", res.Soft404, res.Soft404Unknown)
+	}
 }
 
 // Negatives: a plain 403 on one path and weak markers on normal pages
@@ -124,6 +131,9 @@ func TestNormalRefusalsStayComplete(t *testing.T) {
 	if !res.Complete || res.BlockedBy != "" || res.StoppedBy != "" || len(res.Warnings) != 0 || !baseline {
 		t.Errorf("complete %v blocked_by %q stopped_by %q warnings %q baseline %v", res.Complete, res.BlockedBy, res.StoppedBy, res.Warnings, baseline)
 	}
+	if b, _ := json.Marshal(res); res.Soft404Unknown || strings.Contains(string(b), "soft_404_unknown") {
+		t.Errorf("soft-404 marked unknown on a normal site: %s", b)
+	}
 }
 
 // Behind Incapsula or Wordfence the origin's own 403s carry the weak
@@ -136,7 +146,10 @@ func TestWeakMarkersOnCheckRefusalsStayComplete(t *testing.T) {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/{$}", func(w http.ResponseWriter, _ *http.Request) { weak(w); w.Write([]byte("<html>home</html>")) })
-	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) { weak(w); http.Error(w, "Forbidden", http.StatusForbidden) })
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		weak(w)
+		http.Error(w, "Forbidden", http.StatusForbidden)
+	})
 	c := mustParse(t, `
 id: t-many
 name: many

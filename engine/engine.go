@@ -190,15 +190,19 @@ type Result struct {
 	Target      string             `json:"target"`
 	Fingerprint fingerprint.Result `json:"fingerprint"`
 	Soft404     bool               `json:"soft_404"`
-	TLS         *matchers.TLSInfo  `json:"tls,omitempty"`
-	Score       int                `json:"score"`
-	Checks      int                `json:"checks"`
-	Requests    int64              `json:"requests"`
-	Errors      int64              `json:"errors"`
-	Throttled   int64              `json:"throttled"` // 429/503 replies that made Tuner slow down
-	Duration    time.Duration      `json:"-"`
-	Findings    []Finding          `json:"findings"`
-	Warnings    []string           `json:"warnings,omitempty"`
+	// Soft404Unknown is set when the soft-404 probe hit a block page or
+	// the home page failed: Soft404 is then false but says nothing about
+	// the site, whose 404 behaviour could not be measured.
+	Soft404Unknown bool              `json:"soft_404_unknown,omitempty"`
+	TLS            *matchers.TLSInfo `json:"tls,omitempty"`
+	Score          int               `json:"score"`
+	Checks         int               `json:"checks"`
+	Requests       int64             `json:"requests"`
+	Errors         int64             `json:"errors"`
+	Throttled      int64             `json:"throttled"` // 429/503 replies that made Tuner slow down
+	Duration       time.Duration     `json:"-"`
+	Findings       []Finding         `json:"findings"`
+	Warnings       []string          `json:"warnings,omitempty"`
 
 	// Complete is true when every planned request ran. StoppedBy says why
 	// not: interrupted, max-time, waf, home-status or budget.
@@ -300,11 +304,13 @@ func (s *Scanner) Scan(ctx context.Context, target string, h Hooks) (*Result, er
 		}
 	})
 
-	res.Soft404 = ss.soft404(ctx)
 	// The baseline hook tells the user whether the server sends real 404s.
 	// Behind a block page that answer is the firewall's, not the site's,
-	// so it is left out rather than reported wrong.
-	if res.StoppedBy == "" && !ss.baselineBlocked(ctx) {
+	// so it is left out rather than reported wrong, in JSON too.
+	if res.StoppedBy != "" || ss.baselineBlocked(ctx) {
+		res.Soft404Unknown = true
+	} else {
+		res.Soft404 = ss.soft404(ctx)
 		ss.emit(func() {
 			if h.Baseline != nil {
 				h.Baseline(res.Soft404)
