@@ -6,6 +6,7 @@ package fingerprint
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -115,5 +116,40 @@ func TestPHPBuildCleaned(t *testing.T) {
 	v, build, _ := PHPVersion(h)
 	if v != "8.1.2" || strings.ContainsRune(build, 0x1b) || build != "8.1.2-1ubuntu�[2J" {
 		t.Errorf("got %q %q", v, build)
+	}
+}
+
+// PHP shows only with evidence. WordPress alone never brings a version.
+func TestDetectPHPEvidence(t *testing.T) {
+	home, _ := url.Parse("http://127.0.0.1/")
+	php, _ := url.Parse("http://127.0.0.1/index.php")
+	wp := []byte(`<meta name="generator" content="WordPress 6.9.3" />`)
+	cases := []struct {
+		name    string
+		url     *url.URL
+		header  http.Header
+		body    []byte
+		has     bool
+		version string
+		source  string
+		str     string
+	}{
+		{"python static server", home, http.Header{"Server": {"SimpleHTTP/0.6 Python/3.12.3"}, "Content-Type": {"text/html"}}, []byte("<html>hi</html>"), false, "", "", "SimpleHTTP/0.6 Python/3.12.3"},
+		{"express", home, http.Header{"X-Powered-By": {"Express"}}, []byte("x"), false, "", "", "unknown"},
+		{"version header", home, http.Header{"X-Powered-By": {"PHP/8.2.1"}}, []byte("x"), true, "8.2.1", "x-powered-by /", "PHP 8.2.1"},
+		{"bare header", home, http.Header{"X-Powered-By": {"PHP"}}, []byte("x"), true, "", "x-powered-by /", "PHP (version unknown)"},
+		{"session cookie", home, http.Header{"Set-Cookie": {"PHPSESSID=abc; path=/"}}, []byte("x"), true, "", "cookie", "PHP (version unknown)"},
+		{"laravel cookie", home, http.Header{"Set-Cookie": {"laravel_session=abc; path=/"}}, []byte("x"), true, "", "cookie", "Laravel · PHP (version unknown)"},
+		{"executed php home", php, http.Header{"Content-Type": {"text/html; charset=UTF-8"}}, []byte("<html>shop</html>"), true, "", "probe", "PHP (version unknown)"},
+		{"php source served as a file", php, http.Header{"Content-Type": {"text/html"}}, []byte("<?php echo 1;"), false, "", "", "unknown"},
+		{"php file with a download type", php, http.Header{"Content-Type": {"application/x-httpd-php"}}, []byte("x"), false, "", "", "unknown"},
+		{"wordpress without a php header", home, http.Header{}, wp, true, "", "", "WordPress 6.9.3 · PHP (version unknown)"},
+		{"wordpress with a php header", home, http.Header{"X-Powered-By": {"PHP/8.1.2"}}, wp, true, "8.1.2", "x-powered-by /", "WordPress 6.9.3 · PHP 8.1.2"},
+	}
+	for _, c := range cases {
+		got := Detect(&matchers.Response{URL: c.url, Status: 200, Header: c.header, Body: c.body})
+		if got.Has("php") != c.has || got.PHP != c.version || got.PHPSource != c.source || got.String() != c.str {
+			t.Errorf("%s: php %v %q source %q string %q, want %v %q %q %q", c.name, got.Has("php"), got.PHP, got.PHPSource, got.String(), c.has, c.version, c.source, c.str)
+		}
 	}
 }

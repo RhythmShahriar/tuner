@@ -6,6 +6,7 @@ package engine
 import (
 	"context"
 	"regexp"
+	"slices"
 	"sync"
 
 	"github.com/RhythmShahriar/tuner/fingerprint"
@@ -32,6 +33,11 @@ var (
 // page didn't state it, stopping at the first that does. Responses go
 // through the scan cache, so checks reuse them. It only reads fp, so it can
 // run alongside resolveVersions; the caller stores what it finds.
+//
+// It runs only when the home page already pointed at PHP (WordPress, a
+// session cookie), so a site with no PHP signal costs no extra requests.
+// A PHP session cookie on a probed endpoint confirms PHP without a
+// version: source is then "probe".
 func (ss *session) probePHP(ctx context.Context, fp *fingerprint.Result) (version, build, source string) {
 	if fp.PHP != "" || !fp.Has("php") {
 		return "", "", ""
@@ -51,8 +57,11 @@ func (ss *session) probePHP(ctx context.Context, fp *fingerprint.Result) (versio
 		if v, b, header := fingerprint.PHPVersion(r.Header); v != "" {
 			return v, b, header + " " + p
 		}
+		if source == "" && slices.ContainsFunc(r.Header.Values("Set-Cookie"), fingerprint.PHPCookie) {
+			source = "probe"
+		}
 	}
-	return "", "", ""
+	return "", "", source
 }
 
 // resolveVersions fills in WordPress, plugin and theme versions from the

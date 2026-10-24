@@ -240,8 +240,11 @@ func (s *Scanner) Scan(ctx context.Context, target string, h Hooks) (*Result, er
 		vwg.Go(func() { ss.resolveVersions(ctx, &res.Fingerprint) })
 	}
 	vwg.Wait()
-	if php != "" {
+	switch {
+	case php != "":
 		res.Fingerprint.PHP, res.Fingerprint.PHPBuild, res.Fingerprint.PHPSource = php, phpBuild, phpSource
+	case phpSource != "" && res.Fingerprint.PHPSource == "":
+		res.Fingerprint.PHPSource = phpSource
 	}
 	ss.emit(func() {
 		if h.Fingerprint != nil {

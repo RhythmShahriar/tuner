@@ -21,7 +21,7 @@ type Result struct {
 	WordPress string   `json:"wordpress_version,omitempty"`
 	PHP       string   `json:"php_version,omitempty"`
 	PHPBuild  string   `json:"php_build,omitempty"`  // full build string when it carries a distro suffix, e.g. 7.4.3-4ubuntu2.19
-	PHPSource string   `json:"php_source,omitempty"` // where the PHP version came from, e.g. "x-powered-by /wp-login.php", cookie, probe, php on PATH, --php <path>
+	PHPSource string   `json:"php_source,omitempty"` // evidence for PHP: "<header> <path>" (e.g. "x-powered-by /wp-login.php"), cookie, probe, php on PATH, --php <path>; empty when only WordPress implies it
 	Server    string   `json:"server,omitempty"`
 
 	Components []Component `json:"components,omitempty"`
@@ -105,7 +105,11 @@ func (r Result) String() string {
 		parts = append(parts, "Laravel")
 	}
 	if r.Has("php") {
-		parts = append(parts, strings.TrimSpace("PHP "+r.PHP))
+		if r.PHP == "" {
+			parts = append(parts, "PHP (version unknown)")
+		} else {
+			parts = append(parts, "PHP "+r.PHP)
+		}
 	}
 	if r.Server != "" {
 		parts = append(parts, r.Server)
@@ -120,6 +124,7 @@ var (
 	wpGenerator = regexp.MustCompile(`<meta name="generator" content="WordPress ([0-9.]+)"`)
 	wpBlockCSS  = regexp.MustCompile(`wp-includes/css/dist/block-library/[^"'?]*\?ver=([0-9]+\.[0-9]+(?:\.[0-9]+)?)`)
 	phpPowered  = regexp.MustCompile(`PHP/([0-9][0-9.]*)([^\s,;]*)`)
+	phpBare     = regexp.MustCompile(`(?i)(?:^|[\s,;])PHP(?:$|[\s,;/])`)
 	wpAsset     = regexp.MustCompile(`/wp-content/(plugins|themes)/([A-Za-z0-9_-]+)/[^"'\s<>]*`)
 	assetVer    = regexp.MustCompile(`(?:\?|&|&amp;|&#038;)ver=([0-9][0-9A-Za-z.-]*)`)
 )
@@ -149,26 +154,62 @@ func Detect(r *matchers.Response) Result {
 		res.Components = components(body, res.WordPress)
 	}
 
+	// PHP is only claimed with evidence, strongest first: a PHP version
+	// header, a bare "X-Powered-By: PHP", a PHP session cookie, or a .php
+	// home page the server ran. WordPress alone adds PHP without a version
+	// or source, shown as "PHP (version unknown)".
+	if v, build, header := PHPVersion(r.Header); v != "" {
+		add("php")
+		res.PHP, res.PHPBuild, res.PHPSource = v, build, header+" "+homePath(r)
+	} else if phpBare.MatchString(r.Header.Get("X-Powered-By")) {
+		add("php")
+		res.PHPSource = "x-powered-by " + homePath(r)
+	}
 	for _, c := range r.Header.Values("Set-Cookie") {
 		switch {
 		case strings.HasPrefix(c, "laravel_session="):
 			add("laravel")
-		case strings.HasPrefix(c, "PHPSESSID="):
-			add("php")
+			res.setPHP("cookie")
+		case PHPCookie(c):
+			res.setPHP("cookie")
 		}
 	}
-
-	if v, build, header := PHPVersion(r.Header); v != "" {
-		add("php")
-		res.PHP, res.PHPBuild, res.PHPSource = v, build, header+" "+homePath(r)
+	if ExecutedPHP(r) {
+		res.setPHP("probe")
 	}
-	if res.Has("wordpress") || res.Has("laravel") {
+	if res.Has("wordpress") {
 		add("php")
 	}
 	if s := r.Header.Get("Server"); s != "" {
 		res.Server = matchers.Snippet([]byte(s)) // cleans control bytes too
 	}
 	return res
+}
+
+// setPHP records PHP as detected by source, unless a stronger source
+// already did.
+func (r *Result) setPHP(source string) {
+	if !r.Has("php") {
+		r.Tech = append(r.Tech, "php")
+	}
+	if r.PHPSource == "" {
+		r.PHPSource = source
+	}
+}
+
+// PHPCookie reports whether a Set-Cookie value starts PHP's default
+// session cookie.
+func PHPCookie(setCookie string) bool { return strings.HasPrefix(setCookie, "PHPSESSID=") }
+
+// ExecutedPHP reports whether r is a .php URL the server ran rather than
+// served as a file: a 2xx reply whose body is not PHP source. A static
+// server hands back the source (or a 404), so it never counts.
+func ExecutedPHP(r *matchers.Response) bool {
+	if r.URL == nil || !strings.HasSuffix(strings.ToLower(r.URL.Path), ".php") || r.Status < 200 || r.Status > 299 {
+		return false
+	}
+	ct := strings.ToLower(r.Header.Get("Content-Type"))
+	return strings.HasPrefix(ct, "text/html") && !bytes.Contains(r.Body, []byte("<?php"))
 }
 
 func homePath(r *matchers.Response) string {

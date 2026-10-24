@@ -7,9 +7,12 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"sync"
 	"testing"
+
+	"github.com/RhythmShahriar/tuner/fingerprint"
 )
 
 // A page cache strips X-Powered-By from the home page; uncacheable PHP
@@ -67,6 +70,15 @@ func TestProbePHP(t *testing.T) {
 			home: func(w http.ResponseWriter) { w.Write([]byte("<html>static</html>")) },
 		},
 		{
+			name: "wordpress, PHP session cookie on a probe",
+			home: func(w http.ResponseWriter) { w.Write([]byte(`<link href="/wp-content/plugins/x/y.css">`)) },
+			headers: map[string]http.Header{
+				"/wp-admin/admin-ajax.php": {"Set-Cookie": {"PHPSESSID=abc; path=/"}},
+			},
+			source: "probe",
+			probed: []string{"/xmlrpc.php", "/wp-admin/admin-ajax.php", "/wp-login.php"},
+		},
+		{
 			name:   "hidden everywhere",
 			home:   func(w http.ResponseWriter) { w.Write([]byte(`<link href="/wp-content/plugins/x/y.css">`)) },
 			probed: []string{"/xmlrpc.php", "/wp-admin/admin-ajax.php", "/wp-login.php"},
@@ -103,6 +115,49 @@ func TestProbePHP(t *testing.T) {
 			}
 			if !slices.Equal(probed, tc.probed) {
 				t.Errorf("probed %v, want %v", probed, tc.probed)
+			}
+		})
+	}
+}
+
+type phpSpy struct{ fp fingerprint.Result }
+
+func (s *phpSpy) Advise(_ context.Context, _ *url.URL, fp fingerprint.Result) ([]Finding, []string) {
+	s.fp = fp
+	return nil, nil
+}
+
+// A static server never shows PHP; a WordPress page with no PHP header
+// shows PHP with no version, so the advisor cannot match PHP CVEs.
+func TestRemotePHPNeedsEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		has        bool
+		str        string
+	}{
+		{"static", "<html>static</html>", false, "unknown"},
+		{"wordpress", `<meta name="generator" content="WordPress 6.4.3" />`, true, "WordPress 6.4.3 · PHP (version unknown)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/" {
+					w.Write([]byte(tc.body))
+					return
+				}
+				http.NotFound(w, r)
+			}))
+			defer srv.Close()
+			spy := &phpSpy{}
+			res, err := New(nil, Options{HTTPClient: srv.Client(), Advisor: spy}).Scan(context.Background(), srv.URL, Hooks{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			fp := res.Fingerprint
+			if fp.Has("php") != tc.has || fp.PHP != "" || fp.PHPSource != "" || fp.String() != tc.str {
+				t.Errorf("fingerprint %+v, string %q", fp, fp.String())
+			}
+			if spy.fp.PHP != "" {
+				t.Errorf("advisor saw PHP %q", spy.fp.PHP)
 			}
 		})
 	}
