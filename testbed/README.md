@@ -8,7 +8,8 @@ real secret and no plugin holds a working exploit.
 ## Layout
 
 - `docker-compose.yml`  WordPress (php-fpm) behind nginx and Apache, a
-  subfolder install and a WAF-challenge front. Images are pinned by tag.
+  subfolder install and a WAF-challenge front. Images are pinned by tag
+  and digest.
 - `ground-truth.yaml`   what is really installed and really exposed. The
   benchmark scores every tool against this. Change the testbed and change
   this in the same commit.
@@ -17,6 +18,10 @@ real secret and no plugin holds a working exploit.
 - `wp/init.sh`          seeds the broken state on first boot: the exposed
   files, a modified core file and an uploads webshell marker.
 - `nginx/`, `apache/`   the two front ends, both deliberately open.
+- `validate-config.sh`  checks `rhythm-tuner fix` bundles with nginx and
+  Apache (`make testbed-config`); `validate-config-test.sh` proves it
+  fails on the broken bundles in `config-fixtures/`
+  (`make testbed-config-test`). Ports: 20256 for the live Apache check.
 - `bench/`              the benchmark (build tag `testbed`). It builds
   Tuner, runs each tool once per site and writes `docs/benchmark.md`.
 

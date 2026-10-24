@@ -12,7 +12,7 @@ PIN_FILES ?= $(wildcard .github/workflows/*.yml .github/workflows/*.yaml action.
 #   checks-pack.yml        maintained with the check pack; remove once pinned
 PIN_EXEMPT := release-go\.yml@master$$|^\.github/workflows/checks-pack\.yml:
 
-.PHONY: build test test-all testbed-fast testbed testbed-down testbed-config benchmark benchmark-test vuln checks-lint lint fmt check hooks pack pins actionlint init-ci-lint release-check image-context
+.PHONY: build test test-all testbed-fast testbed testbed-down testbed-config testbed-config-test benchmark benchmark-test vuln checks-lint lint fmt check hooks pack pins actionlint init-ci-lint release-check image-context
 
 build: ## build bin/rhythm-tuner
 	go build -o bin/rhythm-tuner ./cmd/rhythm-tuner
@@ -44,14 +44,18 @@ benchmark-test: ## test the benchmark scoring without Docker or the network
 	go test -tags testbed ./testbed/bench/
 
 # Validates the server-config bundles from `rhythm-tuner fix` (checks-pack
-# C6) against the testbed's nginx and Apache with `nginx -t` and
-# `apachectl -t`. Skips cleanly until C6 ships the fix subcommand.
-testbed-config: ## validate C6 server-config bundles with nginx -t and apachectl -t
+# C6) against the testbed's nginx and Apache: nginx -t, then httpd -t with
+# the bundle included in the docroot's <Directory> and a live request with
+# it as .htaccess. Skips cleanly until C6 ships the fix subcommand.
+testbed-config: ## validate C6 server-config bundles against nginx and Apache (needs Docker)
 	@if go run ./cmd/rhythm-tuner fix --help >/dev/null 2>&1; then \
 		sh testbed/validate-config.sh; \
 	else \
 		echo "testbed-config: rhythm-tuner fix is not in this build yet (checks-pack C6); skipped"; \
 	fi
+
+testbed-config-test: ## prove testbed-config passes good bundles and fails broken ones (needs Docker)
+	sh testbed/validate-config-test.sh
 
 vuln: ## report known vulnerabilities in the code paths Tuner calls
 	$(GOVULNCHECK) ./...
