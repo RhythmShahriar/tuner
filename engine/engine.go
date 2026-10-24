@@ -380,7 +380,7 @@ func (ss *session) run(ctx context.Context, c *Check, p string) (Finding, bool) 
 	if v != nil {
 		return Finding{}, false
 	}
-	ok, ev := c.Match.Match(r, func() bool { return ss.isBaseline(ctx, p, r) })
+	ok, ev := c.Match.Match(r, func() bool { return ss.isBaseline(ctx, c, p, r) })
 	if !ok {
 		return Finding{}, false
 	}

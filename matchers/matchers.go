@@ -314,6 +314,22 @@ func (b *Block) Compile() error {
 	return nil
 }
 
+// Content reports whether the block tests what the body holds (regex,
+// words or magic), so a hit proves more than a status code. The soft-404
+// filter trusts such a hit unless the server's page for a missing path
+// passes the same tests. not_regex does not count: it only rules bodies out.
+func (b *Block) Content() bool {
+	content := func(m Matcher) bool { return m.re != nil || len(m.Words) > 0 || m.magic != nil }
+	return slices.ContainsFunc(b.All, content) || slices.ContainsFunc(b.Any, content)
+}
+
+// NeedsBaseline reports whether any matcher in the block uses not_baseline,
+// so matching it may fetch a soft-404 probe.
+func (b *Block) NeedsBaseline() bool {
+	nb := func(m Matcher) bool { return m.NotBaseline }
+	return slices.ContainsFunc(b.All, nb) || slices.ContainsFunc(b.Any, nb)
+}
+
 // Match evaluates the block. Baseline comparisons run last so a soft-404
 // probe is only requested when everything else already matched.
 func (b *Block) Match(r *Response, isBaseline func() bool) (bool, []string) {

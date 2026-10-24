@@ -79,3 +79,26 @@ func TestMaskCleansKeptPrefix(t *testing.T) {
 		t.Errorf("Mask kept ESC: %q", got)
 	}
 }
+
+func TestBlockContentAndNeedsBaseline(t *testing.T) {
+	for _, tc := range []struct {
+		b                Block
+		content, needsBL bool
+	}{
+		{Block{All: []Matcher{{Status: Ints{200}}, {NotBaseline: true}}}, false, true},
+		{Block{All: []Matcher{{Status: Ints{200}}, {Regex: "^A="}}}, true, false},
+		{Block{All: []Matcher{{NotBaseline: true}}, Any: []Matcher{{Magic: "504b0304"}}}, true, true},
+		{Block{All: []Matcher{{Words: []string{"x"}}}}, true, false},
+		{Block{All: []Matcher{{Status: Ints{200}}, {NotRegex: "html"}}}, false, false},
+	} {
+		if err := tc.b.Compile(); err != nil {
+			t.Fatal(err)
+		}
+		if got := tc.b.Content(); got != tc.content {
+			t.Errorf("%+v: Content() = %v", tc.b, got)
+		}
+		if got := tc.b.NeedsBaseline(); got != tc.needsBL {
+			t.Errorf("%+v: NeedsBaseline() = %v", tc.b, got)
+		}
+	}
+}
