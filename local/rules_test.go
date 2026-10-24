@@ -127,7 +127,7 @@ func TestRuleEvidenceIsMaskedAndShort(t *testing.T) {
 	if strings.Contains(string(b), strings.Repeat("y", 10)) {
 		t.Errorf("secret shown: %s", b)
 	}
-	// Control bytes are replaced, and so are bidi overrides and other
+	// Control bytes are replaced. So are bidi overrides and other
 	// format characters that reorder how a line shows.
 	if got := snippet([]byte("a\x1b[31mb\tc"), 0); got != "a.[31mb.c" {
 		t.Errorf("snippet %q", got)
@@ -168,7 +168,7 @@ func TestRuleLinksInUploads(t *testing.T) {
 	// A link named x.php in uploads runs its target when the server
 	// follows links. Its content is never read, so the "Silence is
 	// golden" exemption can't clear it. A link named like media is
-	// fine, and content rules don't match links they can't read.
+	// fine. Content rules don't match links they can't read.
 	root := tree(t, map[string]string{
 		"shell.inc":                    "<?php eval(base64_decode($_POST['x']));",
 		"wp-content/uploads/index.php": "<?php // Silence is golden.",

@@ -35,7 +35,7 @@ var (
 	defineRe     = regexp.MustCompile(`(?is)\bdefine\s*\(\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]\s*,\s*(.*?)\s*\)\s*;`)
 )
 
-// The keys and salts wp-config.php should set, and the value the sample
+// The keys and salts wp-config.php should set and the value the sample
 // file ships with.
 var (
 	saltNames       = []string{"AUTH_KEY", "SECURE_AUTH_KEY", "LOGGED_IN_KEY", "NONCE_KEY", "AUTH_SALT", "SECURE_AUTH_SALT", "LOGGED_IN_SALT", "NONCE_SALT"}

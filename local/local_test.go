@@ -362,7 +362,7 @@ func TestStrayFiles(t *testing.T) {
 		}
 	}
 
-	// Secrets are found, and only ever masked.
+	// Secrets are found and only ever masked.
 	if f := find(res, "local-dotenv"); f.Path != "/.env" || len(f.Evidence.Secrets) == 0 || f.Evidence.Secrets[0].Name != "DB_PASSWORD" {
 		t.Errorf(".env secrets: %+v", f)
 	}
