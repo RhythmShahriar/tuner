@@ -18,7 +18,7 @@ import (
 var htmlSource string
 
 // htmlTemplate is parsed once. html/template escapes every value for
-// where it lands (text, attribute, URL), and every value was cleaned by
+// where it lands (text, attribute, URL). Every value was cleaned by
 // SafeText before that, so a site's Server header or a file name shows
 // as text and never as markup.
 var htmlTemplate = template.Must(template.New("report").Funcs(template.FuncMap{
