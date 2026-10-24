@@ -37,7 +37,7 @@ const (
 // integrityChecks are the integrity check IDs, for the summary's count.
 var integrityChecks = []string{
 	"local-integrity-core-modified", "local-integrity-core-unknown", "local-integrity-core-missing",
-	"local-integrity-plugin-modified", "local-integrity-plugin-unknown",
+	"local-integrity-plugin-modified", "local-integrity-plugin-unknown", "local-integrity-plugin-unchecked",
 }
 
 // Missing core files listed in one finding's evidence.
@@ -275,14 +275,15 @@ type integrityVisitor struct {
 
 // prepareIntegrity fetches the checksums the walk needs, warning about
 // anything it couldn't check. It returns nil when there is nothing to
-// compare.
-func (s *scan) prepareIntegrity(ctx context.Context) *integrityVisitor {
+// compare. Plugins wordpress.org doesn't host are no failure of the
+// scan, so they get an info finding instead of a warning.
+func (s *scan) prepareIntegrity(ctx context.Context) (*integrityVisitor, []engine.Finding) {
 	if !s.opts.Integrity {
-		return nil
+		return nil, nil
 	}
 	if s.wp == nil {
 		s.warn("integrity: no WordPress install found, so no files were compared with checksums")
-		return nil
+		return nil, nil
 	}
 	c := s.opts.Checksums
 	if c == nil {
@@ -349,14 +350,25 @@ func (s *scan) prepareIntegrity(ctx context.Context) *integrityVisitor {
 			s.warn(format, len(list), plural(len(list)), strings.Join(list, ", "))
 		}
 	}
-	note(notListed, "integrity: skipped %d plugin%s not on wordpress.org (no checksums to compare): %s")
 	note(noVersion, "integrity: skipped %d plugin%s without a version: %s")
 	note(offline, "integrity: skipped %d plugin%s with no cached checksums while offline: %s")
 	note(failed, "integrity: couldn't get checksums for %d plugin%s: %s")
-	if v.core == nil && len(v.plugins) == 0 {
-		return nil
+	var info []engine.Finding
+	if len(notListed) > 0 {
+		slices.Sort(notListed)
+		f := s.finding("local-integrity-plugin-unchecked", engine.Info, filepath.Join(s.wp.content, "plugins"),
+			fmt.Sprintf("%d plugin%s not on wordpress.org %s compared", len(notListed), plural(len(notListed)), plural2(len(notListed), "wasn't", "weren't")),
+			[]string{"no checksums to compare: " + strings.Join(notListed, ", ")},
+			"WordPress.org only publishes checksums for the plugins it hosts. Premium and custom plugins can't be checked this way, so a changed file in them goes unnoticed here.",
+			"Compare them with a fresh copy from their vendor, or keep them in version control and check for changes there.",
+			"integrity", "wordpress")
+		f.Evidence.Request = "look up checksums"
+		info = append(info, f)
 	}
-	return v
+	if v.core == nil && len(v.plugins) == 0 {
+		return nil, info
+	}
+	return v, info
 }
 
 func (v *integrityVisitor) root() string { return v.s.wp.root }

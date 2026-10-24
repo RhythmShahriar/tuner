@@ -158,7 +158,8 @@ func scanStatus(ctx context.Context, root string, opts Options, h engine.Hooks) 
 		}
 	}
 	visitors := []visitor{stray, session, rules}
-	integrity := s.prepareIntegrity(ctx)
+	integrity, info := s.prepareIntegrity(ctx)
+	findings = append(findings, info...)
 	if integrity != nil {
 		visitors = append(visitors, integrity)
 	}

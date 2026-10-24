@@ -131,10 +131,12 @@ func integrityScan(t *testing.T, root string, c *Checksums) *engine.Result {
 	return scanTree(t, root, Options{Exec: noPHP, Integrity: true, Checksums: c})
 }
 
+// integrityFindings are the integrity findings about files, without the
+// info note about plugins that couldn't be compared.
 func integrityFindings(res *engine.Result) []engine.Finding {
 	var out []engine.Finding
 	for _, f := range res.Findings {
-		if strings.HasPrefix(f.ID, "local-integrity-") {
+		if strings.HasPrefix(f.ID, "local-integrity-") && f.ID != "local-integrity-plugin-unchecked" {
 			out = append(out, f)
 		}
 	}
@@ -147,7 +149,14 @@ func TestIntegrityPristine(t *testing.T) {
 	if got := integrityFindings(res); len(got) != 0 {
 		t.Errorf("pristine tree: %v", ids(&engine.Result{Findings: got}))
 	}
-	if !hasWarning(res, "integrity: skipped 1 plugin not on wordpress.org (no checksums to compare): acme-custom") {
+	// The plugin that can't be compared gets an info note, not a
+	// warning: the scan isn't degraded.
+	note := find(res, "local-integrity-plugin-unchecked")
+	if note == nil || note.Severity != engine.Info || note.Title != "1 plugin not on wordpress.org wasn't compared" ||
+		!slices.Equal(note.Evidence.Matched, []string{"no checksums to compare: acme-custom"}) || note.Path != "/wp-content/plugins" {
+		t.Errorf("note %+v", note)
+	}
+	if hasWarning(res, "integrity:") {
 		t.Errorf("warnings %q", res.Warnings)
 	}
 	if res.Checks < len(integrityChecks) {
@@ -247,8 +256,8 @@ func TestIntegrityOffline(t *testing.T) {
 	if f := find(res, "local-integrity-core-modified"); f == nil || len(down.requests) != 0 {
 		t.Errorf("offline with cache: %v, requests %v", ids(res), down.requests)
 	}
-	if !hasWarning(res, "not on wordpress.org (no checksums to compare): acme-custom") {
-		t.Errorf("warnings %q", res.Warnings)
+	if f := find(res, "local-integrity-plugin-unchecked"); f == nil || f.Evidence.Matched[0] != "no checksums to compare: acme-custom" {
+		t.Errorf("findings %v", ids(res))
 	}
 
 	// Online but down, with the cache: the cache still answers.
