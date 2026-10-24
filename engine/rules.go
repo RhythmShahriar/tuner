@@ -79,12 +79,11 @@ func (r Rule) Matches(id string) bool {
 // agree as far as both go; "*" alone matches nothing, so it never turns
 // advisors on by itself.
 func (r Rule) mayMatch(pattern string) bool {
-	lit := pattern
-	if i := strings.IndexAny(pattern, "*?["); i >= 0 {
-		lit = pattern[:i]
-	} else {
+	i := strings.IndexAny(pattern, "*?[")
+	if i < 0 {
 		return r.Matches(pattern)
 	}
+	lit := pattern[:i]
 	if lit == "" {
 		return false
 	}
