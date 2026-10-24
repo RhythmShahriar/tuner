@@ -568,6 +568,12 @@ func (p *scanPlan) applyConfig(set map[string]bool, haveTargets bool) error {
 			}
 			p.configTargets = append(p.configTargets, t)
 		}
+		// A .tuner.yml can come with a pull request, which could point
+		// targets at a host it controls. Credentials from the command line
+		// (often CI secrets) must never go to a host only the file chose.
+		if len(p.configTargets) > 0 && (set["H"] || set["header"] || set["cookie"]) {
+			return usagef("-H and --cookie need targets on the command line when %s chooses them: name the targets or use --no-config", c.Path)
+		}
 	}
 	p.ignores, p.expired = c.Ignores(today())
 	return nil

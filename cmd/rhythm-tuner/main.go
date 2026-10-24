@@ -217,7 +217,8 @@ Batch and CI:
                            min_confidence, baseline, headers (${TUNER_VAR}
                            reads the environment; only TUNER_ names), tags,
                            ids and ignore entries (id, path, reason, until).
-                           Flags win over it.
+                           Flags win over it. When it sets the targets, -H
+                           and --cookie need targets on the command line.
 
 ` + extensionHelp()
 }

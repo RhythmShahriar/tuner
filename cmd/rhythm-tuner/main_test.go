@@ -1441,6 +1441,58 @@ func TestConfigHeadersAndErrors(t *testing.T) {
 	}
 }
 
+// A .tuner.yml from a pull request can choose the targets, so -H and
+// --cookie from the command line (often CI secrets) are refused unless
+// the command line names the targets too. The config's own headers still
+// go to the hosts it chose.
+func TestConfigTargetsGetNoCommandLineCredentials(t *testing.T) {
+	var hits atomic.Int32
+	var leaked atomic.Value
+	leaked.Store("")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		if v := r.Header.Get("Authorization") + r.Header.Get("Cookie"); v != "" {
+			leaked.Store(v)
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	writeConfig(t, "targets: ["+srv.URL+"]\n")
+	want := "rhythm tuner scan: -H and --cookie need targets on the command line when .tuner.yml chooses them: name the targets or use --no-config\n"
+	for _, args := range [][]string{
+		{"-H", "Authorization: Bearer s3cret"},
+		{"--header", "Authorization: Bearer s3cret"},
+		{"--cookie", "sess=abc"},
+	} {
+		code, out, errs := tuner(t, append([]string{"scan", "-q", "--json"}, args...)...)
+		if code != exitUsage || out != "" || errs != want || strings.Contains(errs, "s3cret") {
+			t.Errorf("%v: exit %d, stdout %q, stderr %q", args, code, out, errs)
+		}
+	}
+	if n := hits.Load(); n != 0 {
+		t.Errorf("%d requests reached the config's target", n)
+	}
+
+	// Named on the command line, the target gets them.
+	if code, _, errs := tuner(t, "scan", srv.URL, "-q", "--json", "--no-vulns", "-H", "Authorization: Bearer s3cret"); code != exitOK {
+		t.Fatalf("command line target: exit %d: %s", code, errs)
+	}
+	if v, _ := leaked.Load().(string); v != "Bearer s3cret" {
+		t.Errorf("command line target got %q", v)
+	}
+
+	// Headers from the file itself go to the targets it chose.
+	writeConfig(t, "targets: ["+srv.URL+"]\nheaders:\n  Cookie: ${TUNER_TEST_COOKIE}\n")
+	t.Setenv("TUNER_TEST_COOKIE", "from-config")
+	if code, _, errs := tuner(t, "scan", "-q", "--json", "--no-vulns"); code != exitOK {
+		t.Fatalf("config headers: exit %d: %s", code, errs)
+	}
+	if v, _ := leaked.Load().(string); v != "from-config" {
+		t.Errorf("config header sent as %q", v)
+	}
+}
+
 // A file -l or --config can't open is a usage error that says why.
 func TestUnreadableListAndConfig(t *testing.T) {
 	t.Chdir(t.TempDir())
