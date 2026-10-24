@@ -34,6 +34,14 @@
 
 <br>
 
+## The Rhythm set
+
+| | Asks | Checks |
+|---|---|---|
+| **Tuner** | **Is my site safe?** | **what an attacker can find** |
+| [Soundcheck](https://github.com/RhythmShahriar/soundcheck) | Did my change break anything? | what visitors see and do |
+| [Echo](https://github.com/RhythmShahriar/echo) | Is my site still saying what it should? | everything the site sends |
+
 ## Install
 
 **macOS · Linux**
