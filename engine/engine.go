@@ -282,9 +282,9 @@ func (s *Scanner) Scan(ctx context.Context, target string, h Hooks) (*Result, er
 			res.StoppedBy = "budget"
 		}
 	}
-	// The PHP probe runs in every profile: it costs at most three requests,
-	// and without it quick scans would report the version as hidden behind
-	// a page cache.
+	// The PHP probe runs in every profile. It costs at most three requests;
+	// without it quick scans would report the version as hidden behind a
+	// page cache.
 	var php, phpBuild, phpSource string
 	var vwg sync.WaitGroup
 	vwg.Go(func() { php, phpBuild, phpSource = ss.probePHP(ctx, &res.Fingerprint) })

@@ -33,7 +33,7 @@ func (p *pace) wait(ctx context.Context) error {
 }
 
 // slow halves the request rate, down to ratelimit.Slowest. An unlimited
-// pace starts at throttledPace, and the next request already waits for it.
+// pace starts at throttledPace and the next request already waits for it.
 func (p *pace) slow() {
 	p.mu.Lock()
 	defer p.mu.Unlock()

@@ -297,8 +297,8 @@ func headerMatch(h http.Header, name string, re *regexp.Regexp) (string, bool) {
 	return "", false
 }
 
-// Block combines matchers: every one in All must hold, and if Any is set,
-// at least one of those too.
+// Block combines matchers: every one in All must hold. If Any is set, at
+// least one of those must hold too.
 type Block struct {
 	All []Matcher `yaml:"all"`
 	Any []Matcher `yaml:"any"`

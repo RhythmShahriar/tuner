@@ -44,7 +44,7 @@ func TestProbePHP(t *testing.T) {
 			probed: []string{"/xmlrpc.php", "/wp-admin/admin-ajax.php"},
 		},
 		{
-			name:    "quick profile probes too, and reads Server",
+			name:    "quick profile probes too and reads Server",
 			home:    func(w http.ResponseWriter) { w.Write([]byte(`<script src="/wp-includes/js/x.js"></script>`)) },
 			headers: map[string]http.Header{"/xmlrpc.php": {"Server": {"Apache/2.4.41 (Ubuntu) PHP/7.4.3-4ubuntu2.19"}}},
 			profile: ProfileQuick,

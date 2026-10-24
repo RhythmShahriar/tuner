@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package fingerprint identifies the platform behind a site from its home
-// page, and holds the data and rules that WordPress plugin discovery uses.
+// page. It also holds the data and rules that WordPress plugin discovery
+// uses.
 package fingerprint
 
 import (

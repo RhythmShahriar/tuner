@@ -291,7 +291,7 @@ func TestDiscoverDeepSkippedWhenHomeFails(t *testing.T) {
 }
 
 // With the default budget an advisor that knows more plugins than fit is
-// cut to the budget, and the scan stays complete.
+// cut to the budget. The scan stays complete.
 func TestDiscoverDefaultBudgetFitsAdvisorSlugs(t *testing.T) {
 	site := newWPSite(t, "")
 	var many []string

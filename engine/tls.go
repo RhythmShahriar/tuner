@@ -16,7 +16,7 @@ import (
 )
 
 // tlsInfo inspects the home page's TLS handshake: certificate expiry,
-// whether the chain and hostname verify, and which obsolete protocol
+// whether the chain and hostname verify and which obsolete protocol
 // versions the server still accepts.
 func (ss *session) tlsInfo(ctx context.Context, home *matchers.Response) *matchers.TLSInfo {
 	st := home.TLSState

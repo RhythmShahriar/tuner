@@ -94,7 +94,7 @@ func TestPluginsFromREST(t *testing.T) {
 	got := PluginsFromREST(d, []string{"wp/v2", "oembed/1.0", "wc/v3", "wc/store/v1", "wc/gla", "yoast/v1", "jetpack/v4", "acf/v3", "acme-internal/v1", "custom/v2", ""})
 	want := []Component{
 		{Type: "plugin", Slug: "woocommerce", FoundBy: "rest", Confidence: "high"},
-		{Type: "plugin", Slug: "google-listings-and-ads", FoundBy: "rest", Confidence: "low"}, // more specific than wc, but inferred
+		{Type: "plugin", Slug: "google-listings-and-ads", FoundBy: "rest", Confidence: "low"}, // more specific than wc yet inferred
 		{Type: "plugin", Slug: "wordpress-seo", FoundBy: "rest", Confidence: "high"},
 		{Type: "plugin", Slug: "jetpack", FoundBy: "rest", Confidence: "low"}, // only its slug matches
 		{Type: "plugin", Slug: "advanced-custom-fields", FoundBy: "rest", Confidence: "low"},

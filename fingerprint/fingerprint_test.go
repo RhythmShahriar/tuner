@@ -56,7 +56,7 @@ func TestPHPVersion(t *testing.T) {
 		}
 	}
 
-	// X-Powered-By wins over Server, and the home page records its source.
+	// X-Powered-By wins over Server; the home page records its source.
 	h := http.Header{}
 	h.Set("Server", "Apache PHP/7.4.33")
 	h.Set("X-Powered-By", "PHP/8.2.1")

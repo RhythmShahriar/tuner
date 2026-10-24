@@ -57,8 +57,8 @@ func TestCacheDropsBodiesAfterLastReader(t *testing.T) {
 	}
 }
 
-// Checks that read the same path, and the soft-404 probe for it, all see
-// the full body however the jobs interleave.
+// Checks that read the same path all see the full body however the jobs
+// interleave. So does the soft-404 probe for that path.
 func TestCacheSharedPathKeepsBodyForEveryReader(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/.env" {
