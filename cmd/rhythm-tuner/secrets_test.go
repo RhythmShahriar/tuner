@@ -59,3 +59,33 @@ func TestChecksTagsSecretsListsRules(t *testing.T) {
 		t.Error("checks without --tags secrets listed the secret rules")
 	}
 }
+
+// A .env with two OpenAI and two Stripe live keys: the title counts four
+// secrets although each pair masks alike.
+func TestSecretTitleCountsDistinctKeys(t *testing.T) {
+	const env = "OPENAI_API_KEY=sk-proj-FAKEfakeFAKEfake0123456789\n" +
+		"OPENAI_BACKUP_KEY=sk-proj-OTHERotherOTHERother987654\n" +
+		"STRIPE_SECRET=sk_live_abcdefghijklmnop1234\n" +
+		"STRIPE_OLD_SECRET=sk_live_zyxwvutsrqponmlk9876\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.env" {
+			_, _ = w.Write([]byte(env))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	code, out, errs := tuner(t, "scan", srv.URL, "--plain", "--id", "leak-dotenv", "--no-vulns")
+	if code != exitOK {
+		t.Fatalf("exit %d\n%s", code, errs)
+	}
+	if want := ".env file exposed: 4 secrets"; !strings.Contains(out, want) {
+		t.Errorf("no %q in\n%s", want, out)
+	}
+	for _, raw := range []string{"FAKEfake", "OTHERother", "abcdefgh", "zyxwvuts"} {
+		if strings.Contains(out, raw) {
+			t.Errorf("output shows %q", raw)
+		}
+	}
+}

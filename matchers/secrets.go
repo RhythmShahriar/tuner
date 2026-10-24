@@ -5,6 +5,7 @@ package matchers
 
 import (
 	"cmp"
+	"crypto/sha256"
 	"fmt"
 	"strings"
 
@@ -19,27 +20,156 @@ type Secret = secrets.Secret
 // FindSecrets returns every secret in b, masked and de-duplicated. The kit
 // rules run first; the Tuner supplement then runs on the kit-redacted text,
 // so a value both would catch is reported once, under the kit kind.
+//
+// Two secrets are the same when kind, name and raw value match. The masked
+// form alone can't tell them apart: it keeps at most 4 characters, so two
+// different OpenAI keys both read sk-p•••••. Only a SHA-256 of the raw
+// value is kept, and only while FindSecrets runs.
 func FindSecrets(b []byte) []Secret {
-	found := secrets.FindSecrets(b)
-	out := make([]Secret, 0, len(found))
-	seen := map[Secret]bool{}
-	add := func(s Secret) {
-		s.Masked = CleanText(s.Masked)
-		if !seen[s] {
-			seen[s] = true
-			out = append(out, s)
+	s := string(b)
+	red := secrets.Redact(s)
+	var out []Secret
+	seen := map[secretKey]bool{}
+	add := func(sec Secret, raw string) {
+		k := secretKey{sec, sha256.Sum256([]byte(raw))}
+		if !seen[k] {
+			seen[k] = true
+			sec.Masked = CleanText(sec.Masked)
+			out = append(out, sec)
 		}
 	}
-	for _, s := range found {
-		add(s)
+	for _, ks := range kitSecrets(s, red) {
+		add(ks.secret, ks.rest)
 	}
-	for _, sp := range extraSpans(secrets.Redact(string(b))) {
-		add(sp.secret)
-	}
-	if len(out) == 0 {
-		return nil
+	for _, sp := range extraSpans(red) {
+		add(sp.secret, red[sp.start:sp.end])
 	}
 	return out
+}
+
+// secretKey identifies one credential: what the report shows plus a hash
+// of the raw value, which is never stored or printed.
+type secretKey struct {
+	secret Secret
+	sum    [sha256.Size]byte
+}
+
+// kitSecret is one kit match: the secret as the kit reports it and the
+// part of the raw value its mask hides.
+type kitSecret struct {
+	secret Secret
+	rest   string
+}
+
+// bullets ends every mask the kit writes.
+const bullets = "•••••"
+
+// kitSecrets lists every kit match in s, duplicates included, with the
+// hidden part of each raw value. red is secrets.Redact(s).
+//
+// The kit reports secrets de-duplicated by their masked form, so the raw
+// values come from lining s up with red: red is s with each value
+// replaced by its first few characters and the bullets. Two values with
+// the same kind, name and mask share those first characters, so the
+// hidden rest tells them apart. When the texts don't line up (s already
+// holds bullets or invalid UTF-8, or two values touch), each kit secret
+// is listed once with no rest, as the kit reports them.
+func kitSecrets(s, red string) []kitSecret {
+	found := secrets.FindSecrets([]byte(s))
+	fallback := func() []kitSecret {
+		out := make([]kitSecret, len(found))
+		for i, f := range found {
+			out[i] = kitSecret{secret: f}
+		}
+		return out
+	}
+	if len(found) == 0 || strings.Contains(s, "•") {
+		return fallback()
+	}
+	parts := strings.Split(red, bullets)
+	n := len(parts) - 1 // one value ends at each run of bullets
+	if n < len(found) || !strings.HasPrefix(s, parts[0]) || !strings.HasSuffix(s, parts[n]) {
+		return fallback()
+	}
+	out := make([]kitSecret, 0, n)
+	pos := len(parts[0])
+	next := 0 // the first entry of found no value has used yet
+	for k := range n {
+		// The hidden rest of value k runs from pos to where the text
+		// after it starts: the first match for a middle value, the
+		// suffix for the last one.
+		after := parts[k+1]
+		var end int
+		if k == n-1 {
+			end = len(s) - len(after)
+		} else {
+			if after == "" {
+				return fallback()
+			}
+			i := strings.Index(s[min(pos+1, len(s)):], after)
+			if i < 0 {
+				return fallback()
+			}
+			end = pos + 1 + i
+		}
+		if end <= pos {
+			return fallback()
+		}
+		i := matchFound(found, next, parts[k], n-k)
+		if i < 0 {
+			return fallback()
+		}
+		if i == next {
+			next++
+		}
+		out = append(out, kitSecret{found[i], s[pos:end]})
+		pos = end + len(after)
+	}
+	if next != len(found) {
+		return fallback()
+	}
+	return out
+}
+
+// matchFound picks the entry of found that a value belongs to. before is
+// the redacted text from the previous value up to this one's bullets, so
+// it ends with the value's visible characters and usually holds its name.
+// found lists each secret where it first shows, so a value is either one
+// already seen (index below next) or found[next]. left is how many values
+// remain, this one included. It returns -1 when none fits.
+func matchFound(found []Secret, next int, before string, left int) int {
+	score := func(i int) int {
+		f := found[i]
+		vis := strings.TrimSuffix(f.Masked, bullets)
+		if !strings.HasSuffix(before, vis) {
+			return -1
+		}
+		sc := 2 * len(vis)
+		if f.Name != "" && strings.Contains(before, f.Name) {
+			sc++
+		}
+		return sc
+	}
+	if next < len(found) && len(found)-next >= left {
+		// Every remaining value must be a new entry.
+		if score(next) < 0 {
+			return -1
+		}
+		return next
+	}
+	best, bestScore := -1, -1
+	for i := range next {
+		if sc := score(i); sc > bestScore {
+			best, bestScore = i, sc
+		}
+	}
+	// A new entry wins a tie: it has to show up somewhere.
+	if next < len(found) {
+		if sc := score(next); sc >= 0 && sc >= bestScore {
+			return next
+		}
+	}
+	return best
 }
 
 // Redact replaces every secret value in s with its masked form.

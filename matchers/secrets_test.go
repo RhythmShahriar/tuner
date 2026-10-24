@@ -208,3 +208,52 @@ func TestSecretRulesListEveryKind(t *testing.T) {
 		}
 	}
 }
+
+// Two OpenAI keys and two Stripe live keys mask alike (sk-p•••••,
+// sk_l•••••) but are four credentials. The repeat of the first key is
+// still one.
+func TestFindSecretsCountsDistinctValues(t *testing.T) {
+	const env = "OPENAI_API_KEY=sk-proj-FAKEfakeFAKEfake0123456789\n" +
+		"OPENAI_BACKUP_KEY=sk-proj-OTHERotherOTHERother987654\n" +
+		"STRIPE_SECRET=sk_live_abcdefghijklmnop1234\n" +
+		"STRIPE_OLD_SECRET=sk_live_zyxwvutsrqponmlk9876\n" +
+		"OPENAI_API_KEY=sk-proj-FAKEfakeFAKEfake0123456789\n"
+	got := FindSecrets([]byte(env))
+	const want = ".env file exposed: 4 secrets (OpenAI key sk-p•••••, OpenAI key sk-p•••••, Stripe key sk_l•••••, 1 more)"
+	if title := TitleWithSecrets(".env file exposed", got); title != want {
+		t.Errorf("title %q, want %q", title, want)
+	}
+	for _, s := range got {
+		for _, raw := range []string{"FAKEfake", "OTHERother", "abcdefgh", "zyxwvuts"} {
+			if strings.Contains(s.String(), raw) {
+				t.Errorf("%v shows %q", s, raw)
+			}
+		}
+	}
+}
+
+func TestFindSecretsDedupes(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int
+	}{
+		// The same key twice, also with other text between.
+		{"KEY=sk-proj-FAKEfakeFAKEfake0123456789\nKEY=sk-proj-FAKEfakeFAKEfake0123456789\n", 1},
+		{"a sk-proj-FAKEfakeFAKEfake0123456789 b sk-proj-FAKEfakeFAKEfake0123456789 c", 1},
+		// One password under two names is two findings, as before.
+		{"DB_PASSWORD=supersecret\nSMTP_PASSWORD=supersecret\n", 2},
+		// Two passwords under one name, both fully masked.
+		{"DB_PASSWORD=supersecret\nDB_PASSWORD=supermarket\n", 2},
+		// Supplement values that mask alike.
+		{"DBPW=upperS3cret\nDBPW=upperOther\n", 2},
+		{"DBPW=upperS3cret\nDBPW=upperS3cret\n", 1},
+		// Text that already holds bullets can't be lined up with its
+		// redaction, so it counts by masked value.
+		{"• KEY=sk-proj-FAKEfakeFAKEfake0123456789\nKEY=sk-proj-OTHERotherOTHERother987654\n", 1},
+	}
+	for _, c := range cases {
+		if got := FindSecrets([]byte(c.in)); len(got) != c.want {
+			t.Errorf("%q: got %v, want %d secrets", c.in, got, c.want)
+		}
+	}
+}
