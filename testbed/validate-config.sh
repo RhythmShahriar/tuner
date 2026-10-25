@@ -68,7 +68,7 @@ conf=/usr/local/apache2/conf
 apache_mounts="-v $here/apache/httpd.conf:$conf/testbed.conf:ro -v $here/apache/validate.conf:$conf/httpd.conf:ro"
 
 # The docroot both Apache runs mount: httpd -t refuses a DocumentRoot
-# that is not a directory, and the httpd image has no /var/www/html.
+# that is not a directory. The httpd image has no /var/www/html.
 site="$tmp/site"
 mkdir "$site"
 echo ok > "$site/index.html"

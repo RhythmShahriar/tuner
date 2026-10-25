@@ -85,8 +85,8 @@ func tuner(t *testing.T, args ...string) (code int, stdout, stderr string) {
 
 // realTempDir is t.TempDir with its links and short names resolved, the
 // way a local scan reports its folder: on macOS the temp folder is under
-// the /var link to /private/var, and on Windows it can be a short name
-// like RUNNER~1.
+// the /var link to /private/var. On Windows it can be a short name like
+// RUNNER~1.
 func realTempDir(t *testing.T) string {
 	t.Helper()
 	dir, err := filepath.EvalSymlinks(t.TempDir())

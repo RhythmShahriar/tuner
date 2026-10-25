@@ -32,7 +32,7 @@ const rawSecret = "supersecret-db-pass"
 
 // tempDir is t.TempDir with its links and short names resolved, as Root
 // gives it back: on macOS the temp folder is under the /var link to
-// /private/var, and on Windows it can be a short name like RUNNER~1.
+// /private/var. On Windows it can be a short name like RUNNER~1.
 func tempDir(t *testing.T) string {
 	t.Helper()
 	dir, err := filepath.EvalSymlinks(t.TempDir())

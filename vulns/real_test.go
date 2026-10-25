@@ -50,8 +50,8 @@ func TestDecodeRealResponses(t *testing.T) {
 
 func TestSummary(t *testing.T) {
 	for in, want := range map[string]string{
-		"[en] In PHP versions 8.2.* before 8.2.31, 8.3.* before 8.3.31, 8.4.* before 8.4.21, and 8.5.* before 8.5.6, the PDO Firebird driver improperly handles NUL bytes.": "The PDO Firebird driver improperly handles NUL bytes.",
-		"In PHP version 8.0.* before 8.0.30,  8.1.* before 8.1.22, and 8.2.* before 8.2.8, when loading phar file, it overflows.":                                           "When loading phar file, it overflows.",
+		"[en] In PHP versions 8.2.* before 8.2.31, 8.3.* before 8.3.31, 8.4.* before 8.4.21, and 8.5.* before 8.5.6, the PDO Firebird driver improperly handles NUL bytes.": "The PDO Firebird driver improperly handles NUL bytes.", // style:ignore: real advisory text
+		"In PHP version 8.0.* before 8.0.30,  8.1.* before 8.1.22, and 8.2.* before 8.2.8, when loading phar file, it overflows.":                                           "When loading phar file, it overflows.",                 // style:ignore: real advisory text
 		"PHP uses longjmp() for out-of-memory errors.": "PHP uses longjmp() for out-of-memory errors.",
 	} {
 		if got := summary(langPrefix.ReplaceAllString(in, "")); got != want {
