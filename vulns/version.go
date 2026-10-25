@@ -67,8 +67,11 @@ func parts(v string) []string {
 // part) ranks between rc and pl.
 var special = map[string]int{"dev": 0, "alpha": 1, "a": 1, "beta": 2, "b": 2, "rc": 3, "c": 3, "pl": 5, "p": 5}
 
+// releaseRank is where a plain release sorts among the special parts.
 const releaseRank = 4
 
+// comparePart compares one dot-separated part: numbers numerically, words by
+// their rank in special, a number against a word as a release.
 func comparePart(x, y string) int {
 	nx, ex := strconv.Atoi(x)
 	ny, ey := strconv.Atoi(y)
@@ -91,6 +94,7 @@ func rank(s string) int {
 	return -1
 }
 
+// cmpInt returns -1, 0 or 1 as a is less than, equal to or greater than b.
 func cmpInt(a, b int) int {
 	switch {
 	case a < b:

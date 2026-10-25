@@ -19,7 +19,7 @@ import (
 // the file is public; these findings say which of its packages have
 // known vulnerabilities. It implements engine.ResponseAdvisor.
 type ComposerAdvisor struct {
-	Client *Client
+	Client *Client // the data source; required
 }
 
 // Rules describes the findings ComposerAdvisor and local scans emit.

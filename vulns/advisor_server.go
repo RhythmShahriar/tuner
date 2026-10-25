@@ -18,6 +18,7 @@ import (
 // end-of-life branch (nginx-eol, apache-eol).
 type serverAdvisor struct{}
 
+// lookups looks up an nginx or Apache version read from the Server header.
 func (serverAdvisor) lookups(fp fingerprint.Result) []*lookup {
 	m := serverVersion.FindStringSubmatch(fp.Server)
 	if m == nil {
@@ -26,10 +27,12 @@ func (serverAdvisor) lookups(fp fingerprint.Result) []*lookup {
 	return []*lookup{{component: component{kind: strings.ToLower(m[1]), key: m[2], slug: m[1], version: m[2], path: "/", build: fp.Server}}}
 }
 
+// fetch gets the server's advisories.
 func (serverAdvisor) fetch(ctx context.Context, a *Advisor, l *lookup, _ time.Time) {
 	a.fetchAdvisories(ctx, l)
 }
 
+// advise reports known vulnerabilities and an end-of-life branch.
 func (serverAdvisor) advise(base *url.URL, a *Advisor, ls []*lookup, now time.Time) []engine.Finding {
 	var out []engine.Finding
 	for _, l := range ok(ls) {
@@ -43,6 +46,7 @@ func (serverAdvisor) advise(base *url.URL, a *Advisor, ls []*lookup, now time.Ti
 	return out
 }
 
+// rules describes the nginx and Apache findings.
 func (serverAdvisor) rules() []Rule {
 	var out []Rule
 	for _, s := range []string{"nginx", "apache"} {

@@ -58,10 +58,10 @@ type Store struct {
 
 // Entry is what lands on disk.
 type Entry[T any] struct {
-	Format  int       `json:"format"`
+	Format  int       `json:"format"`        // cacheFormat of the writer; another format is fetched again
 	Key     string    `json:"key,omitempty"` // what was looked up, as given to Load
-	Fetched time.Time `json:"fetched"`
-	Data    T         `json:"data"`
+	Fetched time.Time `json:"fetched"`       // when the data came from the service; the TTL counts from here
+	Data    T         `json:"data"`          // the answer as the fetch func returned it
 }
 
 // Info describes the data Load returned.
@@ -202,6 +202,8 @@ func (s *Store) Path(kind, key string) string {
 	return filepath.Join(s.Dir, filepath.FromSlash(kind), name+".json")
 }
 
+// unsafeKey matches what can't appear in a cache file name. Keys come from
+// slugs a scanned site reports, so they must never reach the path as given.
 var unsafeKey = regexp.MustCompile(`[^A-Za-z0-9._@~-]`)
 
 // Windows reserves these device names, with or without an extension and in
@@ -274,6 +276,7 @@ func WriteFile(path string, data []byte) error {
 
 // --- in-memory memo ---
 
+// memo is one in-memory answer, shared by every caller asking at once.
 type memo struct {
 	once sync.Once
 	done atomic.Bool
@@ -320,11 +323,13 @@ type lru struct {
 	items map[string]*list.Element
 }
 
+// lruItem is an entry in the LRU order list.
 type lruItem struct {
 	id string
 	m  *memo
 }
 
+// newLRU returns an empty LRU holding max memos; 0 or less means DefaultMaxMemo.
 func newLRU(max int) *lru {
 	if max <= 0 {
 		max = DefaultMaxMemo
@@ -332,6 +337,7 @@ func newLRU(max int) *lru {
 	return &lru{max: max, order: list.New(), items: map[string]*list.Element{}}
 }
 
+// get returns the memo for id and marks it recently used, or nil.
 func (l *lru) get(id string) *memo {
 	e, ok := l.items[id]
 	if !ok {
@@ -341,6 +347,7 @@ func (l *lru) get(id string) *memo {
 	return e.Value.(*lruItem).m
 }
 
+// put stores m under id, evicting the least recently used past max.
 func (l *lru) put(id string, m *memo) {
 	if e, ok := l.items[id]; ok {
 		e.Value.(*lruItem).m = m
@@ -355,4 +362,5 @@ func (l *lru) put(id string, m *memo) {
 	}
 }
 
+// len is how many memos are held.
 func (l *lru) len() int { return l.order.Len() }

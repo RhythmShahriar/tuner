@@ -38,6 +38,8 @@ import (
 	"github.com/RhythmShahriar/tuner/vulns/ratelimit"
 )
 
+// Where the data services live, plus the cache and request defaults a
+// zero Client field falls back to. Tests point the bases at local servers.
 const (
 	DefaultVulnBase   = "https://www.wpvulnerability.net"
 	DefaultWPOrgBase  = "https://api.wordpress.org"
@@ -45,7 +47,9 @@ const (
 	DefaultTTL        = 24 * time.Hour
 	DefaultTimeout    = 10 * time.Second
 
-	// Attribution shown with every vulnerability finding.
+	// Source is the attribution shown with every vulnerability finding. The
+	// data is CC0 and needs no credit. Naming it still tells a reader where
+	// a finding came from and where to dispute it.
 	Source = "WPVulnerability (wpvulnerability.com, CC0)"
 )
 
@@ -61,18 +65,22 @@ var ErrOldCache = cache.ErrOldFormat
 // again instead of living on under --offline or a restored CI cache.
 const cacheFormat = 1
 
+// Client looks up advisories and latest releases, caching every answer on
+// disk. The zero value works; set CacheDir to keep answers between runs.
+// It only ever reads public data: no site detail is sent beyond the
+// component slug or version being looked up.
 type Client struct {
-	HTTP       *http.Client
-	UserAgent  string
+	HTTP       *http.Client  // nil means a default client; either way connects time out quickly
+	UserAgent  string        // sent with every request so the services can see who is asking
 	CacheDir   string        // "" disables the disk cache
 	TTL        time.Duration // refresh records older than this; 0 means DefaultTTL
 	Offline    bool          // never fetch; use cached data however old
 	Force      bool          // always fetch, ignoring the TTL (rhythm tuner update)
 	Pace       time.Duration // gap between requests to the data services; 0 means 200ms, <0 none
 	Timeout    time.Duration // per request, reading the answer included; 0 means DefaultTimeout
-	VulnBase   string
-	WPOrgBase  string
-	PHPNetBase string
+	VulnBase   string        // WPVulnerability API; "" means DefaultVulnBase
+	WPOrgBase  string        // wordpress.org API; "" means DefaultWPOrgBase
+	PHPNetBase string        // php.net; "" means DefaultPHPNetBase
 	// Wordfence, when set, adds the Wordfence Intelligence feed as a
 	// second source for plugins, themes and core, merged by CVE.
 	Wordfence *Wordfence
@@ -93,6 +101,7 @@ func DefaultCacheDir() string {
 	return filepath.Join(d, "rhythm", "tuner", "vulns")
 }
 
+// init fills the defaults on first use, so a Client needs no constructor.
 func (c *Client) init() {
 	c.once.Do(func() {
 		// Connections give up after a few seconds: a firewalled data
@@ -125,33 +134,33 @@ func (c *Client) init() {
 
 // Record is the normalized vulnerability data for one component.
 type Record struct {
-	Name         string `json:"name,omitempty"`
-	Closed       bool   `json:"closed,omitempty"`
+	Name         string `json:"name,omitempty"`   // display name, as WPVulnerability spells it
+	Closed       bool   `json:"closed,omitempty"` // withdrawn from wordpress.org; often after a security report
 	ClosedReason string `json:"closed_reason,omitempty"`
 	ClosedDate   string `json:"closed_date,omitempty"`
 	EndOfLife    string `json:"end_of_life,omitempty"` // PHP and server branches: support end date
-	Vulns        []Vuln `json:"vulns"`
+	Vulns        []Vuln `json:"vulns"`                 // never nil in a valid record; empty means none known
 }
 
 // Vuln is one advisory. Min/Max bound the affected versions; an empty
 // bound is open. Core records come pre-filtered and have no bounds.
 type Vuln struct {
-	ID          string   `json:"id"`
+	ID          string   `json:"id"` // WPVulnerability UUID, stable across fetches
 	Title       string   `json:"title"`
 	Description string   `json:"description,omitempty"`
 	CVEs        []string `json:"cves,omitempty"`
 	Severity    string   `json:"severity,omitempty"` // critical, high, medium, low; empty if unrated
 	CVSS        float64  `json:"cvss,omitempty"`
-	Vector      string   `json:"vector,omitempty"`
-	KEV         bool     `json:"kev,omitempty"` // in CISA's Known Exploited Vulnerabilities catalog
-	Min         string   `json:"min,omitempty"`
-	MinOp       string   `json:"min_op,omitempty"`
-	Max         string   `json:"max,omitempty"`
-	MaxOp       string   `json:"max_op,omitempty"`
-	Unfixed     bool     `json:"unfixed,omitempty"`
+	Vector      string   `json:"vector,omitempty"`  // CVSS vector string, as published
+	KEV         bool     `json:"kev,omitempty"`     // in CISA's Known Exploited Vulnerabilities catalog
+	Min         string   `json:"min,omitempty"`     // lowest affected version; "" means no lower bound
+	MinOp       string   `json:"min_op,omitempty"`  // comparison for Min: ge, gt or eq
+	Max         string   `json:"max,omitempty"`     // highest affected version; "" means no upper bound
+	MaxOp       string   `json:"max_op,omitempty"`  // comparison for Max: le, lt or eq (lt makes Max the fixed version)
+	Unfixed     bool     `json:"unfixed,omitempty"` // no fixed release exists yet
 	References  []string `json:"references,omitempty"`
-	Published   string   `json:"published,omitempty"`
-	Sources     []string `json:"sources,omitempty"` // SourceWPVulnerability, SourceWordfence; set when merged
+	Published   string   `json:"published,omitempty"` // earliest source date, as the source wrote it
+	Sources     []string `json:"sources,omitempty"`   // SourceWPVulnerability, SourceWordfence; set when merged
 }
 
 // Valid reports whether r holds a usable record; a cache entry without
@@ -173,9 +182,9 @@ func (v Vuln) FixedIn() string {
 
 // Release is the latest published version of a component.
 type Release struct {
-	Latest      string    `json:"latest,omitempty"`
-	LastUpdated time.Time `json:"last_updated,omitzero"`
-	NotFound    bool      `json:"not_found,omitempty"` // not on wordpress.org: premium, custom or removed
+	Latest      string    `json:"latest,omitempty"`      // newest version; "" when NotFound
+	LastUpdated time.Time `json:"last_updated,omitzero"` // wordpress.org's last update, zero for core
+	NotFound    bool      `json:"not_found,omitempty"`   // not on wordpress.org: premium, custom or removed
 }
 
 // Valid reports whether r holds a usable release; a cache entry without
@@ -190,6 +199,8 @@ func (c *Client) Advisories(ctx context.Context, kind, key string) (rec *Record,
 	return rec, info.Stale, err
 }
 
+// advisories merges the Wordfence feed into WPVulnerability's answer when a
+// key is set and returns the cache status of the combined data.
 func (c *Client) advisories(ctx context.Context, kind, key string) (*Record, cache.Info, error) {
 	rec, info, err := c.wpvulnerability(ctx, kind, key)
 	if c.Wordfence == nil || kind != "plugin" && kind != "theme" && kind != "core" {
@@ -225,6 +236,7 @@ func joinInfo(a, b cache.Info) cache.Info {
 	return a
 }
 
+// wpvulnerability fetches one component's record through the disk cache.
 func (c *Client) wpvulnerability(ctx context.Context, kind, key string) (*Record, cache.Info, error) {
 	c.init()
 	return cache.Load(c.store, ctx, "wpvulnerability/"+kind, key, func(ctx context.Context) (*Record, error) {
@@ -251,6 +263,7 @@ func (c *Client) Latest(ctx context.Context, kind, slug string) (rel *Release, s
 	return rel, info.Stale, err
 }
 
+// latest fetches the newest release from wordpress.org through the disk cache.
 func (c *Client) latest(ctx context.Context, kind, slug string) (*Release, cache.Info, error) {
 	c.init()
 	return cache.Load(c.store, ctx, "wordpress.org/"+kind, slug, func(ctx context.Context) (*Release, error) {
@@ -353,6 +366,10 @@ func (c *Client) Unreachable() []string {
 	return c.breaker.Down()
 }
 
+// getJSON fetches u and decodes its JSON into v, paced by the rate limiter and
+// guarded by the breaker so one dead host fails fast for the rest of the run.
+// A 404 is decoded too: the APIs answer unknown slugs with a JSON error body.
+// The body is capped at 16 MiB so a misbehaving service can't exhaust memory.
 func (c *Client) getJSON(ctx context.Context, u string, v any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
@@ -386,6 +403,8 @@ func (c *Client) getJSON(ctx context.Context, u string, v any) error {
 	})
 }
 
+// parseWPDate reads the dates wordpress.org returns, which come in several
+// layouts; a date it can't read is the zero time.
 func parseWPDate(s string) time.Time {
 	for _, layout := range []string{"2006-01-02 3:04pm MST", "2006-01-02 15:04:05", "2006-01-02"} {
 		if t, err := time.Parse(layout, s); err == nil {
@@ -402,6 +421,7 @@ func parseWPDate(s string) time.Time {
 // false or an object.
 type flex string
 
+// UnmarshalJSON turns any JSON scalar into its string form and any object into "1".
 func (f *flex) UnmarshalJSON(b []byte) error {
 	var v any
 	if err := json.Unmarshal(b, &v); err != nil {
@@ -425,8 +445,10 @@ func (f *flex) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// on reports whether the API meant true.
 func (f flex) on() bool { return f != "" && f != "0" && f != "false" }
 
+// rawResponse is the envelope every WPVulnerability answer arrives in.
 type rawResponse struct {
 	Error   flex            `json:"error"`
 	Message flex            `json:"message"`
@@ -440,6 +462,8 @@ type object[T any] struct {
 	OK bool
 }
 
+// UnmarshalJSON decodes an object into V and sets OK; anything else
+// leaves both zero.
 func (o *object[T]) UnmarshalJSON(b []byte) error {
 	if b = bytes.TrimSpace(b); len(b) == 0 || b[0] != '{' {
 		return nil
@@ -448,6 +472,7 @@ func (o *object[T]) UnmarshalJSON(b []byte) error {
 	return json.Unmarshal(b, &o.V)
 }
 
+// rawData is the record for one component.
 type rawData struct {
 	Name          flex              `json:"name"`
 	Closed        flex              `json:"closed"`
@@ -457,12 +482,14 @@ type rawData struct {
 	Vulnerability []json.RawMessage `json:"vulnerability"` // decoded one by one so a bad entry can't sink the rest
 }
 
+// rawScore is one CVSS rating.
 type rawScore struct {
 	Score    flex `json:"score"`
 	Severity flex `json:"severity"`
 	Vector   flex `json:"vector"`
 }
 
+// rawOperator is the affected version range.
 type rawOperator struct {
 	MinVersion  flex `json:"min_version"`
 	MinOperator flex `json:"min_operator"`
@@ -471,12 +498,14 @@ type rawOperator struct {
 	Unfixed     flex `json:"unfixed"`
 }
 
+// rawImpact holds the scores and the CISA KEV flag.
 type rawImpact struct {
 	CVSS  object[rawScore] `json:"cvss"`
 	CVSS3 object[rawScore] `json:"cvss3"`
 	KEV   flex             `json:"kev"`
 }
 
+// rawVuln is one advisory with its sources.
 type rawVuln struct {
 	UUID        flex                `json:"uuid"`
 	Name        flex                `json:"name"`
@@ -492,19 +521,23 @@ type rawVuln struct {
 	Impact object[rawImpact] `json:"impact"`
 }
 
+// Patterns normalize uses to pick a readable title from an advisory's sources.
 var (
 	onlyVersion = regexp.MustCompile(`^[0-9][0-9.]*$`)
 	cveID       = regexp.MustCompile(`^CVE-\d{4}-\d+$`)
 	langPrefix  = regexp.MustCompile(`^\[[a-z]{2}\]\s*`)
 	// A name that only states a range, like "PHP 8.4 < 8.4.27".
 	rangeName = regexp.MustCompile(`^[^<>=]*\s[<>]=?\s*[0-9][0-9.]*$`)
-	// "In PHP versions 8.2.* before 8.2.31, and 8.3.* before 8.3.31, " opens
+	// "In PHP versions 8.2.* before 8.2.31, and 8.3.* before 8.3.31, " opens (quoted, style:ignore)
 	// many PHP advisories and crowds out what the flaw is.
 	versionLead = regexp.MustCompile(`(?i)^In [A-Za-z ]*?versions?\s+(?:(?:and|from)\s+)?(?:[0-9][0-9.*x]*\s+(?:before|through|prior to)\s+[0-9][0-9.]*,?\s*(?:and\s+(?:from\s+)?)?)+`)
 )
 
+// severityLetter expands the one-letter severities some sources use.
 var severityLetter = map[string]string{"c": "critical", "h": "high", "m": "medium", "l": "low", "n": ""}
 
+// normalize turns the wire format into a Record. An entry that doesn't decode
+// is skipped rather than failing the whole record.
 func (d rawData) normalize() *Record {
 	rec := &Record{
 		Name:         clean(string(d.Name)),
@@ -593,6 +626,7 @@ func summary(desc string) string {
 	return truncate(s, 90)
 }
 
+// truncate shortens s to n runes, ending with an ellipsis when it cut.
 func truncate(s string, n int) string {
 	if r := []rune(s); len(r) > n {
 		return strings.TrimSpace(string(r[:n-1])) + "…"

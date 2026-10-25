@@ -43,6 +43,7 @@ func (c *Client) PHPBranches(ctx context.Context) (branches []Branch, stale bool
 	return branches, info.Stale, err
 }
 
+// phpBranches fetches php.net's supported branches through the disk cache.
 func (c *Client) phpBranches(ctx context.Context) ([]Branch, cache.Info, error) {
 	c.init()
 	return cache.Load(c.store, ctx, "php.net/releases", "states", func(ctx context.Context) ([]Branch, error) {
@@ -100,6 +101,7 @@ func branchOf(v string) string {
 	return p[0] + "." + p[1]
 }
 
+// published is when v was first published, if its date can be read.
 func published(v Vuln) (time.Time, bool) {
 	if len(v.Published) < len(time.DateOnly) {
 		return time.Time{}, false

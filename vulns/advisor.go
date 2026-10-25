@@ -21,6 +21,7 @@ import (
 // requests; this bounds the goroutines waiting on a slow data service.
 const lookupConcurrency = 4
 
+// errNoRecord marks a lookup that came back without a usable record.
 var errNoRecord = errors.New("no vulnerability record")
 
 // Advisor implements engine.Advisor with Client's data. It is composed of
@@ -29,8 +30,8 @@ var errNoRecord = errors.New("no vulnerability record")
 // Advisor runs their lookups together, counts what failed or came from a
 // stale cache, then writes the warnings and the data status.
 type Advisor struct {
-	Client *Client
-	Now    func() time.Time
+	Client *Client          // the data source; required
+	Now    func() time.Time // the clock end-of-life findings are judged by; nil means time.Now
 }
 
 // part is the advisor for one kind of component.
@@ -62,6 +63,7 @@ func Rules() []Rule {
 }
 
 var (
+	// serverVersion reads a version from a Server header such as nginx/1.24.0.
 	serverVersion = regexp.MustCompile(`(?i)^(nginx|apache)/([0-9]+(?:\.[0-9]+)+)`)
 	// Distro builds backport security fixes without changing the version.
 	backported = regexp.MustCompile(`(?i)ubuntu|debian|deb[0-9]|\bel[0-9]|centos|red ?hat|rhel|fedora|amazon|rocky|alma|suse`)
@@ -78,6 +80,7 @@ type component struct {
 	source  string // where the version was read, e.g. "x-powered-by /wp-login.php"
 }
 
+// lookup is one component's lookup and everything its fetch learned.
 type lookup struct {
 	component
 	rec     *Record

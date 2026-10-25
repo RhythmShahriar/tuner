@@ -49,8 +49,8 @@ var affected = map[string]string{
 // request gets a 502.
 type Server struct {
 	*httptest.Server
-	Hits atomic.Int32
-	Down atomic.Bool
+	Hits atomic.Int32 // requests served so far
+	Down atomic.Bool  // answer every request with a 502
 }
 
 // NewServer starts a fake OSV.dev API, closed when the test ends.

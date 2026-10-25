@@ -33,7 +33,8 @@ const (
 	// Wordfence's terms let anyone reuse a record if they link to it and
 	// reproduce Defiant's copyright notice and license. Findings link to
 	// each record; these are the fallbacks when the feed omits them.
-	wordfenceNotice     = "Copyright Defiant Inc."
+	wordfenceNotice = "Copyright Defiant Inc."
+	// The feed's terms (linked from each finding) and the page for one record.
 	wordfenceLicenseURL = "https://www.wordfence.com/wordfence-intelligence-terms-and-conditions/"
 	wordfenceRecordURL  = "https://www.wordfence.com/threat-intel/vulnerabilities/id/"
 
@@ -52,8 +53,8 @@ const wordfenceFormat = 1
 // loads the whole index from disk once, on its first lookup. The key is only ever sent in the Authorization header and is
 // never part of an error or warning.
 type Wordfence struct {
-	HTTP      *http.Client
-	UserAgent string
+	HTTP      *http.Client  // nil means a default client; either way connects time out quickly
+	UserAgent string        // sent with every request
 	Key       string        // API key; required
 	Base      string        // "" means DefaultWordfenceBase
 	CacheDir  string        // "" disables the disk cache
@@ -76,15 +77,16 @@ type Wordfence struct {
 // "type/slug" (plugin/akismet, theme/astra, core/wordpress), one per
 // affected range.
 type wordfenceIndex struct {
-	Notice     string            `json:"notice,omitempty"`
-	LicenseURL string            `json:"license_url,omitempty"`
-	Vulns      map[string][]Vuln `json:"vulns"`
+	Notice     string            `json:"notice,omitempty"`      // the feed's copyright notice, shown with its findings
+	LicenseURL string            `json:"license_url,omitempty"` // the feed's terms
+	Vulns      map[string][]Vuln `json:"vulns"`                 // advisories by "type/slug"
 }
 
 // Valid reports whether the index is usable; a cache entry without one is
 // fetched again.
 func (x *wordfenceIndex) Valid() bool { return x != nil && x.Vulns != nil }
 
+// init fills the defaults on first use, so a Wordfence needs no constructor.
 func (w *Wordfence) init() {
 	w.once.Do(func() {
 		w.http = ratelimit.FastClient(w.HTTP)
@@ -143,6 +145,7 @@ func (w *Wordfence) Source() string {
 	return fmt.Sprintf("Wordfence Intelligence (%s; license %s)", cmpOr(w.notice, wordfenceNotice), cmpOr(w.license, wordfenceLicenseURL))
 }
 
+// cmpOr returns a, or b when a is empty.
 func cmpOr(a, b string) string {
 	if a != "" {
 		return a
@@ -199,6 +202,7 @@ func (w *Wordfence) scrub(err error) error {
 
 // --- Wordfence Intelligence wire format ---
 
+// wfRange is one affected range in the feed.
 type wfRange struct {
 	From          flex `json:"from_version"`
 	FromInclusive bool `json:"from_inclusive"`
@@ -206,6 +210,7 @@ type wfRange struct {
 	ToInclusive   bool `json:"to_inclusive"`
 }
 
+// wfRecord is the part of a feed record Tuner reads.
 type wfRecord struct {
 	ID       string `json:"id"`
 	Title    string `json:"title"`
