@@ -20,6 +20,7 @@ import (
 	"github.com/RhythmShahriar/tuner/vulns"
 )
 
+// init registers the local-scan flags with rhythm tuner scan.
 func init() { registerScanExtension(&localExtension{}) }
 
 // localExtension adds the local-scan flags --integrity and --discover.

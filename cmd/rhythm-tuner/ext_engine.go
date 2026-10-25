@@ -11,6 +11,7 @@ import (
 	"github.com/RhythmShahriar/tuner/report"
 )
 
+// init registers the engine flags with rhythm tuner scan.
 func init() { registerScanExtension(&engineExtension{}) }
 
 // engineExtension adds the scan engine's safety flags to rhythm tuner scan.
@@ -20,6 +21,7 @@ type engineExtension struct {
 	requestBudget int
 }
 
+// Help documents --plugins, --request-budget and --follow-host.
 func (e *engineExtension) Help() string {
 	return `Plugins:
       --plugins MODE       how hard to look for WordPress plugins the home
@@ -36,12 +38,14 @@ Redirects:
                            to the host you named`
 }
 
+// Flags adds the engine flags.
 func (e *engineExtension) Flags(fs *flag.FlagSet) {
 	fs.BoolVar(&e.followHost, "follow-host", false, "")
 	fs.StringVar(&e.plugins, "plugins", "", "")
 	fs.IntVar(&e.requestBudget, "request-budget", 0, "")
 }
 
+// Plan passes the flags to the engine options, refusing bad values.
 func (e *engineExtension) Plan(p *scanPlan) error {
 	p.engine.FollowHost = e.followHost
 	mode, err := engine.ParsePluginMode(e.plugins)
@@ -56,6 +60,7 @@ func (e *engineExtension) Plan(p *scanPlan) error {
 	return nil
 }
 
+// Finished has nothing to add once the scan ends.
 func (e *engineExtension) Finished(*scanPlan, []report.Report, io.Writer) (int, error) {
 	return exitOK, nil
 }

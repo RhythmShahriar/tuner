@@ -27,6 +27,7 @@ import (
 // doesn't hold up a scheduled scan.
 const notifyTimeout = 30 * time.Second
 
+// init registers the change-tracking flags with rhythm tuner scan.
 func init() { registerScanExtension(&reportExtension{}) }
 
 // reportExtension adds change tracking to rhythm tuner scan: --since
@@ -57,6 +58,7 @@ type reportExtension struct {
 	notifyOptions notify.Options
 }
 
+// Help documents the change-tracking flags.
 func (e *reportExtension) Help() string {
 	return `Changes:
       --since <file>       compare with an earlier JSON report and list what

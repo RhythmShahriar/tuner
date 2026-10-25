@@ -18,11 +18,11 @@ import (
 
 // command is a subcommand such as "diff" or "serve".
 type command struct {
-	Name    string // what users type: rhythm tuner <Name>
-	Alias   string // optional short form, like "s" for scan
-	Args    string // what follows the name in the usage list, e.g. "<old.json> <new.json>"
-	Summary string // one line for the usage list, e.g. "compare two JSON reports"
-	Run     func(args []string, stdout, stderr io.Writer) int
+	Name    string                                            // what users type: rhythm tuner <Name>
+	Alias   string                                            // optional short form, like "s" for scan
+	Args    string                                            // what follows the name in the usage list, e.g. "<old.json> <new.json>"
+	Summary string                                            // one line for the usage list, e.g. "compare two JSON reports"
+	Run     func(args []string, stdout, stderr io.Writer) int // runs the command; returns the exit code
 }
 
 // scanExtension adds flags and behavior to rhythm tuner scan.
@@ -42,6 +42,7 @@ type scanExtension interface {
 }
 
 var (
+	// commands and scanExtensions are filled by init functions before main.
 	commands       []command
 	scanExtensions []scanExtension
 )
@@ -64,6 +65,7 @@ func registerCommand(c command) {
 // registration order, which follows file names because init() does.
 func registerScanExtension(e scanExtension) { scanExtensions = append(scanExtensions, e) }
 
+// lookupCommand returns the command called name or with that alias, or nil.
 func lookupCommand(name string) *command {
 	for i := range commands {
 		if commands[i].Name == name || commands[i].Alias != "" && commands[i].Alias == name {

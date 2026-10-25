@@ -15,6 +15,7 @@ import (
 	"github.com/RhythmShahriar/tuner/report"
 )
 
+// reportUsage is the help for rhythm tuner report.
 const reportUsage = `Usage:
   rhythm tuner report <report.json>... [flags]
 
@@ -42,6 +43,7 @@ Exit codes: 0 ok · 2 usage error · 3 a report couldn't be read or written
 // list them. jsonl streams during a scan, so a saved report can't become it.
 var reportFormats = []string{"html", "md", "sarif", "json"}
 
+// init registers rhythm tuner report.
 func init() {
 	registerCommand(command{Name: "report", Args: "<report.json>... -o <file>", Summary: "render saved JSON reports as HTML, Markdown or SARIF", Run: cmdReport})
 }

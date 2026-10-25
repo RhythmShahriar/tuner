@@ -37,6 +37,7 @@ func updateUsage() string {
 	}) + named(updateHelp)
 }
 
+// updateHelp follows the usage line in rhythm tuner update --help.
 const updateHelp = `
 Refreshes the check pack and the cached vulnerability data now. Scans also
 refresh both on their own once they are a day old.

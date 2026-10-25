@@ -43,6 +43,7 @@ type Verifier struct {
 // kit instead of refreshing it through TUF.
 func NewVerifier(offline bool) *Verifier { return newVerifier(release.Repo, offline) }
 
+// newVerifier is NewVerifier for any repository, for tests.
 func newVerifier(repo string, offline bool) *Verifier {
 	return &Verifier{repo: repo, offline: offline}
 }
