@@ -195,10 +195,13 @@ runs:
           # the repository and, when known, the release tag as well.
           ref=()
           [ "$ver" = latest ] || ref=(--certificate-github-workflow-ref "refs/tags/v$ver")
-          cosign verify-blob checksums.txt \
+          # Git Bash on Windows rewrites arguments that look like paths
+          # (backslashes included), so turn that off and match dots with
+          # [.] rather than a backslash.
+          MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' cosign verify-blob checksums.txt \
             --bundle checksums.txt.sigstore.json \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            --certificate-identity-regexp '^https://github\.com/RhythmShahriar/\.github/\.github/workflows/release-go\.yml@' \
+            --certificate-identity-regexp '^https://github[.]com/RhythmShahriar/[.]github/[.]github/workflows/release-go[.]yml@' \
             --certificate-github-workflow-repository RhythmShahriar/tuner \
             ${ref[@]+"${ref[@]}"}
         fi
@@ -289,8 +292,10 @@ runs:
         out="$RUNNER_TEMP/rhythm-tuner-report"
         mkdir -p "$out"
         report="$out/tuner.json"
-        rhythm-tuner scan "${targets[@]}" "${flags[@]}" ${base[@]+"${base[@]}"} ${req[@]+"${req[@]}"} ${extra[@]+"${extra[@]}"} -o "$report"
-        code=$?
+        # shell: bash runs with -e, so keep the scan's exit code instead of
+        # stopping here: the outputs and the SARIF upload need it.
+        code=0
+        rhythm-tuner scan "${targets[@]}" "${flags[@]}" ${base[@]+"${base[@]}"} ${req[@]+"${req[@]}"} ${extra[@]+"${extra[@]}"} -o "$report" || code=$?
         echo "exit-code=$code" >> "$GITHUB_OUTPUT"
         [ -s "$report" ] || { echo "::error::rhythm-tuner wrote no report (exit $code)"; exit "$((code > 1 ? code : 3))"; }
         echo "report=$report" >> "$GITHUB_OUTPUT"
