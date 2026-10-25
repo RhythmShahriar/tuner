@@ -27,6 +27,7 @@ type Bench struct {
 	Tools     []*Tool       // the tools to run (Tuner always)
 }
 
+// main runs the benchmark: every tool against every testbed site.
 func main() {
 	var (
 		manifestPath = flag.String("manifest", "testbed/ground-truth.yaml", "the ground-truth manifest")
@@ -44,6 +45,7 @@ func main() {
 	}
 }
 
+// runMain loads the manifest, runs the tools and writes the scoreboard.
 func runMain(manifestPath, out, tunerBin, only, dockerNet string, timeout time.Duration) error {
 	m, err := LoadManifest(manifestPath)
 	if err != nil {
@@ -145,6 +147,7 @@ func buildTuner() (string, error) {
 	return bin, nil
 }
 
+// tunerVersion is the version bin reports, or "".
 func tunerVersion(bin string) string {
 	out, err := run(context.Background(), 30*time.Second, bin, "--version")
 	if err != nil {
@@ -153,6 +156,7 @@ func tunerVersion(bin string) string {
 	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(out), "rhythm-tuner"))
 }
 
+// summary is one line on how a tool did on a site.
 func summary(s Score) string {
 	switch {
 	case s.NotRun:

@@ -19,13 +19,14 @@ const MinEvery = time.Minute
 // Schedule says when runs start: every Every from the first run, or each
 // day at the times in At (local time of the clock). Exactly one is set.
 type Schedule struct {
-	Every time.Duration
-	At    []TimeOfDay
+	Every time.Duration // between run starts; 0 when At is set
+	At    []TimeOfDay   // times of day, sorted; nil when Every is set
 }
 
 // TimeOfDay is a wall-clock time, e.g. 02:00.
 type TimeOfDay struct{ Hour, Minute int }
 
+// String is the time as HH:MM.
 func (t TimeOfDay) String() string { return fmt.Sprintf("%02d:%02d", t.Hour, t.Minute) }
 
 // ParseAt reads "02:00" or "02:00,14:30" into sorted times of day.

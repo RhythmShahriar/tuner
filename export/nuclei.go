@@ -171,11 +171,12 @@ func expressionIn(paths []string, ms []nucleiMatcher) bool {
 
 // The template layout, in the field order nuclei-templates use.
 type nucleiTemplate struct {
-	ID   string          `yaml:"id"`
-	Info nucleiInfo      `yaml:"info"`
-	HTTP []nucleiRequest `yaml:"http"`
+	ID   string          `yaml:"id"`   // tuner-<check id>
+	Info nucleiInfo      `yaml:"info"` // name, severity and the rest of the check's description
+	HTTP []nucleiRequest `yaml:"http"` // one request block
 }
 
+// nucleiInfo is a template's info block.
 type nucleiInfo struct {
 	Name        string     `yaml:"name"`
 	Author      string     `yaml:"author"`
@@ -187,6 +188,8 @@ type nucleiInfo struct {
 	Metadata    nucleiMeta `yaml:"metadata"`
 }
 
+// nucleiMeta keeps the Tuner fields nuclei has no place for, so an
+// exported template still says where it came from.
 type nucleiMeta struct {
 	MaxRequest int    `yaml:"max-request"`
 	TunerID    string `yaml:"tuner-id"`
@@ -197,6 +200,7 @@ type nucleiMeta struct {
 	FixApache  string `yaml:"fix-apache,omitempty"`
 }
 
+// nucleiRequest is the request block: the check's paths and matchers.
 type nucleiRequest struct {
 	Method            string          `yaml:"method"`
 	Path              []string        `yaml:"path"`
@@ -205,6 +209,7 @@ type nucleiRequest struct {
 	Matchers          []nucleiMatcher `yaml:"matchers"`
 }
 
+// nucleiMatcher is one nuclei matcher, made from a Tuner one.
 type nucleiMatcher struct {
 	Type      string   `yaml:"type"`
 	Part      string   `yaml:"part,omitempty"`
@@ -402,6 +407,7 @@ func splitAlternatives(re string) []string {
 	return append(out, re[start:])
 }
 
+// sortedKeys returns m's keys in order, so exports are reproducible.
 func sortedKeys(m map[string]string) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {

@@ -23,9 +23,9 @@ const Schema = "rhythm-tuner-diff/v0"
 
 // Entry is one finding in a comparison.
 type Entry struct {
-	Target      string         `json:"target"`
-	Fingerprint string         `json:"fingerprint"`
-	Finding     engine.Finding `json:"finding"`
+	Target      string         `json:"target"`      // as the report names it
+	Fingerprint string         `json:"fingerprint"` // the identity the two scans are matched on
+	Finding     engine.Finding `json:"finding"`     // as the newer scan saw it; the older one for a fixed finding
 	// Was is the finding's severity in the old scan, when it changed. A
 	// finding whose severity changed counts as new.
 	Was engine.Severity `json:"was,omitempty"`
@@ -47,15 +47,15 @@ const (
 // Scan is one side of a comparison: its reports and the targets it
 // could not scan, as a saved JSON batch lists them.
 type Scan struct {
-	Reports []report.Report
-	Failed  []report.TargetError
+	Reports []report.Report      // one per scanned target
+	Failed  []report.TargetError // targets it could not scan
 }
 
 // Result is what changed between two scans.
 type Result struct {
-	New       []Entry `json:"new"`
-	Fixed     []Entry `json:"fixed"`
-	Unchanged []Entry `json:"unchanged"`
+	New       []Entry `json:"new"`       // in the new scan only, or changed severity or gained advisories
+	Fixed     []Entry `json:"fixed"`     // in the old scan only and checked again by the new one (see NotSeen)
+	Unchanged []Entry `json:"unchanged"` // in both
 	// NotScanned lists targets of the old scan the new one doesn't have
 	// (or couldn't reach). Their findings are not counted as fixed.
 	NotScanned []string `json:"not_scanned,omitempty"`
@@ -206,6 +206,7 @@ func (res Result) Summary(since string) string {
 	return fmt.Sprintf("%d new, %d fixed since %s", len(res.New), len(res.Fixed), report.SafeText(since)) + res.notSeen()
 }
 
+// notSeen is the summary's note on findings not seen, or "" when none.
 func (res Result) notSeen() string {
 	if len(res.NotSeen) == 0 {
 		return ""
@@ -265,6 +266,7 @@ func (e Entry) title() string {
 	return e.Finding.Title + fmt.Sprintf(" (%d new: %s)", n, strings.Join(ids, ", "))
 }
 
+// firstOf is s's first element, or "".
 func firstOf(s []string) string {
 	if len(s) > 0 {
 		return s[0]

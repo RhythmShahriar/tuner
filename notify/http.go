@@ -24,6 +24,8 @@ type hook struct {
 	body   func(Message) any
 }
 
+// newHook checks a webhook URL and prepares its client. scheme is the
+// real one behind slack://, discord:// or webhook+https://.
 func newHook(u *url.URL, scheme string, o Options, shown string, body func(Message) any) (*hook, error) {
 	if strings.Trim(u.Path, "/") == "" {
 		return nil, fmt.Errorf("%s: the URL has no path; paste the whole webhook URL", shown)
@@ -41,8 +43,10 @@ func newHook(u *url.URL, scheme string, o Options, shown string, body func(Messa
 	return &hook{url: real.String(), shown: shown, client: &c, body: body}, nil
 }
 
+// String is the URL as shown to the user, its token masked.
 func (h *hook) String() string { return h.shown }
 
+// Send posts m as the backend's JSON body.
 func (h *hook) Send(ctx context.Context, m Message) error {
 	data, err := json.Marshal(h.body(m))
 	if err != nil {
@@ -70,6 +74,8 @@ func (h *hook) Send(ctx context.Context, m Message) error {
 // control characters, which also stops <!channel> style mentions.
 var slackEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 
+// slackBody is Slack's incoming webhook body. Unfurling is off so Slack
+// never fetches the scanned site to preview a link.
 func slackBody(m Message) any {
 	return map[string]any{
 		"text":         m.Text(slackEscaper.Replace),
@@ -81,6 +87,8 @@ func slackBody(m Message) any {
 // discordLimit is Discord's content limit, in characters.
 const discordLimit = 2000
 
+// discordEscaper escapes Discord's Markdown, so site text can't format the
+// message or ping anyone.
 var discordEscaper = func() *strings.Replacer {
 	var pairs []string
 	for _, c := range "\\*_~`|>[]()<@" {
@@ -119,6 +127,7 @@ func cutEscape(s string) string {
 	return s
 }
 
+// discordBody is Discord's webhook body, cut to the message limit.
 func discordBody(m Message) any {
 	text := m.Text(discordEscape)
 	if utf8.RuneCountInString(text) > discordLimit {
@@ -135,4 +144,5 @@ func discordBody(m Message) any {
 	}
 }
 
+// webhookBody is the Message itself, for receivers of the documented JSON.
 func webhookBody(m Message) any { return m }

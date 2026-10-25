@@ -34,7 +34,7 @@ type Plan struct {
 	// Fast lists targets scanned at FastRate instead of Engine.Rate, such
 	// as hosts on the user's own network.
 	Fast     map[string]bool
-	FastRate float64
+	FastRate float64 // requests per second for Fast targets
 
 	Parallel int           // targets scanned at once; below 1 means 1
 	MaxTime  time.Duration // stop the whole run after this long; 0 never
@@ -48,7 +48,7 @@ type Plan struct {
 	// target whose vulnerability data was missing or whose scan was cut
 	// short, which it otherwise can't call clean.
 	FailOn                          engine.Severity
-	ConfirmedOnly                   bool
+	ConfirmedOnly                   bool // count only confirmed findings for FailOn
 	AllowMissingVulns, AllowPartial bool
 
 	// Version, CheckSet and CheckPack go into each report.
@@ -75,11 +75,11 @@ type Hooks struct {
 
 // Target is how one target went.
 type Target struct {
-	Target string
+	Target string // as given
 	// Result is the scan's result without hidden findings, or nil when
 	// the target could not be scanned.
 	Result *engine.Result
-	Status Status
+	Status Status // how much of the target the scan saw
 	// Err is why the scan failed or stopped early; context.Canceled when
 	// the run was canceled. A target with a Result may have one too.
 	Err error
@@ -191,10 +191,11 @@ func (p *Plan) safeScan(ctx context.Context, s *engine.Scanner, target string, h
 
 // InternalError is a panic caught while scanning one target.
 type InternalError struct {
-	Value any
+	Value any    // what was passed to panic
 	Stack []byte // where it happened, for a bug report
 }
 
+// Error says a panic happened and asks for a report.
 func (e InternalError) Error() string {
 	return fmt.Sprintf("internal error (please report): %v", e.Value)
 }

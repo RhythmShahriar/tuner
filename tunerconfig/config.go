@@ -67,12 +67,12 @@ type Config struct {
 	// Path is the file the settings came from, as it was named.
 	Path string
 
-	Targets       []string
-	Profile       string // quick or default (deep still works), lower-cased
-	Rate          *float64
-	Concurrency   *int
-	FailOn        string // a severity, lower-cased
-	MinConfidence string // confirmed or likely
+	Targets       []string // scanned when the command line names none
+	Profile       string   // quick or default (deep still works), lower-cased
+	Rate          *float64 // requests per second
+	Concurrency   *int     // requests in flight at once
+	FailOn        string   // a severity, lower-cased
+	MinConfidence string   // confirmed or likely
 	// Baseline is the baseline report's path, relative to the folder
 	// that holds the config file unless it is absolute.
 	Baseline string
@@ -83,11 +83,11 @@ type Config struct {
 	// variable, sorted. A scan sends those only to targets the command
 	// line named, as the variables are often CI secrets.
 	EnvHeaders  []string
-	Tags        []string
-	ExcludeTags []string
-	IDs         []string
-	ExcludeIDs  []string
-	Ignore      []Ignore
+	Tags        []string // run only checks with one of these tags
+	ExcludeTags []string // skip checks with any of these tags
+	IDs         []string // run only these checks; globs allowed
+	ExcludeIDs  []string // skip these checks; globs allowed
+	Ignore      []Ignore // accepted risks
 }
 
 // Ignore hides findings a project has accepted, until a date.

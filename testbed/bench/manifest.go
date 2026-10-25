@@ -65,6 +65,8 @@ type Plugin struct {
 }
 
 var (
+	// The values a manifest may use for a plugin's discovery, a site's front
+	// and a finding's severity.
 	discoverable = []string{"readme", "rest", "asset"}
 	fronts       = []string{"nginx", "apache", "challenge"}
 	severities   = []string{"critical", "high", "medium", "low", "info"}
@@ -88,6 +90,7 @@ func LoadManifest(path string) (*Manifest, error) {
 	return &m, nil
 }
 
+// check validates the manifest before anything runs.
 func (m *Manifest) check() error {
 	if len(m.Sites) == 0 {
 		return fmt.Errorf("no sites")

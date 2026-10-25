@@ -47,33 +47,33 @@ const MaxListed = 25
 
 // Item is one new finding in a notification.
 type Item struct {
-	Target      string          `json:"target"`
-	Fingerprint string          `json:"fingerprint"`
-	ID          string          `json:"id"`
-	Title       string          `json:"title"`
-	Severity    engine.Severity `json:"severity"`
+	Target      string          `json:"target"`        // the scanned target
+	Fingerprint string          `json:"fingerprint"`   // stable across runs; see report.Fingerprint
+	ID          string          `json:"id"`            // the check ID
+	Title       string          `json:"title"`         // what was found
+	Severity    engine.Severity `json:"severity"`      // as the new scan rated it
 	Was         engine.Severity `json:"was,omitempty"` // the old severity, when that is what changed
-	Confidence  string          `json:"confidence"`
+	Confidence  string          `json:"confidence"`    // confirmed or likely
 	// Location is the finding's URL, or its path inside the scanned
 	// folder for a local scan.
 	Location      string   `json:"location"`
 	NewAdvisories []string `json:"new_advisories,omitempty"` // CVE or advisory IDs
-	Fix           string   `json:"fix,omitempty"`
+	Fix           string   `json:"fix,omitempty"`            // the check's fix, cleaned and masked
 }
 
 // Message is what every backend sends.
 type Message struct {
-	Schema  string `json:"schema"`
-	Tool    string `json:"tool"`
-	Version string `json:"version"`
+	Schema  string `json:"schema"`  // rhythm-tuner-notify/v0
+	Tool    string `json:"tool"`    // rhythm-tuner
+	Version string `json:"version"` // the Tuner version that sent it
 	// Since names the earlier report the scan was compared with. It is
 	// empty on a first run, when every finding counts as new.
 	Since       string                  `json:"since,omitempty"`
-	MinSeverity engine.Severity         `json:"min_severity"`
-	Summary     string                  `json:"summary"`
-	Counts      map[engine.Severity]int `json:"counts"`
-	Targets     []string                `json:"targets"`
-	Findings    []Item                  `json:"findings"`
+	MinSeverity engine.Severity         `json:"min_severity"` // the lowest severity sent
+	Summary     string                  `json:"summary"`      // one line with the counts
+	Counts      map[engine.Severity]int `json:"counts"`       // new findings per severity
+	Targets     []string                `json:"targets"`      // every target scanned, findings or not
+	Findings    []Item                  `json:"findings"`     // the new findings; chat and email list up to MaxListed
 	// Incomplete holds the scan's status notes when it didn't finish, e.g.
 	// "Incomplete: stopped by --max-time", so nobody reads a short list as
 	// a clean bill of health.
@@ -273,6 +273,9 @@ func cleanErr(err error) error {
 	return err
 }
 
+// loopback reports whether host is this machine. Only a receiver there may
+// take findings over plain http or SMTP without TLS: findings name a
+// client's weak spots and must not cross a network in the clear.
 func loopback(host string) bool {
 	if host == "localhost" {
 		return true
@@ -285,6 +288,7 @@ func loopback(host string) bool {
 // anything that looks like a secret is masked.
 func safe(s string) string { return report.SafeText(matchers.Redact(s)) }
 
+// safeBlock is safe for multi-line text: each line is cleaned and masked.
 func safeBlock(s string) string {
 	lines := strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
 	for i, l := range lines {
@@ -312,6 +316,7 @@ func host(t string) string {
 	return t
 }
 
+// first is s's first element, or "".
 func first(s []string) string {
 	if len(s) > 0 {
 		return s[0]

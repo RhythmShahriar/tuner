@@ -19,21 +19,21 @@ import (
 
 // Result is what Tuner learned about the target.
 type Result struct {
-	Tech      []string `json:"tech"` // wordpress, laravel, php
-	WordPress string   `json:"wordpress_version,omitempty"`
-	PHP       string   `json:"php_version,omitempty"`
-	PHPBuild  string   `json:"php_build,omitempty"`  // full build string when it carries a distro suffix, e.g. 7.4.3-4ubuntu2.19
-	PHPSource string   `json:"php_source,omitempty"` // evidence for PHP: "<header> <path>" (e.g. "x-powered-by /wp-login.php"), cookie, probe, php on PATH, --php <path>; empty when only WordPress implies it
-	Server    string   `json:"server,omitempty"`
+	Tech      []string `json:"tech"`                        // wordpress, laravel, php
+	WordPress string   `json:"wordpress_version,omitempty"` // the version the site gives away, if any
+	PHP       string   `json:"php_version,omitempty"`       // the PHP version the site gives away, if any
+	PHPBuild  string   `json:"php_build,omitempty"`         // full build string when it carries a distro suffix, e.g. 7.4.3-4ubuntu2.19
+	PHPSource string   `json:"php_source,omitempty"`        // evidence for PHP: "<header> <path>" (e.g. "x-powered-by /wp-login.php"), cookie, probe, php on PATH, --php <path>; empty when only WordPress implies it
+	Server    string   `json:"server,omitempty"`            // the Server header as sent
 
-	Components []Component `json:"components,omitempty"`
+	Components []Component `json:"components,omitempty"` // plugins and themes seen
 }
 
 // Component is a WordPress plugin or theme seen on the site.
 type Component struct {
-	Type    string `json:"type"` // plugin or theme
-	Slug    string `json:"slug"`
-	Version string `json:"version,omitempty"`
+	Type    string `json:"type"`                     // plugin or theme
+	Slug    string `json:"slug"`                     // the folder name under wp-content
+	Version string `json:"version,omitempty"`        // "" when it could not be read
 	Source  string `json:"version_source,omitempty"` // readme, style.css, asset or plugin header
 
 	FoundBy    Methods `json:"found_by,omitempty"`   // how it was discovered: asset, rest, readme
@@ -83,6 +83,7 @@ func (m *Methods) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// String is "slug version", with "theme " in front of a theme.
 func (c Component) String() string {
 	s := c.Slug
 	if c.Type == "theme" {
@@ -128,6 +129,8 @@ func (r Result) String() string {
 }
 
 var (
+	// Patterns for what the home page gives away: the generator tag, the
+	// block library stylesheet, X-Powered-By and asset paths with their ?ver=.
 	wpGenerator = regexp.MustCompile(`<meta name="generator" content="WordPress ([0-9.]+)"`)
 	wpBlockCSS  = regexp.MustCompile(`wp-includes/css/dist/block-library/[^"'?]*\?ver=([0-9]+\.[0-9]+(?:\.[0-9]+)?)`)
 	phpPowered  = regexp.MustCompile(`PHP/([0-9][0-9.]*)([^\s,;]*)`)
@@ -219,6 +222,7 @@ func ExecutedPHP(r *matchers.Response) bool {
 	return strings.HasPrefix(ct, "text/html") && !bytes.Contains(r.Body, []byte("<?php"))
 }
 
+// homePath is the path the home page was fetched from, "/" if unknown.
 func homePath(r *matchers.Response) string {
 	if r.URL != nil && r.URL.Path != "" {
 		return r.URL.Path
