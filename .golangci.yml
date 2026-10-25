@@ -11,7 +11,16 @@ linters:
     - gosec
     - misspell
     - unconvert
+    - revive
   settings:
+    revive:
+      rules:
+        # Every package says what it is for and every exported identifier
+        # carries a doc comment. Stuttering names are left alone: renaming
+        # them would break the API that tests and packs build on.
+        - name: package-comments
+        - name: exported
+          arguments: [disableStutteringCheck]
     goheader:
       values:
         regexp:
@@ -31,6 +40,6 @@ linters:
   exclusions:
     rules:
       - path: _test\.go
-        linters: [errcheck, gosec]
+        linters: [errcheck, gosec, revive]
 formatters:
   enable: [gofmt]

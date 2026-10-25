@@ -24,6 +24,9 @@ jobs:
     uses: RhythmShahriar/.github/.github/workflows/ci-go.yml@fb09694450362b6d4b68c631182d78a69b653c83 # master 2026-10-24
     with:
       os: '["ubuntu-latest", "windows-latest", "macos-latest"]'
+      # The writing rules (scripts/check-style.py in RhythmShahriar/.github)
+      # over every tracked text file, Linux job only.
+      style: true
   commitlint:
     uses: RhythmShahriar/.github/.github/workflows/commitlint.yml@fb09694450362b6d4b68c631182d78a69b653c83 # master 2026-10-24
 
