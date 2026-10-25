@@ -24,7 +24,7 @@ type Secret = secrets.Secret
 // Two secrets are the same when kind, name and raw value match. The masked
 // form alone can't tell them apart: it keeps at most 4 characters, so two
 // different OpenAI keys both read sk-p•••••. Only a SHA-256 of the raw
-// value is kept, and only while FindSecrets runs.
+// value is kept, for no longer than FindSecrets runs.
 func FindSecrets(b []byte) []Secret {
 	s := string(b)
 	red := secrets.Redact(s)

@@ -45,6 +45,9 @@ func (ss *session) tlsInfo(ctx context.Context, home *matchers.Response) *matche
 	return info
 }
 
+// legacyVersions lists the obsolete TLS versions (1.0 and 1.1) the server
+// still accepts. Each try is a bare handshake that is closed at once:
+// it sends no request and costs the site no more than a connection.
 func (ss *session) legacyVersions(ctx context.Context, u *url.URL) []string {
 	addr := u.Host
 	if u.Port() == "" {

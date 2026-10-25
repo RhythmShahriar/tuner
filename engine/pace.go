@@ -31,6 +31,7 @@ type pace struct {
 	unlimited atomic.Bool
 }
 
+// wait blocks until the next request to the host may go out.
 func (p *pace) wait(ctx context.Context) error {
 	return p.l.Wait(ctx)
 }
@@ -61,6 +62,7 @@ func newPaces(rps float64) *paces {
 	return &paces{hosts: ratelimit.NewHosts(rps), unlimited: unlimited, m: map[string]*pace{}}
 }
 
+// For returns host's pace, making it on first use.
 func (ps *paces) For(host string) *pace {
 	host = strings.ToLower(host)
 	ps.mu.Lock()

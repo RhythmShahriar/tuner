@@ -21,7 +21,8 @@ var (
 	// Composer auth.json token maps: {"github-oauth": {"github.com": "token"}}.
 	// http-basic passwords and the bitbucket-oauth consumer key and secret
 	// are JSON fields with secret names, which the kit already masks.
-	composerRe     = regexp.MustCompile(`"(github-oauth|gitlab-oauth|gitlab-token|bearer)"\s*:\s*\{([^{}]*)\}`)
+	composerRe = regexp.MustCompile(`"(github-oauth|gitlab-oauth|gitlab-token|bearer)"\s*:\s*\{([^{}]*)\}`)
+	// composerPairRe reads one "host": "token" pair inside such a map.
 	composerPairRe = regexp.MustCompile(`"[^"]+"\s*:\s*"([^"]+)"`)
 )
 
@@ -54,6 +55,7 @@ func skipValue(v string) bool {
 // Values that look like secrets but are only placeholders.
 var placeholders = map[string]bool{"null": true, "true": true, "false": true, "none": true, "empty": true}
 
+// span is a secret found in the redacted text: its place and what it is.
 type span struct {
 	start, end int
 	secret     Secret

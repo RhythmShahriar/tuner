@@ -47,17 +47,17 @@ const (
 // Options configure a Scanner. The zero value scans politely with the
 // defaults above, passive plugin discovery and no vulnerability matching.
 type Options struct {
-	UserAgent   string
+	UserAgent   string        // sent with every request so site owners can tell Tuner apart
 	Headers     http.Header   // sent with every request, e.g. Cookie or Authorization; overrides UserAgent
 	Rate        float64       // requests per second to the target; 0 means unlimited until the site answers 429 or 503
 	Timeout     time.Duration // per request, each try; 0 means DefaultTimeout
 	Concurrency int           // most requests in flight at once, for the whole scan; 0 means DefaultConcurrency
 	Retries     int           // extra attempts after a network error or a 429/503
-	Proxy       *url.URL
-	Insecure    bool         // skip TLS certificate verification
-	Profile     Profile      // quick skips plugin and theme version lookups (not the PHP probe)
-	HTTPClient  *http.Client // optional base client, e.g. one that trusts a test server
-	Advisor     Advisor      // optional: known-vulnerability matching
+	Proxy       *url.URL      // route every request through this proxy; the TLS probe is skipped then
+	Insecure    bool          // skip TLS certificate verification
+	Profile     Profile       // quick skips plugin and theme version lookups (not the PHP probe)
+	HTTPClient  *http.Client  // optional base client, e.g. one that trusts a test server
+	Advisor     Advisor       // optional: known-vulnerability matching
 
 	// FollowHost lets the scan continue on another host when the home page
 	// redirects there. Headers are still only sent to the requested host.
@@ -124,53 +124,53 @@ func (c Confidence) Confirmed() bool { return c != ConfidenceLow }
 
 // Advisory is one known vulnerability behind an advisor finding.
 type Advisory struct {
-	ID         string   `json:"id"`
-	Title      string   `json:"title"`
-	CVEs       []string `json:"cves,omitempty"`
-	Severity   Severity `json:"severity,omitempty"` // empty when unrated
-	CVSS       float64  `json:"cvss,omitempty"`
-	KEV        bool     `json:"kev,omitempty"` // known exploited (CISA KEV)
-	FixedIn    string   `json:"fixed_in,omitempty"`
-	References []string `json:"references,omitempty"`
+	ID         string   `json:"id"`                   // the advisory's ID at its source
+	Title      string   `json:"title"`                // one line
+	CVEs       []string `json:"cves,omitempty"`       // CVE IDs, when assigned
+	Severity   Severity `json:"severity,omitempty"`   // empty when unrated
+	CVSS       float64  `json:"cvss,omitempty"`       // base score, when rated
+	KEV        bool     `json:"kev,omitempty"`        // known exploited (CISA KEV)
+	FixedIn    string   `json:"fixed_in,omitempty"`   // first fixed version; "" when unknown or unfixed
+	References []string `json:"references,omitempty"` // links to the advisory
 }
 
 // Hooks stream progress while a scan runs. Calls are never concurrent.
 type Hooks struct {
-	Fingerprint func(fingerprint.Result)
-	Baseline    func(soft404 bool)
-	Finding     func(Finding)
-	Progress    func(done, total int)
-	Request     func(RequestLog)
+	Fingerprint func(fingerprint.Result) // the site's fingerprint, once known
+	Baseline    func(soft404 bool)       // the soft-404 probe ran; soft404 is whether the site has a catch-all page
+	Finding     func(Finding)            // each finding, as soon as it is found
+	Progress    func(done, total int)    // checks done out of total
+	Request     func(RequestLog)         // each request, for -v
 }
 
 // RequestLog describes one HTTP exchange, for verbose output.
 type RequestLog struct {
-	Method   string
+	Method   string // GET or HEAD
 	URL      string
-	Status   int
+	Status   int // 0 when no reply came
 	Duration time.Duration
-	Attempt  int
-	Err      error
+	Attempt  int   // 1 for the first try
+	Err      error // network error, if any
 }
 
 // Finding is one problem found on the target: a YAML check that fired or
 // an advisor's result. Evidence never holds a secret unmasked.
 type Finding struct {
-	ID         string     `json:"id"`
-	Title      string     `json:"title"`
-	Severity   Severity   `json:"severity"`
-	Confidence Confidence `json:"confidence"`
-	Caveat     string     `json:"caveat,omitempty"` // why confidence is low, e.g. "a distro build may already include the fix"
-	Target     string     `json:"target"`
-	URL        string     `json:"url"`
-	Path       string     `json:"path"`
-	Evidence   Evidence   `json:"evidence"`
-	Impact     string     `json:"impact,omitempty"`
-	Fix        string     `json:"fix,omitempty"`
-	References []string   `json:"references,omitempty"`
-	Tags       []string   `json:"tags,omitempty"`
-	Advisories []Advisory `json:"advisories,omitempty"`
-	Source     string     `json:"source,omitempty"` // data provider, for attribution
+	ID         string     `json:"id"`                   // the check or advisor rule that fired
+	Title      string     `json:"title"`                // what was found
+	Severity   Severity   `json:"severity"`             // how bad it is
+	Confidence Confidence `json:"confidence"`           // high (confirmed) or low (likely)
+	Caveat     string     `json:"caveat,omitempty"`     // why confidence is low, e.g. "a distro build may already include the fix"
+	Target     string     `json:"target"`               // the target as given
+	URL        string     `json:"url"`                  // where it was found
+	Path       string     `json:"path"`                 // URL path, or path in a local scan
+	Evidence   Evidence   `json:"evidence"`             // what the check saw
+	Impact     string     `json:"impact,omitempty"`     // what an attacker could do
+	Fix        string     `json:"fix,omitempty"`        // how to fix it
+	References []string   `json:"references,omitempty"` // further reading
+	Tags       []string   `json:"tags,omitempty"`       // categories, for --tags
+	Advisories []Advisory `json:"advisories,omitempty"` // the known vulnerabilities behind an advisor finding
+	Source     string     `json:"source,omitempty"`     // data provider, for attribution
 
 	Fingerprint string            `json:"fingerprint,omitempty"` // stable identity for baselines, set by report.Stamp
 	Fixes       map[string]string `json:"fixes,omitempty"`       // server config snippets by server: nginx, apache
@@ -179,36 +179,36 @@ type Finding struct {
 
 // Evidence shows why a finding fired. Secrets in it are always masked.
 type Evidence struct {
-	Request string            `json:"request"`
-	Status  int               `json:"status"`
-	Matched []string          `json:"matched,omitempty"`
-	Secrets []matchers.Secret `json:"secrets,omitempty"`
+	Request string            `json:"request"`           // METHOD path
+	Status  int               `json:"status"`            // HTTP status of the reply
+	Matched []string          `json:"matched,omitempty"` // the parts that matched
+	Secrets []matchers.Secret `json:"secrets,omitempty"` // credentials found, masked
 }
 
 // Result is the outcome of one Scan: what the target runs, what was found
 // and how complete the scan was.
 type Result struct {
-	Target      string             `json:"target"`
-	Fingerprint fingerprint.Result `json:"fingerprint"`
-	Soft404     bool               `json:"soft_404"`
+	Target      string             `json:"target"`      // the target as given
+	Fingerprint fingerprint.Result `json:"fingerprint"` // what the site runs
+	Soft404     bool               `json:"soft_404"`    // the site answers unknown paths with 200
 	// Soft404Unknown is set when the soft-404 probe hit a block page or
 	// the home page failed: Soft404 is then false but says nothing about
 	// the site, whose 404 behavior could not be measured.
 	Soft404Unknown bool              `json:"soft_404_unknown,omitempty"`
-	TLS            *matchers.TLSInfo `json:"tls,omitempty"`
-	Score          int               `json:"score"`
-	Checks         int               `json:"checks"`
-	Requests       int64             `json:"requests"`
-	Errors         int64             `json:"errors"`
-	Throttled      int64             `json:"throttled"` // 429/503 replies that made Tuner slow down
-	Duration       time.Duration     `json:"-"`
-	Findings       []Finding         `json:"findings"`
-	Warnings       []string          `json:"warnings,omitempty"`
+	TLS            *matchers.TLSInfo `json:"tls,omitempty"`      // certificate and protocols of an https target
+	Score          int               `json:"score"`              // 0 to 100; see Score
+	Checks         int               `json:"checks"`             // checks run
+	Requests       int64             `json:"requests"`           // HTTP requests sent
+	Errors         int64             `json:"errors"`             // requests that got no reply
+	Throttled      int64             `json:"throttled"`          // 429/503 replies that made Tuner slow down
+	Duration       time.Duration     `json:"-"`                  // wall time; JSON reports carry duration_ms instead
+	Findings       []Finding         `json:"findings"`           // sorted, most severe first
+	Warnings       []string          `json:"warnings,omitempty"` // problems that limit what the scan could see
 
 	// Complete is true when every planned request ran. StoppedBy says why
 	// not: interrupted, max-time, waf, home-status, budget or (local scans) integrity.
 	Complete  bool   `json:"complete"`
-	StoppedBy string `json:"stopped_by,omitempty"`
+	StoppedBy string `json:"stopped_by,omitempty"` // why Complete is false
 	BlockedBy string `json:"blocked_by,omitempty"` // WAF or bot wall in the way, e.g. cloudflare
 	VulnData  string `json:"vuln_data,omitempty"`  // ok, partial, missing or off
 }
@@ -569,6 +569,8 @@ type session struct {
 	throttled  atomic.Int64
 }
 
+// fetch is one cached request. Checks that ask for the same URL share
+// it, so they cost the site one request between them.
 type fetch struct {
 	once    sync.Once
 	resp    *matchers.Response
@@ -583,6 +585,10 @@ func (ss *session) emit(fn func()) {
 	fn()
 }
 
+// open starts a session for target: it parses the URL, builds the
+// guarded HTTP clients and fetches the home page. Every connection the
+// session makes goes through guardDial, so the host and address rules
+// in redirect.go hold for checks and advisors alike.
 func (s *Scanner) open(ctx context.Context, target string, h Hooks) (*session, *matchers.Response, error) {
 	u, explicit, auth, err := ParseTargetAuth(target)
 	if err != nil {
@@ -803,9 +809,10 @@ var ErrRequestTimeout = errors.New("request timed out")
 // try. errors.Is(err, ErrRequestTimeout) reports it.
 type RequestTimeoutError struct {
 	Timeout time.Duration // Options.Timeout
-	Tries   int
+	Tries   int           // how many tries timed out
 }
 
+// Error says how long it waited and how often.
 func (e *RequestTimeoutError) Error() string {
 	if e.Tries <= 1 {
 		return fmt.Sprintf("no response within %s (tried once)", e.Timeout)
@@ -937,14 +944,17 @@ func (ss *session) acquire(ctx context.Context) error {
 	}
 }
 
+// release frees the in-flight slot acquire took.
 func (ss *session) release() { <-ss.inflight }
 
+// logRequest passes l to the Request hook, in order with the other hooks.
 func (ss *session) logRequest(l RequestLog) {
 	if ss.hooks.Request != nil {
 		ss.emit(func() { ss.hooks.Request(l) })
 	}
 }
 
+// randHex returns n random bytes in hex, for the soft-404 probe path.
 func randHex(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)

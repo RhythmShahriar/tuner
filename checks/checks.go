@@ -7,6 +7,10 @@ package checks
 
 import "embed"
 
+// FS holds the checks and their _test.yaml fixtures, one folder per area
+// (wordpress/, leaks/, tls/ and so on). Only YAML one folder down is
+// embedded, so pack.json at the root stays out of the check set.
+//
 //go:embed */*.yaml
 var FS embed.FS
 

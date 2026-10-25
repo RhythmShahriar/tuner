@@ -31,6 +31,8 @@ type wafVendor struct {
 	weak func(r *matchers.Response) bool
 }
 
+// wafVendors are the firewalls and bot walls Tuner recognizes by their
+// block pages, in the order they are tried.
 var wafVendors = []wafVendor{
 	{
 		id: "cloudflare", label: "Cloudflare challenge",
@@ -69,6 +71,7 @@ var wafVendors = []wafVendor{
 	},
 }
 
+// bodyHas reports whether r's body contains s.
 func bodyHas(r *matchers.Response, s string) bool { return bytes.Contains(r.Body, []byte(s)) }
 
 // detectWAF returns the vendor whose block page the home page r is, or
@@ -81,6 +84,8 @@ func detectWAF(r *matchers.Response) *wafVendor { return findWAF(r, true) }
 // origin's own 403s do not read as a firewall.
 func detectBlockPage(r *matchers.Response) *wafVendor { return findWAF(r, false) }
 
+// findWAF returns the first vendor whose block page r is. weak lets the
+// weaker markers count when r refused the request.
 func findWAF(r *matchers.Response, weak bool) *wafVendor {
 	if r == nil {
 		return nil
@@ -114,6 +119,7 @@ type wafTally struct {
 	by      map[*wafVendor]int
 }
 
+// add counts one response, blocked by v or not (nil).
 func (t *wafTally) add(v *wafVendor) {
 	t.mu.Lock()
 	defer t.mu.Unlock()

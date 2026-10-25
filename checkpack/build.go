@@ -45,6 +45,7 @@ func (p *Pack) Supersedes(b BuildInfo) bool {
 	return p.supersedes(b)
 }
 
+// supersedes is Supersedes on the manifest alone, before the pack is opened.
 func (m Manifest) supersedes(b BuildInfo) bool {
 	switch {
 	case b.Modified:

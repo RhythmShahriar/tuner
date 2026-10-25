@@ -27,33 +27,33 @@ import (
 // describes mock servers the check must fire on (Positive) and stay quiet
 // on (Negative).
 type File struct {
-	Positive []Case `yaml:"positive"`
-	Negative []Case `yaml:"negative"`
+	Positive []Case `yaml:"positive"` // mock sites the check must fire on
+	Negative []Case `yaml:"negative"` // mock sites the check must stay quiet on
 }
 
 // Case is one mock site.
 type Case struct {
-	Name    string           `yaml:"name"`
+	Name    string           `yaml:"name"`           // shown in test output
 	Secrets bool             `yaml:"expect_secrets"` // masked secrets must be extracted
-	TLS     bool             `yaml:"tls"`
-	TLSMin  string           `yaml:"tls_min"` // lowest protocol the server accepts, e.g. "1.0"
-	Cert    *Cert            `yaml:"cert"`    // custom certificate; implies tls
-	Routes  map[string]Reply `yaml:"routes"`
-	Default *Reply           `yaml:"default"` // reply for unknown paths; 404 if unset
+	TLS     bool             `yaml:"tls"`            // serve over https with a test certificate
+	TLSMin  string           `yaml:"tls_min"`        // lowest protocol the server accepts, e.g. "1.0"
+	Cert    *Cert            `yaml:"cert"`           // custom certificate; implies tls
+	Routes  map[string]Reply `yaml:"routes"`         // replies by path, with or without the query string
+	Default *Reply           `yaml:"default"`        // reply for unknown paths; 404 if unset
 }
 
 // Cert describes a custom certificate for a TLS fixture.
 type Cert struct {
 	ExpiresInDays int  `yaml:"expires_in_days"` // negative for an expired certificate
-	Untrusted     bool `yaml:"untrusted"`
+	Untrusted     bool `yaml:"untrusted"`       // signed by an unknown authority
 }
 
 // Reply is what the mock server sends for one path.
 type Reply struct {
-	Status  int               `yaml:"status"`
+	Status  int               `yaml:"status"` // default 200
 	Headers map[string]string `yaml:"headers"`
-	Body    string            `yaml:"body"`
-	BodyHex string            `yaml:"body_hex"`
+	Body    string            `yaml:"body"`     // {{path}} becomes the requested path
+	BodyHex string            `yaml:"body_hex"` // bytes in hex, for binary replies; sent before Body
 }
 
 // bytes is the reply body as sent.

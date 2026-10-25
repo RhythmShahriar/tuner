@@ -38,20 +38,20 @@ func (s Severity) Rank() int { return slices.Index(Severities, s) }
 
 // Check is one YAML check from the checks/ directory.
 type Check struct {
-	ID         string         `yaml:"id"`
-	Name       string         `yaml:"name"`
-	Severity   Severity       `yaml:"severity"`
-	Confidence Confidence     `yaml:"confidence"`
-	Profile    Profile        `yaml:"profile"` // cheapest scan profile that runs this check
+	ID         string         `yaml:"id"`         // unique, kebab-case; findings carry it
+	Name       string         `yaml:"name"`       // the finding's title
+	Severity   Severity       `yaml:"severity"`   // how bad a finding is
+	Confidence Confidence     `yaml:"confidence"` // high (confirmed) or low (likely); default high
+	Profile    Profile        `yaml:"profile"`    // cheapest scan profile that runs this check
 	Tags       []string       `yaml:"tags"`
-	Requires   []string       `yaml:"requires"` // tech the fingerprint must find, e.g. wordpress
-	Request    Request        `yaml:"request"`
-	Match      matchers.Block `yaml:"match"`
-	Extract    Extract        `yaml:"extract"`
-	Impact     string         `yaml:"impact"`
-	Fix        string         `yaml:"fix"`
-	References []string       `yaml:"references"`
-	FixServer  FixServer      `yaml:"fix_server"`
+	Requires   []string       `yaml:"requires"`   // tech the fingerprint must find, e.g. wordpress
+	Request    Request        `yaml:"request"`    // what to fetch; GET or HEAD only
+	Match      matchers.Block `yaml:"match"`      // what the reply must look like for the check to fire
+	Extract    Extract        `yaml:"extract"`    // what to attach to the finding
+	Impact     string         `yaml:"impact"`     // what an attacker could do with it
+	Fix        string         `yaml:"fix"`        // how to fix it
+	References []string       `yaml:"references"` // links for further reading
+	FixServer  FixServer      `yaml:"fix_server"` // server config that fixes it
 
 	// File is the check's path inside the checks filesystem.
 	File string `yaml:"-"`
@@ -60,8 +60,8 @@ type Check struct {
 // FixServer holds web server config snippets that fix a finding. They
 // reach the finding as Finding.Fixes, keyed nginx and apache.
 type FixServer struct {
-	Nginx  string `yaml:"nginx"`
-	Apache string `yaml:"apache"`
+	Nginx  string `yaml:"nginx"`  // snippet for an nginx server block
+	Apache string `yaml:"apache"` // snippet for an Apache virtual host
 }
 
 // fixes returns the non-empty snippets by server name, or nil.
@@ -81,8 +81,8 @@ func (f FixServer) fixes() map[string]string {
 // Request is what a check fetches: one request per path, GET unless
 // Method says HEAD.
 type Request struct {
-	Method string   `yaml:"method"`
-	Path   []string `yaml:"path"` // {{host}} expands to the target hostname
+	Method string   `yaml:"method"` // GET (default) or HEAD; anything that could change a site is refused
+	Path   []string `yaml:"path"`   // {{host}} expands to the target hostname
 }
 
 // Extract lists what a check pulls out of a matching response.
