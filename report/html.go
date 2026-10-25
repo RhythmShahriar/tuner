@@ -37,6 +37,8 @@ type htmlPage struct {
 	Failed    []TargetError
 }
 
+// htmlSite is one target's section of the HTML report, ready for the
+// template. Every string in it is escaped by html/template.
 type htmlSite struct {
 	Anchor      string
 	Target      string
@@ -58,18 +60,22 @@ type htmlSite struct {
 	Requests    int64
 }
 
+// htmlComponent is a plugin, theme or other component in the fingerprint.
 type htmlComponent struct{ Type, Slug, Version, Source string }
 
+// htmlCount is the number of findings at one severity.
 type htmlCount struct {
 	Severity engine.Severity
 	N        int
 }
 
+// htmlGroup is the findings at one severity, in report order.
 type htmlGroup struct {
 	Severity engine.Severity
 	Findings []htmlFinding
 }
 
+// htmlFinding is one finding as the template shows it.
 type htmlFinding struct {
 	Title, ID, Confidence, Caveat, Place string
 	Severity                             engine.Severity
@@ -84,6 +90,7 @@ type htmlFinding struct {
 	References                           []htmlLink
 }
 
+// htmlAdvisory is one advisory listed under a finding.
 type htmlAdvisory struct {
 	Severity, CVEs, FixedIn string
 	Title                   htmlLink
@@ -94,6 +101,7 @@ type htmlAdvisory struct {
 // htmlLink is a link that renders only for http and https targets.
 type htmlLink struct{ Text, Href string }
 
+// htmlFixed is a finding the earlier report had and this one doesn't.
 type htmlFixed struct {
 	Severity engine.Severity
 	Title    string
@@ -136,6 +144,8 @@ func writeHTML(w io.Writer, reports []Report, o WriteOptions) error {
 	return htmlTemplate.Execute(w, page)
 }
 
+// htmlSiteFor builds target i's section. old is the same target's
+// earlier report when compared is set; nil means it is new since then.
 func htmlSiteFor(i int, r Report, old *Report, compared bool, sinceName string) htmlSite {
 	s := htmlSite{
 		Anchor: fmt.Sprintf("site-%d", i+1), Target: r.Target, Score: r.Score, ScoreClass: scoreClass(r.Score),
@@ -213,6 +223,7 @@ func htmlSiteFor(i int, r Report, old *Report, compared bool, sinceName string) 
 	return s
 }
 
+// htmlFindingFor turns f into template data. Secrets arrive masked.
 func htmlFindingFor(f engine.Finding) htmlFinding {
 	hf := htmlFinding{
 		Title: f.Title, ID: f.ID, Severity: f.Severity, Confidence: string(f.Confidence), Place: Place(f),
@@ -251,6 +262,7 @@ func safeHref(target string) string {
 	return SafeText(u.String())
 }
 
+// scoreClass is the CSS class for a score: good, fair or poor.
 func scoreClass(score int) string {
 	switch {
 	case score >= 90:
@@ -261,6 +273,8 @@ func scoreClass(score int) string {
 	return "poor"
 }
 
+// seenFinding is what the earlier report knew about a finding, to mark
+// it new, raised or carrying new advisories.
 type seenFinding struct {
 	severity   engine.Severity
 	advisories map[string]bool

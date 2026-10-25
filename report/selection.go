@@ -17,11 +17,11 @@ import (
 type Selection struct {
 	// Skipped lists the HTTP checks the scan had but did not run, sorted.
 	Skipped     []string        `json:"skipped_checks,omitempty"`
-	IDs         []string        `json:"ids,omitempty"`
-	ExcludeIDs  []string        `json:"exclude_ids,omitempty"`
-	Tags        []string        `json:"tags,omitempty"`
-	ExcludeTags []string        `json:"exclude_tags,omitempty"`
-	MinSeverity engine.Severity `json:"min_severity,omitempty"`
+	IDs         []string        `json:"ids,omitempty"`          // --id: only these checks
+	ExcludeIDs  []string        `json:"exclude_ids,omitempty"`  // --exclude-id
+	Tags        []string        `json:"tags,omitempty"`         // --tags: only checks with one of these
+	ExcludeTags []string        `json:"exclude_tags,omitempty"` // --exclude-tags
+	MinSeverity engine.Severity `json:"min_severity,omitempty"` // --severity: nothing below this
 }
 
 // NewSelection records what a scan leaves out. It runs the checks in ran

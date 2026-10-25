@@ -21,11 +21,11 @@ const Schema = "rhythm-tuner/v0"
 
 // Report is one target's results in the documented JSON schema.
 type Report struct {
-	Schema     string                  `json:"schema"`
-	Tool       string                  `json:"tool"`
-	Version    string                  `json:"version"`
-	DurationMS int64                   `json:"duration_ms"`
-	Summary    map[engine.Severity]int `json:"summary"`
+	Schema     string                  `json:"schema"`               // always Schema
+	Tool       string                  `json:"tool"`                 // rhythm-tuner
+	Version    string                  `json:"version"`              // the Tuner version that wrote it
+	DurationMS int64                   `json:"duration_ms"`          // wall time of the scan
+	Summary    map[engine.Severity]int `json:"summary"`              // findings per severity
 	CheckSet   string                  `json:"check_set,omitempty"`  // built-in, pack or directory
 	CheckPack  string                  `json:"check_pack,omitempty"` // the pack's version, when check_set is pack
 	Baselined  int                     `json:"baselined"`            // findings a baseline file hid
@@ -51,7 +51,7 @@ type Report struct {
 // applies.
 type stampedFinding struct {
 	engine.Finding
-	Fingerprint string `json:"fingerprint"`
+	Fingerprint string `json:"fingerprint"` // stable ID across runs; see Fingerprint
 }
 
 // MarshalJSON writes the report with a fingerprint on every finding, so a
@@ -74,6 +74,7 @@ func (r Report) MarshalJSON() ([]byte, error) {
 	return marshal(out)
 }
 
+// marshal encodes v like the report writer does, without the final newline.
 func marshal(v any) ([]byte, error) {
 	var b bytes.Buffer
 	err := encoder(&b).Encode(v)
@@ -119,7 +120,7 @@ func summary(res *engine.Result) map[engine.Severity]int {
 // a vulnerability API that never answered) would pass a CI gate it
 // should fail, so every format says so plainly.
 type Status struct {
-	Complete  bool
+	Complete  bool   // the scan saw everything it set out to
 	StoppedBy string // interrupted, max-time, waf, home-status, budget or integrity
 	BlockedBy string // the firewall that challenged the scan: cloudflare, sucuri, ...
 	VulnData  string // ok, partial, missing or off (--no-vulns)
@@ -184,11 +185,14 @@ func (s Status) Reason() string {
 	return "stopped by " + SafeText(s.StoppedBy)
 }
 
+// firewallNames are the display names of the firewalls the WAF check can name.
 var firewallNames = map[string]string{
 	"cloudflare": "Cloudflare", "sucuri": "Sucuri", "imperva": "Imperva", "wordfence": "Wordfence",
 	"akamai": "Akamai", "aws": "AWS WAF", "modsecurity": "ModSecurity",
 }
 
+// firewallName is the display name for a firewall ID. An unknown ID came
+// from the scanned site, so it is cleaned before it is shown.
 func firewallName(id string) string {
 	if n, ok := firewallNames[strings.ToLower(id)]; ok {
 		return n
@@ -196,6 +200,8 @@ func firewallName(id string) string {
 	return SafeText(id)
 }
 
+// encoder is a JSON encoder that leaves <, > and & alone: reports are
+// read by people and tools, not embedded in HTML.
 func encoder(w io.Writer) *json.Encoder {
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)

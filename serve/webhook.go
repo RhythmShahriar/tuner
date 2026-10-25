@@ -50,8 +50,8 @@ func VerifySignature(secret string, body []byte, header string) bool {
 
 // WebhookPayload is the JSON a webhook receives.
 type WebhookPayload struct {
-	Event string    `json:"event"`
-	Sent  time.Time `json:"sent"` // receivers can reject old deliveries
+	Event string    `json:"event"` // always EventCompleted, for now
+	Sent  time.Time `json:"sent"`  // receivers can reject old deliveries
 	Scan  struct {
 		ID       string                  `json:"id"`
 		TargetID string                  `json:"target_id"`
@@ -68,6 +68,7 @@ type WebhookPayload struct {
 	} `json:"scan"`
 }
 
+// webhookFinding is the summary of a finding a webhook carries.
 type webhookFinding struct {
 	ID       string          `json:"id"`
 	Title    string          `json:"title"`
@@ -75,6 +76,7 @@ type webhookFinding struct {
 	URL      string          `json:"url"`
 }
 
+// payload builds the webhook body for a finished scan.
 func payload(rec scanRecord, now time.Time) WebhookPayload {
 	var p WebhookPayload
 	p.Event, p.Sent = EventCompleted, now.UTC()
@@ -137,8 +139,10 @@ func (s *Server) deliver(u string, rec scanRecord, publicOnly bool) {
 // reply or a URL that can't be used.
 type permanentError struct{ msg string }
 
+// Error returns the reason.
 func (e permanentError) Error() string { return e.msg }
 
+// httpError is the permanent error for a status that a retry won't fix.
 func httpError(code int) permanentError { return permanentError{"HTTP " + strconv.Itoa(code)} }
 
 // errPrivateAddr is a webhook host that resolves to an address the scan
@@ -209,6 +213,8 @@ func publicTransport(rt http.RoundTripper) http.RoundTripper {
 	return t
 }
 
+// post delivers body once. The signature lets the receiver check the
+// body came from this server.
 func (s *Server) post(client *http.Client, u, id string, body []byte) error {
 	// Not tied to s.ctx: a shutdown still lets the last try go out.
 	ctx, cancel := context.WithTimeout(context.Background(), client.Timeout)

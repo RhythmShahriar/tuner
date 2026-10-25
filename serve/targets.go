@@ -36,11 +36,11 @@ const (
 
 // Target is a site registered with the API.
 type Target struct {
-	ID      string    `json:"id"`
-	URL     string    `json:"url"`
-	Host    string    `json:"host"`
-	Token   string    `json:"token"` // the proof to publish
-	Created time.Time `json:"created"`
+	ID      string    `json:"id"`      // t_ and random hex
+	URL     string    `json:"url"`     // the site's base URL
+	Host    string    `json:"host"`    // host[:port]; verification proves control of this
+	Token   string    `json:"token"`   // the proof to publish
+	Created time.Time `json:"created"` // when it was registered
 	// Verified is when ownership was last proven; VerifiedBy how.
 	Verified   *time.Time `json:"verified,omitempty"`
 	VerifiedBy string     `json:"verified_by,omitempty"`
@@ -51,20 +51,23 @@ type targetView struct {
 	Target
 	IsVerified bool          `json:"is_verified"`
 	Expires    *time.Time    `json:"verification_expires,omitempty"`
-	Verify     verifyOptions `json:"verify"`
+	Verify     verifyOptions `json:"verify"` // how to prove ownership
 }
 
+// verifyOptions are the two ways to prove ownership.
 type verifyOptions struct {
 	DNS  *dnsProof `json:"dns,omitempty"` // nil for an IP address, which has no DNS name to hold a record
 	File fileProof `json:"file"`
 }
 
+// dnsProof is the TXT record to publish.
 type dnsProof struct {
 	Name  string `json:"name"`
 	Type  string `json:"type"`
 	Value string `json:"value"`
 }
 
+// fileProof is the file to serve from the site.
 type fileProof struct {
 	URL  string `json:"url"`
 	Body string `json:"body"`
@@ -75,6 +78,7 @@ func (t Target) verifiedAt(now time.Time) bool {
 	return t.Verified != nil && now.Before(t.Verified.Add(VerifyTTL))
 }
 
+// view adds verification status and instructions to t.
 func (s *Server) view(t Target) targetView {
 	v := targetView{Target: t, IsVerified: t.verifiedAt(s.cfg.Now())}
 	if t.Verified != nil {
@@ -134,6 +138,8 @@ func parseTargetURL(raw string) (*url.URL, error) {
 	return u, nil
 }
 
+// createTarget registers a site. Registering one again returns the
+// existing target and token.
 func (s *Server) createTarget(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		URL string `json:"url"`
@@ -162,6 +168,7 @@ func (s *Server) createTarget(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, code, s.view(t))
 }
 
+// listTargets answers GET /v0/targets.
 func (s *Server) listTargets(w http.ResponseWriter, _ *http.Request) {
 	list := s.store.listTargets()
 	views := make([]targetView, len(list))
@@ -171,6 +178,7 @@ func (s *Server) listTargets(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, views)
 }
 
+// getTarget answers GET /v0/targets/{id}.
 func (s *Server) getTarget(w http.ResponseWriter, r *http.Request) {
 	t, ok := s.store.target(r.PathValue("id"))
 	if !ok {
@@ -180,6 +188,7 @@ func (s *Server) getTarget(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.view(t))
 }
 
+// deleteTarget answers DELETE /v0/targets/{id}.
 func (s *Server) deleteTarget(w http.ResponseWriter, r *http.Request) {
 	ok, err := s.store.deleteTarget(r.PathValue("id"))
 	switch {
@@ -194,12 +203,14 @@ func (s *Server) deleteTarget(w http.ResponseWriter, r *http.Request) {
 
 // verifyCheck is the outcome of one ownership check.
 type verifyCheck struct {
-	Method string `json:"method"`
-	Where  string `json:"where"` // the DNS name or URL looked at
-	OK     bool   `json:"ok"`
-	Error  string `json:"error,omitempty"`
+	Method string `json:"method"`          // dns or file
+	Where  string `json:"where"`           // the DNS name or URL looked at
+	OK     bool   `json:"ok"`              // the proof was found
+	Error  string `json:"error,omitempty"` // why it wasn't
 }
 
+// verifyTarget checks the DNS record or the file proof (both when method
+// is empty) and records the time when one holds.
 func (s *Server) verifyTarget(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Method string `json:"method"`

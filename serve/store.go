@@ -29,8 +29,12 @@ type store struct {
 	active  map[string]*scan
 }
 
+// idPattern is the form of target and scan IDs. Scan files are named
+// by ID, so anything else found in the folder is skipped.
 var idPattern = regexp.MustCompile(`^[a-z]_[0-9a-f]{12,32}$`)
 
+// openStore loads the targets in dir and marks scans a previous server
+// left unfinished as interrupted, returning their IDs.
 func openStore(dir string, now func() time.Time) (*store, []string, error) {
 	if err := os.MkdirAll(filepath.Join(dir, "scans"), 0o700); err != nil {
 		return nil, nil, err
@@ -47,8 +51,10 @@ func openStore(dir string, now func() time.Time) (*store, []string, error) {
 	return st, interrupted, err
 }
 
+// targetsFile is where the targets are saved.
 func (st *store) targetsFile() string { return filepath.Join(st.dir, "targets.json") }
 
+// scanFile is where scan id is saved.
 func (st *store) scanFile(id string) string { return filepath.Join(st.dir, "scans", id+".json") }
 
 // markInterrupted rewrites scans a previous server left queued or
@@ -134,6 +140,7 @@ func (st *store) updateTarget(id string, fn func(*Target)) (Target, error) {
 	return *t, st.saveTargets()
 }
 
+// deleteTarget removes target id, reporting whether it existed.
 func (st *store) deleteTarget(id string) (bool, error) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
@@ -144,6 +151,7 @@ func (st *store) deleteTarget(id string) (bool, error) {
 	return true, st.saveTargets()
 }
 
+// listTargets returns every target, oldest first.
 func (st *store) listTargets() []Target {
 	st.mu.Lock()
 	defer st.mu.Unlock()
@@ -160,12 +168,14 @@ func (st *store) saveScan(sc *scan) error {
 	return cache.WriteJSON(st.scanFile(sc.id), sc.record())
 }
 
+// setActive tracks a scan that is queued or running.
 func (st *store) setActive(sc *scan) {
 	st.mu.Lock()
 	st.active[sc.id] = sc
 	st.mu.Unlock()
 }
 
+// dropActive stops tracking a finished scan.
 func (st *store) dropActive(id string) {
 	st.mu.Lock()
 	delete(st.active, id)

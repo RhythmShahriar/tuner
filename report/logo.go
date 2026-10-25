@@ -52,6 +52,7 @@ func LogoDataURI(path string) (string, error) {
 	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data), nil
 }
 
+// svgNS is the namespace a logo's root element must declare.
 const svgNS = "http://www.w3.org/2000/svg"
 
 // svgElements are the SVG elements a logo may use: shapes, text, groups

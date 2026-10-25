@@ -31,6 +31,8 @@ func Fingerprint(f engine.Finding, root string) string {
 	return fingerprintPrefix + hex.EncodeToString(sum[:])[:32]
 }
 
+// location is where f is, as Fingerprint hashes it: a path relative to
+// the scan root for a local finding, the URL path for a remote one.
 func location(f engine.Finding, root string) string {
 	u, err := url.Parse(f.URL)
 	if err != nil || f.URL == "" {

@@ -16,6 +16,8 @@ import (
 // SARIF 2.1.0, the subset GitHub code scanning reads.
 // https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html
 
+// The SARIF 2.1.0 log, cut down to what Tuner writes. Field names
+// follow the specification.
 type sarifLog struct {
 	Schema  string     `json:"$schema"`
 	Version string     `json:"version"`
@@ -132,6 +134,8 @@ var securitySeverity = map[engine.Severity]string{
 	engine.Critical: "9.5", engine.High: "8.0", engine.Medium: "5.5", engine.Low: "3.0", engine.Info: "0.0",
 }
 
+// sarifLevel maps a severity to a SARIF level: critical and high are
+// errors, medium a warning, the rest notes.
 func sarifLevel(s engine.Severity) string {
 	switch s {
 	case engine.Critical, engine.High:
@@ -271,6 +275,7 @@ func localRoot(r Report, root string) string {
 	return ""
 }
 
+// isFileURL reports whether s is a file:// URL, the mark of a local finding.
 func isFileURL(s string) bool {
 	u, err := url.Parse(s)
 	return err == nil && u.Scheme == "file"

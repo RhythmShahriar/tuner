@@ -22,7 +22,8 @@ import (
 )
 
 const (
-	badgeWidth  = 10 // a severity badge, padded, is this wide
+	badgeWidth = 10 // a severity badge, padded, is this wide
+	// titleIndent lines up a finding's wrapped title with its first line.
 	titleIndent = badgeWidth + 2
 
 	// The report is as wide as the terminal less a margin, within these
@@ -88,14 +89,17 @@ func contentWidth(cols int, w io.Writer) int {
 func (p *Pretty) SetStatus(s Status) { p.status = s }
 
 var (
+	// Styles shared by the terminal report.
 	muted = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.Muted))
 	bold  = lipgloss.NewStyle().Bold(true)
 )
 
+// sevStyle is the bold color of a severity.
 func sevStyle(s engine.Severity) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(ui.SeverityColor(string(s))).Bold(true)
 }
 
+// clear erases the progress line, if one is drawn.
 func (p *Pretty) clear() {
 	if p.drawn {
 		fmt.Fprint(p.w, "\r\x1b[2K")
@@ -119,6 +123,7 @@ func (p *Pretty) Header(version, target string) {
 		muted.Render(strings.Repeat("─", p.width)))
 }
 
+// step prints one line of scan setup, such as the target or profile.
 func (p *Pretty) step(label, value string) {
 	if p.o.Quiet {
 		return
@@ -160,8 +165,10 @@ func (p *Pretty) Baseline(soft404 bool) {
 	}
 }
 
+// spinner is the progress animation, one frame per tick.
 var spinner = []string{"◐", "◓", "◑", "◒"}
 
+// glyphs mark severities without relying on color.
 var glyphs = map[engine.Severity]string{
 	engine.Critical: "✖", engine.High: "▲", engine.Medium: "■", engine.Low: "●", engine.Info: "·",
 }
@@ -286,6 +293,7 @@ func (p *Pretty) explainHint() string {
 	return "run " + p.command() + " explain <id> for the full fix"
 }
 
+// advisoryLines is the first n advisory lines of f, plus a count of the rest.
 func advisoryLines(f engine.Finding, n int) []string {
 	lines := f.Evidence.Matched[:min(n, len(f.Evidence.Matched))]
 	if more := len(f.Advisories) - len(lines); more > 0 {
@@ -382,6 +390,7 @@ func compact(f engine.Finding, width int) string {
 	return "    " + marker + "  " + line
 }
 
+// section is the heading rule that opens a severity's findings.
 func section(sev engine.Severity, n, width int) string {
 	label := sevStyle(sev).Render(fmt.Sprintf("%s  %d", strings.ToUpper(string(sev)), n))
 	rule := muted.Render(strings.Repeat("─", max(2, width-lipgloss.Width(label)-1)))
@@ -391,7 +400,7 @@ func section(sev engine.Severity, n, width int) string {
 // Hidden counts the findings a scan hid: by a --baseline file and by
 // ignore entries in .tuner.yml.
 type Hidden struct {
-	Baselined, Ignored int
+	Baselined, Ignored int // by a --baseline file and by .tuner.yml ignore entries
 }
 
 // text is what the score adds for h: " after baseline (2 hidden)", " after
@@ -601,6 +610,7 @@ func plural(n int64, noun string) string {
 	return fmt.Sprintf("%d %ss", n, noun)
 }
 
+// truncate shortens s to n runes, ending with an ellipsis when it cut.
 func truncate(s string, n int) string {
 	if r := []rune(s); len(r) > n {
 		return string(r[:max(0, n-1)]) + "…"
@@ -631,6 +641,7 @@ func wrap(s string, n int) []string {
 	return lines
 }
 
+// pad right-pads s with spaces to n terminal cells.
 func pad(s string, n int) string {
 	if w := lipgloss.Width(s); w < n {
 		return s + strings.Repeat(" ", n-w)

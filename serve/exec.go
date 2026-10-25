@@ -46,6 +46,8 @@ func ExecRunner(exe, dir string) Runner {
 	}
 }
 
+// childEnv is env without childSecrets, compared without case since
+// Windows variable names ignore it.
 func childEnv(env []string) []string {
 	out := env[:0:0]
 	for _, kv := range env {
