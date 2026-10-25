@@ -26,7 +26,7 @@ x-db-env: &db-env
 
 services:
   db:
-    image: mariadb:11.4.8@sha256:bc474f00629f0123c10f9e1bca193a45d18af15a274cf0656acda64f1086c3b6
+    image: mariadb:13.0.2@sha256:0e4bb0f339feba125d1154fbacd36c16ec8518f52e44e1f82ecec7d6771caf39
     environment:
       MARIADB_DATABASE: wordpress
       MARIADB_USER: wordpress
@@ -97,7 +97,7 @@ services:
     restart: "no"
 
   nginx:
-    image: nginx:1.27.3-alpine@sha256:814a8e88df978ade80e584cc5b333144b9372a8e3c98872d07137dbf3b44d0e4
+    image: nginx:1.31.0-alpine@sha256:2f07d83bf561b506400dc183b1b2003803e39efbd22451f848adaba14d28c7c7
     depends_on:
       seed:
         condition: service_completed_successfully
@@ -109,7 +109,7 @@ services:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
 
   apache:
-    image: httpd:2.4.62@sha256:4c7788695c832bf415a662dfb5160f1895e65fc65c025e85f436ee2c9e7d7f3e
+    image: httpd:2.4.69@sha256:a30cd4cd57f3f3c3be9b2d16384d2488839996bb14c67df2b51f1ecbb3e584a1
     depends_on:
       seed:
         condition: service_completed_successfully
@@ -123,7 +123,7 @@ services:
   # answers 403 with a challenge page. The expected benchmark result is
   # "blocked", not a score.
   waf:
-    image: nginx:1.27.3-alpine@sha256:814a8e88df978ade80e584cc5b333144b9372a8e3c98872d07137dbf3b44d0e4
+    image: nginx:1.31.0-alpine@sha256:2f07d83bf561b506400dc183b1b2003803e39efbd22451f848adaba14d28c7c7
     ports:
       - "127.0.0.1:${TESTBED_WAF_PORT:-20283}:80"
     volumes:
