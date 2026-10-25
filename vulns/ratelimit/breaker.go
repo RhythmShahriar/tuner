@@ -55,6 +55,7 @@ type Breaker struct {
 	hosts map[string]*hostState
 }
 
+// hostState is what the breaker knows about one host.
 type hostState struct {
 	up     bool          // a request got an answer
 	downAt time.Time     // when the host went down; zero if it isn't
@@ -113,6 +114,8 @@ func (b *Breaker) Do(ctx context.Context, host string, fn func() error) error {
 	}
 }
 
+// record notes how st's request went. A canceled request says nothing
+// about the host, so it leaves the state alone.
 func (b *Breaker) record(st *hostState, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()

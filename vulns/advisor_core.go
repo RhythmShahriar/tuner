@@ -17,6 +17,7 @@ import (
 // (vuln-core) and, without any, whether a newer release exists.
 type coreAdvisor struct{}
 
+// lookups looks up core only when the fingerprint read its version.
 func (coreAdvisor) lookups(fp fingerprint.Result) []*lookup {
 	if !fp.Has("wordpress") || fp.WordPress == "" {
 		return nil
@@ -24,11 +25,14 @@ func (coreAdvisor) lookups(fp fingerprint.Result) []*lookup {
 	return []*lookup{{component: component{kind: "core", key: fp.WordPress, slug: "wordpress", version: fp.WordPress, path: "/"}}}
 }
 
+// fetch gets the advisories for the version and the latest release.
 func (coreAdvisor) fetch(ctx context.Context, a *Advisor, l *lookup, _ time.Time) {
 	a.fetchAdvisories(ctx, l)
 	a.fetchLatest(ctx, l, "wordpress")
 }
 
+// advise reports known vulnerabilities, or else an outdated release:
+// the vulnerability finding already says to update.
 func (coreAdvisor) advise(base *url.URL, a *Advisor, ls []*lookup, _ time.Time) []engine.Finding {
 	var out []engine.Finding
 	for _, l := range ok(ls) {
@@ -47,6 +51,7 @@ func (coreAdvisor) advise(base *url.URL, a *Advisor, ls []*lookup, _ time.Time) 
 	return out
 }
 
+// rules describes the core findings.
 func (coreAdvisor) rules() []Rule {
 	return []Rule{
 		NewRule("vuln-core", false, engine.High, "WordPress core with known vulnerabilities", "vuln", "core", "wordpress"),

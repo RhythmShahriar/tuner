@@ -233,6 +233,7 @@ func cmpBool(x, y bool) int {
 	return 1
 }
 
+// rankOr is s's rank, treating an unknown severity as medium.
 func rankOr(s engine.Severity) int {
 	if r := s.Rank(); r >= 0 {
 		return r
@@ -240,6 +241,8 @@ func rankOr(s engine.Severity) int {
 	return engine.Medium.Rank()
 }
 
+// finding builds a high-confidence finding on base's path plus path. The
+// evidence is the version match itself: no request was sent for it.
 func finding(base *url.URL, id string, sev engine.Severity, path, title string, ev []string, impact, fix string, tags ...string) engine.Finding {
 	u := *base
 	u.Path = strings.TrimSuffix(base.Path, "/") + path

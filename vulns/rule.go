@@ -17,12 +17,12 @@ const HelpBase = "https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Finding-Re
 // It has the fields of engine.Rule, so the engine's rule registry can take
 // these as they are.
 type Rule struct {
-	ID       string
-	Prefix   bool
-	Title    string
-	Tags     []string
+	ID       string          // the finding ID, or its prefix
+	Prefix   bool            // ID is a prefix: vuln-plugin- covers vuln-plugin-akismet
+	Title    string          // what the finding is about, for lists and SARIF
+	Tags     []string        // categories, for --tags selection
 	Severity engine.Severity // the usual severity; vulnerability findings take their worst advisory's
-	HelpURI  string
+	HelpURI  string          // help page for the rule; NewRule sets HelpBase plus the ID
 }
 
 // Matches reports whether the finding ID id is one of r's.

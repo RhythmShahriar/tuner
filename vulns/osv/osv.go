@@ -36,8 +36,8 @@ const (
 // Like vulns.Client, it caches answers on disk, refreshes them once they're
 // a day old and falls back to stale copies when the service is down.
 type Client struct {
-	HTTP      *http.Client
-	UserAgent string
+	HTTP      *http.Client  // nil means a default client; either way connects time out quickly
+	UserAgent string        // sent with every request
 	Base      string        // default DefaultBase
 	CacheDir  string        // "" disables the disk cache
 	TTL       time.Duration // 0 means 24h
@@ -52,15 +52,15 @@ type Client struct {
 
 // Package is a Composer package at an installed version.
 type Package struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
+	Name    string `json:"name"`    // Composer name, vendor/package
+	Version string `json:"version"` // as installed, from the lock file
 }
 
 // Vuln is the part of an OSV record Tuner uses.
 type Vuln struct {
-	ID       string   `json:"id"`
-	Summary  string   `json:"summary"`
-	Aliases  []string `json:"aliases"`
+	ID       string   `json:"id"`      // OSV ID, often a GHSA
+	Summary  string   `json:"summary"` // one line
+	Aliases  []string `json:"aliases"` // CVE IDs and other names for the same flaw
 	Affected []struct {
 		Package struct {
 			Name      string `json:"name"`
@@ -83,8 +83,10 @@ type Vuln struct {
 	} `json:"references"`
 }
 
+// errOffline means --offline forbids fetching a package that isn't cached.
 var errOffline = errors.New("offline and not cached")
 
+// init fills the defaults on first use, so a Client needs no constructor.
 func (o *Client) init() {
 	o.once.Do(func() {
 		o.http = ratelimit.FastClient(o.HTTP) // see vulns.Client: fail fast when firewalled
@@ -112,7 +114,7 @@ type Result struct {
 	// Unreachable is set when OSV.dev timed out or refused the connection.
 	// Oldest is when the oldest stale copy used instead was fetched.
 	Unreachable bool
-	Oldest      time.Time
+	Oldest      time.Time // when the oldest stale copy was fetched; zero if none was stale
 }
 
 // Status is the vulnerability data status, one of vulns.StatusOK,
@@ -408,6 +410,8 @@ func (o *Client) vuln(ctx context.Context, id string, force bool) (*Vuln, time.T
 	return &v, time.Time{}, nil
 }
 
+// do sends one request to OSV.dev with body encoded as JSON and decodes the
+// answer into v.
 func (o *Client) do(ctx context.Context, method, u string, body, v any) error {
 	var r io.Reader
 	if body != nil {

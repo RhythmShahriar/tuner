@@ -22,6 +22,9 @@ const abandonedAfter = 2 * 365 * 24 * time.Hour
 // each for those out of date, abandoned or with an unknown version.
 type componentAdvisor struct{}
 
+// lookups lists every plugin and theme the fingerprint found, with or
+// without a version: an unversioned one can still be closed or have
+// advisories worth a hint.
 func (componentAdvisor) lookups(fp fingerprint.Result) []*lookup {
 	var out []*lookup
 	for _, c := range fp.Components {
@@ -31,11 +34,15 @@ func (componentAdvisor) lookups(fp fingerprint.Result) []*lookup {
 	return out
 }
 
+// fetch gets the component's advisories and its latest wordpress.org release.
 func (componentAdvisor) fetch(ctx context.Context, a *Advisor, l *lookup, _ time.Time) {
 	a.fetchAdvisories(ctx, l)
 	a.fetchLatest(ctx, l, l.slug)
 }
 
+// advise reports known vulnerabilities and closed components one by one.
+// Outdated, abandoned and unverified components are grouped into one
+// finding each, so a site with forty plugins doesn't get forty more.
 func (componentAdvisor) advise(base *url.URL, a *Advisor, ls []*lookup, now time.Time) []engine.Finding {
 	var out []engine.Finding
 	var outdated, abandoned, unverified []string
@@ -100,6 +107,7 @@ func closedFinding(base *url.URL, l *lookup) engine.Finding {
 	return f
 }
 
+// rules describes the plugin and theme findings.
 func (componentAdvisor) rules() []Rule {
 	return []Rule{
 		NewRule("vuln-plugin-", true, engine.High, "Plugin with known vulnerabilities", "vuln", "plugin", "wordpress"),
