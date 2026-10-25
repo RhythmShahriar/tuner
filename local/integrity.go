@@ -48,12 +48,12 @@ const maxMissingListed = 20
 // change, so they are cached on disk for good; "this plugin isn't on
 // wordpress.org" answers are kept for a day. Offline uses the cache only.
 type Checksums struct {
-	HTTP       *http.Client
-	UserAgent  string
-	CoreBase   string // default DefaultWPOrgAPI; a mirror for tests or air-gapped hosts
-	PluginBase string // default DefaultWPDLAPI
-	CacheDir   string // "" disables the disk cache
-	Offline    bool   // never fetch; use cached checksums only
+	HTTP       *http.Client // nil means a client with a 20s timeout
+	UserAgent  string       // sent with every request
+	CoreBase   string       // default DefaultWPOrgAPI; a mirror for tests or air-gapped hosts
+	PluginBase string       // default DefaultWPDLAPI
+	CacheDir   string       // "" disables the disk cache
+	Offline    bool         // never fetch; use cached checksums only
 
 	once sync.Once
 }
@@ -67,6 +67,7 @@ var errNotCached = errors.New("not cached")
 // How long a "not listed" answer is trusted.
 const notListedTTL = 24 * time.Hour
 
+// init fills the defaults on first use, so Checksums needs no constructor.
 func (c *Checksums) init() {
 	c.once.Do(func() {
 		if c.HTTP == nil {
@@ -79,9 +80,9 @@ func (c *Checksums) init() {
 
 // sumEntry is a cached answer.
 type sumEntry struct {
-	Fetched time.Time           `json:"fetched"`
-	Missing bool                `json:"missing,omitempty"`
-	Files   map[string][]string `json:"files,omitempty"` // path -> accepted hex hashes
+	Fetched time.Time           `json:"fetched"`           // the TTL of a "not listed" answer counts from here
+	Missing bool                `json:"missing,omitempty"` // wordpress.org has no checksums for it
+	Files   map[string][]string `json:"files,omitempty"`   // path -> accepted hex hashes
 }
 
 // Core returns the MD5 of every file in a WordPress release, by path
@@ -217,6 +218,7 @@ func (c *Checksums) lookup(ctx context.Context, kind, key, u string, parse func(
 	return files, nil
 }
 
+// get fetches u with the body capped at 32 MiB and returns it with the status.
 func (c *Checksums) get(ctx context.Context, u string) ([]byte, int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
@@ -233,6 +235,9 @@ func (c *Checksums) get(ctx context.Context, u string) ([]byte, int, error) {
 	return b, resp.StatusCode, err
 }
 
+// path is the cache file for key, or "" when there is no cache. The key
+// comes from a version or plugin slug read on disk, so it is sanitized:
+// a crafted slug must not write outside the cache directory.
 func (c *Checksums) path(kind, key string) string {
 	if c.CacheDir == "" {
 		return ""
@@ -248,6 +253,7 @@ func (c *Checksums) path(kind, key string) string {
 // these; anything else could escape the cache folder.
 var sumKeyChars = regexp.MustCompile(`[^A-Za-z0-9._@-]`)
 
+// readSumCache loads a cached answer into e, reporting whether it could.
 func readSumCache(path string, e *sumEntry) bool {
 	if path == "" {
 		return false
@@ -278,6 +284,7 @@ func writeSumCache(path string, e sumEntry) {
 	}
 }
 
+// hostOf is u's host, for messages that name the service that failed.
 func hostOf(u string) string {
 	if p, err := url.Parse(u); err == nil {
 		return p.Host
@@ -465,6 +472,9 @@ func (v *integrityVisitor) enter(e *entry) bool {
 	return ok
 }
 
+// need asks for the MD5 of every core file the release lists and of every
+// listed plugin file. Unlisted PHP files in wp-admin and wp-includes are
+// visited without hashing: their presence alone is the finding.
 func (v *integrityVisitor) need(e *entry) need {
 	rel := v.relPath(e.path)
 	if _, ok := v.core[rel]; ok && !strings.HasPrefix(rel, "wp-content/") {
@@ -487,6 +497,8 @@ func (v *integrityVisitor) need(e *entry) need {
 	return 0
 }
 
+// visit compares one file with the checksums and reports a mismatch,
+// a link in place of a core file or a file the release doesn't have.
 func (v *integrityVisitor) visit(e *entry, f *fileData) {
 	rel := v.relPath(e.path)
 	ev := []string{v.s.rel(e.path) + sizeNote(f.size)}

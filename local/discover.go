@@ -74,6 +74,8 @@ func Discover(root string, maxDepth int) (Discovery, error) {
 	return discover(root, maxDepth, defaultMaxEntries)
 }
 
+// discover is Discover with the entry limit as a parameter, so tests
+// can reach it without a quarter of a million files.
 func discover(root string, maxDepth, maxEntries int) (Discovery, error) {
 	abs, err := Root(root)
 	if err != nil {

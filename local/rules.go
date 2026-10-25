@@ -76,6 +76,7 @@ import (
 var embeddedRules embed.FS
 
 // Rule is a declarative local file check.
+// The fields are the rule file format described above.
 type Rule struct {
 	ID         string            `yaml:"id"`
 	Name       string            `yaml:"name"`
@@ -137,6 +138,8 @@ func ParseRule(data []byte) (*Rule, error) {
 	return &r, r.compile()
 }
 
+// compile checks a parsed rule and prepares its globs and regexes. A
+// rule that fails here is reported and never run.
 func (r *Rule) compile() error {
 	switch {
 	case !strings.HasPrefix(r.ID, "local-"):
@@ -318,6 +321,8 @@ type glob struct {
 	last func(string) bool // matches the last path segment, when the glob doesn't end in **
 }
 
+// newGlob parses g. The last segment gets a fast matcher when it is a
+// plain name or a *.ext suffix, the common cases.
 func newGlob(g string) glob {
 	segs := strings.Split(strings.ToLower(g), "/")
 	out := glob{segs: segs}
@@ -346,6 +351,8 @@ func (g glob) match(p []string) bool {
 // globMatch matches a slash path against a glob, ignoring case.
 func globMatch(g, p string) bool { return newGlob(g).match(strings.Split(strings.ToLower(p), "/")) }
 
+// matchSegs reports whether the glob segments g match the path segments p,
+// with ** standing for any number of segments.
 func matchSegs(g, p []string) bool {
 	for len(g) > 0 {
 		if g[0] == "**" {
@@ -559,6 +566,9 @@ func LoadRules(fsys fs.FS) ([]*Rule, []error) {
 	return rules, errs
 }
 
+// builtinRules are the rules shipped in rules/*.yaml, parsed once. A rule
+// that fails to parse comes back as an error, not a panic, so one bad
+// rule can't stop every local scan.
 var builtinRules = sync.OnceValues(func() ([]*Rule, []error) {
 	sub, err := fs.Sub(embeddedRules, "rules")
 	if err != nil {
@@ -610,6 +620,8 @@ func projectPrunes(name string) bool {
 	return false
 }
 
+// enter skips version control and node_modules folders and folders every
+// rule excludes.
 func (v *rulesVisitor) enter(e *entry) bool {
 	if projectPrunes(e.name) {
 		return false
@@ -618,10 +630,12 @@ func (v *rulesVisitor) enter(e *entry) bool {
 	return slices.ContainsFunc(v.rules, func(r *Rule) bool { return !r.prunes(rel) })
 }
 
+// need asks for what at least one rule needs from the file.
 func (v *rulesVisitor) need(e *entry) need {
 	return rulesNeed(v.rules, relSegs(v.s.root, e.path), e)
 }
 
+// visit runs the project-scope rules on one file.
 func (v *rulesVisitor) visit(e *entry, f *fileData) {
 	v.add(runRules(v.s, v.rules, relSegs(v.s.root, e.path), e, f)...)
 }

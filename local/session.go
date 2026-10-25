@@ -35,12 +35,16 @@ import (
 // site's PHP files. Nothing is run except php asking for its own settings.
 const sessionCheckID = "local-php-session-upload-progress"
 
+// sessionCVE is the advisory the session check reports.
 const sessionCVE = "CVE-2026-115560"
 
 // Unsafe base handlers for condition 1.
 var unsafeHandlers = []string{"php_binary", "php_serialize"}
 
 var (
+	// Patterns for the code half of the check (ini_set of the handler, then
+	// session_start) and for the ini formats the settings come from: php.ini
+	// and .user.ini, FPM pools, .htaccess and Debian's per-SAPI layout.
 	iniSetHandler = regexp.MustCompile(`(?i)\bini_(?:set|alter)\s*\(\s*(['"])session\.serialize_handler['"]\s*,\s*([^;]*?)\)\s*;`)
 	sessionStart  = regexp.MustCompile(`(?i)\bsession_start\s*\(`)
 	literalArg    = regexp.MustCompile(`^\s*['"]([A-Za-z_]+)['"]\s*$`)
@@ -180,6 +184,7 @@ func (s *scan) sessionUploadProgress(ctx context.Context, code *sessionVisitor) 
 	return []engine.Finding{f}
 }
 
+// names lists up to three context names, then how many more there are.
 func names(cs []sessionCtx) string {
 	var out []string
 	for _, c := range cs[:min(len(cs), 3)] {
@@ -279,6 +284,7 @@ func (s *scan) sessionConfig(ctx context.Context) []sessionCtx {
 	return ctxs
 }
 
+// poolCtx is base as changed by the FPM pool file at path.
 func poolCtx(base sessionCtx, path, rel string) sessionCtx {
 	c := base
 	c.web = true
@@ -368,6 +374,8 @@ func iniValue(v string) string {
 	return strings.Trim(strings.TrimSpace(v), `"'`)
 }
 
+// iniBool reads an ini boolean the way PHP does: empty, 0, off, false, no
+// and none are false.
 func iniBool(v string) bool {
 	switch strings.ToLower(strings.TrimSpace(v)) {
 	case "", "0", "off", "false", "no", "none":
@@ -376,6 +384,7 @@ func iniBool(v string) bool {
 	return true
 }
 
+// globSorted is filepath.Glob in a stable order; a bad pattern matches nothing.
 func globSorted(pattern string) []string {
 	m, _ := filepath.Glob(pattern)
 	slices.Sort(m)
@@ -397,6 +406,8 @@ type sessionVisitor struct {
 func (v *sessionVisitor) root() string { return v.s.root }
 func (v *sessionVisitor) checks() int  { return 1 }
 
+// enter skips dependency, version control and cache folders and the
+// media library's year folders, which hold no settings or session code.
 func (v *sessionVisitor) enter(e *entry) bool {
 	parent := filepath.Base(filepath.Dir(e.path))
 	switch name := e.name; {
@@ -410,6 +421,7 @@ func (v *sessionVisitor) enter(e *entry) bool {
 	return true
 }
 
+// need asks for the head of .user.ini, .htaccess and PHP files.
 func (v *sessionVisitor) need(e *entry) need {
 	if !e.regular() {
 		return 0
@@ -420,6 +432,7 @@ func (v *sessionVisitor) need(e *entry) need {
 	return 0
 }
 
+// visit records a settings override or a handler switch found in one file.
 func (v *sessionVisitor) visit(e *entry, f *fileData) {
 	if f.head == nil {
 		return
@@ -479,6 +492,9 @@ func (v *sessionVisitor) results() ([]handlerSwitch, []override) {
 	return switches, ovs
 }
 
+// rankSwitch orders handler switches by how strong the case is. A literal
+// value ranks before an expression; a switch followed by session_start()
+// ranks before one that isn't.
 func rankSwitch(sw handlerSwitch) int {
 	r := 0
 	if sw.value == "" {
@@ -490,6 +506,7 @@ func rankSwitch(sw handlerSwitch) int {
 	return r
 }
 
+// hasSessionKey reports whether kv sets either setting the check reads.
 func hasSessionKey(kv map[string]string) bool {
 	_, a := kv["session.serialize_handler"]
 	_, b := kv["session.upload_progress.enabled"]
@@ -556,6 +573,7 @@ func plural2(n int, one, many string) string {
 	return many
 }
 
+// lineAt is the 1-based line of byte offset off in b.
 func lineAt(b []byte, off int) int { return bytes.Count(b[:off], []byte("\n")) + 1 }
 
 // stripPHPComments blanks out //, # and /* */ comments while keeping line
@@ -611,6 +629,7 @@ type phpTokenizer struct {
 	text []bool
 }
 
+// mark flags the bytes from..to as text: inline HTML or a string literal.
 func (t *phpTokenizer) mark(from, to int) {
 	for j := from; j < to && j < len(t.out); j++ {
 		t.text[j] = true
@@ -743,4 +762,5 @@ func isIdent(c byte, first bool) bool {
 	return c == '_' || c >= 0x80 || (c|0x20 >= 'a' && c|0x20 <= 'z') || (!first && c >= '0' && c <= '9')
 }
 
+// isSpace reports whether c is ASCII whitespace as PHP's tokenizer sees it.
 func isSpace(c byte) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r' }

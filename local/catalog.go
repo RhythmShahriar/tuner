@@ -19,12 +19,12 @@ const HelpBase = "https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Finding-Re
 // listings and SARIF know it without running a scan. Its fields match
 // engine.Rule, so registering the catalog is a conversion.
 type RuleInfo struct {
-	ID       string
-	Prefix   bool // ID is a prefix of the reported IDs (none are, today)
-	Title    string
+	ID       string          // the finding ID, or its prefix
+	Prefix   bool            // ID is a prefix of the reported IDs (none are, today)
+	Title    string          // what the finding is about, for lists and SARIF
 	Tags     []string        // every tag its findings can carry, "local" included
 	Severity engine.Severity // the most severe its findings can be
-	HelpURI  string
+	HelpURI  string          // the ID's anchor on the finding reference page
 }
 
 // goRules are the checks written in Go. Titles with a variable part

@@ -28,6 +28,8 @@ const headerBytes = 8 << 10
 const maxPluginFiles = 50
 
 var (
+	// Patterns for the values Tuner reads from wp-includes/version.php and
+	// wp-config.php. Only the files' text is read; none of it is run.
 	wpVersionVar = regexp.MustCompile(`\$wp_version\s*=\s*['"]([^'"]+)['"]`)
 	wpLocalVar   = regexp.MustCompile(`\$wp_local_package\s*=\s*['"]([A-Za-z_]+)['"]`)
 	versionToken = regexp.MustCompile(`^[0-9][0-9A-Za-z.+-]*`)
@@ -45,6 +47,7 @@ var (
 // Headers Tuner reads, matched like WordPress's get_file_data().
 var headers = map[string]*regexp.Regexp{}
 
+// init compiles the header patterns.
 func init() {
 	for _, name := range []string{"Plugin Name", "Theme Name", "Version"} {
 		headers[name] = regexp.MustCompile(`(?mi)^[ \t/*#@]*` + regexp.QuoteMeta(name) + `:(.*)$`)
@@ -54,6 +57,7 @@ func init() {
 // Includes other than wp-settings.php: settings may be defined there.
 var includeRe = regexp.MustCompile(`(?i)\b(?:require|include)(?:_once)?\b[^;]*;`)
 
+// wordpress is an install found under the scan root.
 type wordpress struct {
 	root       string
 	version    string
@@ -155,6 +159,7 @@ func (s *scan) mainPluginFile(dir, slug string) []byte {
 	return nil
 }
 
+// plural is "s" unless n is 1.
 func plural(n int) string {
 	if n == 1 {
 		return ""
@@ -162,6 +167,7 @@ func plural(n int) string {
 	return "s"
 }
 
+// boolInt is 1 for true, 0 for false.
 func boolInt(b bool) int {
 	if b {
 		return 1
@@ -382,6 +388,8 @@ type config struct {
 	includes bool
 }
 
+// parseConfig reads the defines and table prefix from wp-config.php's
+// source, comments removed. The first define of a name wins, as in PHP.
 func parseConfig(src string) config {
 	code := stripComments(src)
 	c := config{defines: map[string]string{}, lines: map[string]int{}}
@@ -426,6 +434,7 @@ func lineNote(n int) string {
 	return fmt.Sprintf(" (line %d)", n)
 }
 
+// defined reports whether wp-config.php defines name.
 func (c config) defined(name string) bool {
 	_, ok := c.defines[name]
 	return ok
