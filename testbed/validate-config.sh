@@ -67,18 +67,21 @@ docker run --rm -v "$tmp/nginx.conf:/etc/nginx/nginx.conf:ro" \
 conf=/usr/local/apache2/conf
 apache_mounts="-v $here/apache/httpd.conf:$conf/testbed.conf:ro -v $here/apache/validate.conf:$conf/httpd.conf:ro"
 
-# Apache, server-config parse of the bundle.
-# shellcheck disable=SC2086 # apache_mounts is a list of flags
-docker run --rm $apache_mounts -v "$tmp/harden.htaccess:$conf/harden.conf:ro" \
-	"$HTTPD_IMAGE" httpd -t -D SYNTAX
-
-# Apache, the bundle as a real .htaccess under a live server.
+# The docroot both Apache runs mount: httpd -t refuses a DocumentRoot
+# that is not a directory, and the httpd image has no /var/www/html.
 site="$tmp/site"
 mkdir "$site"
 echo ok > "$site/index.html"
 cp "$tmp/harden.htaccess" "$site/.htaccess"
 chmod 755 "$site"
 chmod 644 "$site/index.html" "$site/.htaccess"
+
+# Apache, server-config parse of the bundle.
+# shellcheck disable=SC2086 # apache_mounts is a list of flags
+docker run --rm $apache_mounts -v "$tmp/harden.htaccess:$conf/harden.conf:ro" \
+	-v "$site:/var/www/html:ro" "$HTTPD_IMAGE" httpd -t -D SYNTAX
+
+# Apache, the bundle as a real .htaccess under a live server.
 # shellcheck disable=SC2086
 cid=$(docker run -d $apache_mounts -v "$site:/var/www/html:ro" \
 	-p "127.0.0.1:$port:80" "$HTTPD_IMAGE")

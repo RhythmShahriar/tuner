@@ -51,8 +51,9 @@ jobs:
           # container behind. A serve that logs the name and keeps serving
           # is still running at the timeout and fails here.
           name=tuner-smoke-notoken
-          timeout 20 docker run --name "$name" -e TUNER_SERVE_TOKEN= "$image" > notoken.log 2>&1
-          code=$?
+          # The run shell has -e, so catch the expected non-zero exit.
+          code=0
+          timeout 20 docker run --name "$name" -e TUNER_SERVE_TOKEN= "$image" > notoken.log 2>&1 || code=$?
           cat notoken.log
           running=$(docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null || echo false)
           docker rm -f "$name" >/dev/null 2>&1 || true

@@ -94,7 +94,8 @@ jobs:
       - name: wp tuner scan
         working-directory: .
         run: |
-          set -uo pipefail
+          # The default run shell adds -e; this step reads exit codes itself.
+          set +e -uo pipefail
           dead=http://127.0.0.1:20250
           wp() {
             docker run --rm -u "$(id -u):$(id -g)" ${WP_WORKDIR:+-w "$WP_WORKDIR"} \

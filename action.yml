@@ -60,14 +60,16 @@ inputs:
       set "false" to only write the file, e.g. for pull requests from forks.
     required: false
     default: "true"
+  # The runner evaluates expressions in descriptions too, so the examples
+  # below name the secret without the expression syntax.
   headers:
     description: >
       Extra request headers, one "Name: value" per line, each passed as -H. Use this, not args, for
-      anything with a space or a secret, e.g. "Authorization: Bearer ${{ secrets.STAGING_TOKEN }}".
+      anything with a space or a secret, e.g. "Authorization: Bearer " and secrets.STAGING_TOKEN.
     required: false
     default: ""
   cookie:
-    description: A Cookie header for the scan, e.g. "session=${{ secrets.SESSION }}", passed as --cookie.
+    description: A Cookie header for the scan, e.g. "session=" and secrets.SESSION, passed as --cookie.
     required: false
     default: ""
   args:

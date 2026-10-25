@@ -55,14 +55,15 @@ jobs:
           case "$RUNNER_OS" in Linux) os=linux ;; macOS) os=darwin ;; Windows) os=windows ;; esac
           case "$RUNNER_ARCH" in X64) arch=amd64 ;; ARM64) arch=arm64 ;; esac
           mkdir -p "$RUNNER_TEMP/mirror/good" "$RUNNER_TEMP/mirror/tampered"
+          # go build runs in the module; the archive is made here.
           cd "$RUNNER_TEMP/mirror/good"
           if [ "$os" = windows ]; then
-            go build -o rhythm-tuner.exe -ldflags "-X main.version=0.0.0-action-test" "$GITHUB_WORKSPACE/cmd/rhythm-tuner"
+            (cd "$GITHUB_WORKSPACE" && go build -o "$RUNNER_TEMP/mirror/good/rhythm-tuner.exe" -ldflags "-X main.version=0.0.0-action-test" ./cmd/rhythm-tuner)
             archive="rhythm-tuner_${os}_${arch}.zip"
             pwsh -NoProfile -Command "Compress-Archive -Path rhythm-tuner.exe -DestinationPath $archive"
             rm rhythm-tuner.exe
           else
-            go build -o rhythm-tuner -ldflags "-X main.version=0.0.0-action-test" "$GITHUB_WORKSPACE/cmd/rhythm-tuner"
+            (cd "$GITHUB_WORKSPACE" && go build -o "$RUNNER_TEMP/mirror/good/rhythm-tuner" -ldflags "-X main.version=0.0.0-action-test" ./cmd/rhythm-tuner)
             archive="rhythm-tuner_${os}_${arch}.tar.gz"
             tar -czf "$archive" rhythm-tuner
             rm rhythm-tuner
