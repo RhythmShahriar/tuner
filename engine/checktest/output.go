@@ -128,6 +128,7 @@ func hiddenParts(body, redacted string) []string {
 	return out
 }
 
+// isSpace reports whether r is ASCII whitespace.
 func isSpace(r rune) bool { return r == ' ' || r == '\t' || r == '\n' || r == '\r' }
 
 // windows splits v into every run of window runes, or returns v whole

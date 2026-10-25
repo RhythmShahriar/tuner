@@ -49,6 +49,7 @@ func (r Result) Failed(strict bool) bool {
 	return len(r.Problems) > 0 || (strict && len(r.Leaks) > 0)
 }
 
+// String names the case for test output.
 func (r Result) String() string {
 	kind := "negative"
 	if r.Positive {

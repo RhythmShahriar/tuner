@@ -22,6 +22,7 @@ type Rule struct {
 }
 
 var (
+	// rules holds every registered rule by source.
 	rulesMu sync.Mutex
 	rules   = map[string][]Rule{} // by source, e.g. "vulns" or "local"
 )

@@ -29,9 +29,9 @@ var Servers = []string{"nginx", "apache"}
 // Finding is the part of a report finding a bundle needs. Reports from
 // before fix_server have no Fixes; Build then falls back to the check.
 type Finding struct {
-	ID    string            `json:"id"`
-	URL   string            `json:"url"`
-	Fixes map[string]string `json:"fixes,omitempty"`
+	ID    string            `json:"id"`              // the check that fired
+	URL   string            `json:"url"`             // where; blocks name it so a reader can find the finding
+	Fixes map[string]string `json:"fixes,omitempty"` // server snippets the report carried
 }
 
 // ParseReport reads the findings of a Tuner JSON report: one target's
@@ -79,8 +79,8 @@ type Block struct {
 
 // Bundle is the config for one server.
 type Bundle struct {
-	Server   string
-	Blocks   []Block
+	Server   string   // nginx or apache
+	Blocks   []Block  // one per check, sorted by ID
 	Findings int      // findings the blocks cover
 	Without  []string // check IDs found with no snippet for this server, sorted
 	// Command is how the user runs Tuner, for the explain hint; ""
@@ -152,6 +152,7 @@ func Build(findings []Finding, server string, checks []*engine.Check) (*Bundle, 
 	return b, nil
 }
 
+// snippetFor is the check's snippet for server.
 func snippetFor(fs engine.FixServer, server string) string {
 	if server == "apache" {
 		return fs.Apache
@@ -221,6 +222,8 @@ func (b *Bundle) WritePlan(w io.Writer) error {
 	return err
 }
 
+// header is the comment block that opens a bundle: what made it and
+// where it goes.
 func (b *Bundle) header(version string) []string {
 	lines := []string{
 		fmt.Sprintf("Tuner fix bundle for %s, from rhythm-tuner %s.", b.Server, version),
@@ -264,6 +267,7 @@ func drop(s, keep string) string {
 	}, s)
 }
 
+// plural is "1 noun" or "n nouns".
 func plural(n int, noun string) string {
 	if n == 1 {
 		return fmt.Sprintf("1 %s", noun)

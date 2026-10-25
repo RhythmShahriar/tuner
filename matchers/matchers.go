@@ -23,11 +23,11 @@ import (
 
 // Response is a fetched HTTP response, as seen by matchers.
 type Response struct {
-	URL    *url.URL
-	Status int
-	Header http.Header
-	Body   []byte
-	TLS    *TLSInfo // set on the home page of https targets
+	URL    *url.URL    // the final URL, after redirects
+	Status int         // HTTP status
+	Header http.Header // response headers
+	Body   []byte      // the body, cut at the engine's 1 MiB cap
+	TLS    *TLSInfo    // set on the home page of https targets
 
 	// TLSState is the raw handshake, kept for the engine's TLS probe.
 	TLSState *tls.ConnectionState
@@ -36,7 +36,7 @@ type Response struct {
 	// 1 MiB cap. They stay set when the engine drops Body from its cache
 	// to bound memory.
 	Size   int
-	SHA256 [32]byte
+	SHA256 [32]byte // of Body as read
 }
 
 // TLSInfo describes the target's certificate and protocol support.
@@ -49,9 +49,9 @@ type TLSInfo struct {
 
 // Matcher is one condition. Every field that is set must hold.
 type Matcher struct {
-	Status        Ints              `yaml:"status"`
-	Regex         string            `yaml:"regex"`
-	NotRegex      string            `yaml:"not_regex"`
+	Status        Ints              `yaml:"status"`         // any of these statuses
+	Regex         string            `yaml:"regex"`          // must match the body
+	NotRegex      string            `yaml:"not_regex"`      // must not match the body
 	Words         []string          `yaml:"words"`          // any of these substrings
 	Magic         string            `yaml:"magic"`          // hex prefix of the body
 	Header        map[string]string `yaml:"header"`         // header name → regex
@@ -59,8 +59,8 @@ type Matcher struct {
 	MissingHeader []string          `yaml:"missing_header"` // headers that must be absent
 	Scheme        string            `yaml:"scheme"`         // http or https
 	NotBaseline   bool              `yaml:"not_baseline"`   // must differ from the soft-404 response
-	Cookie        *CookieMatch      `yaml:"cookie"`
-	TLS           *TLSMatch         `yaml:"tls"`
+	Cookie        *CookieMatch      `yaml:"cookie"`         // a cookie set without a flag
+	TLS           *TLSMatch         `yaml:"tls"`            // https certificate and protocol conditions
 
 	cookieName *regexp.Regexp
 
@@ -78,9 +78,9 @@ type CookieMatch struct {
 // TLSMatch holds when every set condition holds for an https target.
 type TLSMatch struct {
 	ExpiresWithinDays int  `yaml:"expires_within_days"` // valid now but expires within N days
-	Expired           bool `yaml:"expired"`
-	Untrusted         bool `yaml:"untrusted"` // chain or hostname does not verify
-	Legacy            bool `yaml:"legacy"`    // TLS 1.0 or 1.1 still accepted
+	Expired           bool `yaml:"expired"`             // the certificate has expired
+	Untrusted         bool `yaml:"untrusted"`           // chain or hostname does not verify
+	Legacy            bool `yaml:"legacy"`              // TLS 1.0 or 1.1 still accepted
 }
 
 // Ints accepts either a single int or a list in YAML.
@@ -149,6 +149,7 @@ func (m *Matcher) Compile() error {
 	return nil
 }
 
+// compileHeaders compiles a header name to regex map.
 func compileHeaders(in map[string]string) (map[string]*regexp.Regexp, error) {
 	out := make(map[string]*regexp.Regexp, len(in))
 	for name, expr := range in {
@@ -255,6 +256,8 @@ func (m *Matcher) cookieLacking(h http.Header) (string, bool) {
 	return "", false
 }
 
+// match reports whether info meets every set condition, with the
+// evidence for it.
 func (t *TLSMatch) match(info *TLSInfo) (string, bool) {
 	if info == nil {
 		return "", false
@@ -288,6 +291,7 @@ func (t *TLSMatch) match(info *TLSInfo) (string, bool) {
 	return strings.Join(ev, "; "), true
 }
 
+// headerMatch returns the first value of header name that matches re.
 func headerMatch(h http.Header, name string, re *regexp.Regexp) (string, bool) {
 	for _, v := range h.Values(name) {
 		if re.MatchString(v) {
@@ -300,8 +304,8 @@ func headerMatch(h http.Header, name string, re *regexp.Regexp) (string, bool) {
 // Block combines matchers: every one in All must hold. If Any is set, at
 // least one of those must hold too.
 type Block struct {
-	All []Matcher `yaml:"all"`
-	Any []Matcher `yaml:"any"`
+	All []Matcher `yaml:"all"` // every one must hold
+	Any []Matcher `yaml:"any"` // one of these must hold, when set
 }
 
 // Compile checks the block and prepares its matchers (regexes, magic

@@ -53,6 +53,7 @@ references:
   - https://owasp.org/Top10/A05_2021-Security_Misconfiguration/
 `
 
+// fixtureTemplate is the fixture file new writes next to a scaffolded check.
 const fixtureTemplate = `# Mock sites for {{id}}: it must fire on every positive case and stay
 # quiet on every negative one. Run them with: rhythm tuner checks test
 positive:

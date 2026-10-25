@@ -46,11 +46,11 @@ func IsAdvisorID(pattern string) bool {
 // Selector narrows the checks a scan runs. Zero values select everything
 // in the default profile.
 type Selector struct {
-	Profile     Profile
+	Profile     Profile  // quick, default or deep; "" means default
 	Tags        []string // run checks with any of these tags
-	ExcludeTags []string
+	ExcludeTags []string // skip checks with any of these tags
 	IDs         []string // run only these checks; globs like leak-* allowed
-	ExcludeIDs  []string
+	ExcludeIDs  []string // skip these checks; globs allowed
 	MinSeverity Severity // skip checks below this severity
 }
 
@@ -163,11 +163,14 @@ func editDistance(a, b string) int {
 	return prev[len(b)]
 }
 
+// globMatch reports whether id matches the glob pattern; a malformed
+// pattern matches nothing.
 func globMatch(pattern, id string) bool {
 	ok, _ := path.Match(pattern, id)
 	return ok
 }
 
+// hasAny reports whether have holds any of want.
 func hasAny(have, want []string) bool {
 	return slices.ContainsFunc(want, func(t string) bool { return slices.Contains(have, t) })
 }
@@ -212,6 +215,7 @@ func Score(findings []Finding) int {
 // (IDs, tags, minimum severity) to an advisor's output.
 func Filtered(a Advisor, s Selector) Advisor { return filtered{a, s} }
 
+// filtered is the Advisor Filtered returns.
 type filtered struct {
 	Advisor
 	sel Selector
@@ -226,6 +230,7 @@ func (f filtered) PluginSlugs(ctx context.Context) []string {
 	return nil
 }
 
+// Advise runs the advisor and keeps the findings the selection allows.
 func (f filtered) Advise(ctx context.Context, base *url.URL, fp fingerprint.Result) ([]Finding, []string) {
 	findings, warnings := f.Advisor.Advise(ctx, base, fp)
 	return f.keep(findings), warnings

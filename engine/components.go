@@ -19,6 +19,8 @@ import (
 const maxComponents = 50
 
 var (
+	// Version lines in a plugin's readme.txt, a theme's style.css and the
+	// RSS generator tag.
 	stableTag   = regexp.MustCompile(`(?mi)^[ \t]*Stable tag:[ \t]*([0-9][0-9A-Za-z.-]*)`)
 	themeVer    = regexp.MustCompile(`(?mi)^[ \t*]*Version:[ \t]*([0-9][0-9A-Za-z.-]*)`)
 	feedVersion = regexp.MustCompile(`<generator>https?://wordpress\.org/\?v=([0-9.]+)</generator>`)
@@ -273,6 +275,7 @@ feed:
 	return trimmed, false
 }
 
+// readmePath is where a plugin's readme.txt lives.
 func readmePath(slug string) string { return "/wp-content/plugins/" + slug + "/readme.txt" }
 
 // forget drops the body cached under key; the status and headers stay.

@@ -41,9 +41,10 @@ type Issue struct {
 	File    string // check or fixture file; empty for rules about the whole set
 	Check   string // check ID, when known
 	Rule    string // id, method, query, baseline, reference, fixtures, fix-server, budget or load
-	Message string
+	Message string // what is wrong and how to fix it
 }
 
+// String formats the issue as file: rule: message.
 func (i Issue) String() string {
 	where := i.File
 	if where == "" {
@@ -52,6 +53,7 @@ func (i Issue) String() string {
 	return fmt.Sprintf("%s: %s: %s", where, i.Rule, i.Message)
 }
 
+// kebab is the form of a check ID: two or more lower-case words joined by -.
 var kebab = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)+$`)
 
 // Lint checks every check in fsys against the rules for checks Tuner
@@ -205,6 +207,8 @@ func guarded(b matchers.Block) bool {
 	return len(b.Any) > 0 && !slices.ContainsFunc(b.Any, func(m matchers.Matcher) bool { return !specific(m) })
 }
 
+// specific reports whether m looks at more than the status and headers,
+// which a catch-all page can fake.
 func specific(m matchers.Matcher) bool {
 	return m.NotBaseline || m.Regex != "" || len(m.Words) > 0 || m.Magic != ""
 }

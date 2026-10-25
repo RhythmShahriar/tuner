@@ -26,10 +26,11 @@ import (
 
 // RedirectError means the home page redirected somewhere the scan won't go.
 type RedirectError struct {
-	From, To *url.URL
-	Internal bool // To resolves to a loopback, link-local or private address
+	From, To *url.URL // the URL redirected from and where it pointed
+	Internal bool     // To resolves to a loopback, link-local or private address
 }
 
+// Error names both hosts and how to scan the other one on purpose.
 func (e *RedirectError) Error() string {
 	from, to := e.From.Host, e.To.Host
 	if e.From.Scheme != e.To.Scheme {
@@ -44,10 +45,11 @@ func (e *RedirectError) Error() string {
 // AddressError means a connection would have reached a loopback,
 // link-local or private address while the target is a public host.
 type AddressError struct {
-	Host string
-	Addr netip.Addr
+	Host string     // the host name being dialed
+	Addr netip.Addr // the address it resolved to
 }
 
+// Error names the host and the address that was refused.
 func (e *AddressError) Error() string {
 	return fmt.Sprintf("refusing to connect to %s at %s: a local or private address while the target is not one", e.Host, e.Addr)
 }
@@ -55,6 +57,7 @@ func (e *AddressError) Error() string {
 // resolver looks up the addresses of a host name.
 type resolver func(ctx context.Context, host string) ([]netip.Addr, error)
 
+// defaultResolve looks a host up with the system resolver.
 func defaultResolve(ctx context.Context, host string) ([]netip.Addr, error) {
 	return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
 }
@@ -155,6 +158,7 @@ func internal(a netip.Addr) bool {
 	return slices.ContainsFunc(internalV4, func(p netip.Prefix) bool { return p.Contains(a) })
 }
 
+// dialFunc is the signature of net.Dialer.DialContext.
 type dialFunc func(ctx context.Context, network, addr string) (net.Conn, error)
 
 // guardDial resolves the host itself and dials the checked addresses, so
@@ -226,6 +230,8 @@ func effectivePort(u *url.URL) string {
 	return "443"
 }
 
+// normHost is u's host in lower case without a trailing dot, so
+// Example.COM. and example.com compare equal.
 func normHost(u *url.URL) string { return strings.TrimSuffix(strings.ToLower(u.Hostname()), ".") }
 
 // sameSite reports whether to is the scan's own host as seen from from:

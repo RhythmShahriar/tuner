@@ -97,6 +97,8 @@ type Extras struct {
 }
 
 var (
+	// The file names a pack may carry under data/ and local/. Lower case
+	// and no folders, so a pack can't place a file anywhere unexpected.
 	dataName  = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*\.json$`)
 	localName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*\.yaml$`)
 )
@@ -104,12 +106,12 @@ var (
 // Manifest describes a pack. It travels next to the archive, so a client
 // can reject an incompatible pack before downloading it.
 type Manifest struct {
-	Schema   int       `json:"schema"`
-	Version  string    `json:"version"`   // from the commit time, e.g. 2026.10.23-142501
-	Commit   string    `json:"commit"`    // the tuner commit the pack was built from
-	Created  time.Time `json:"created"`   // that commit's time; orders packs and builds
-	MinTuner string    `json:"min_tuner"` // oldest rhythm-tuner that can run these checks
-	Checks   int       `json:"checks"`
+	Schema   int       `json:"schema"`            // Schema of the builder; a newer one is rejected
+	Version  string    `json:"version"`           // from the commit time, e.g. 2026.10.23-142501
+	Commit   string    `json:"commit"`            // the tuner commit the pack was built from
+	Created  time.Time `json:"created"`           // that commit's time; orders packs and builds
+	MinTuner string    `json:"min_tuner"`         // oldest rhythm-tuner that can run these checks
+	Checks   int       `json:"checks"`            // how many checks the archive holds
 	Retired  []string  `json:"retired,omitempty"` // check IDs removed on purpose; older binaries still have them built in
 	Data     []string  `json:"data,omitempty"`    // fingerprint data files under data/
 	Local    int       `json:"local,omitempty"`   // local scan rules under local/
@@ -118,7 +120,7 @@ type Manifest struct {
 // Built is a pack ready to publish: the release assets and the
 // signature once Sign has run.
 type Built struct {
-	Manifest Manifest
+	Manifest Manifest          // what the release's manifest says
 	Files    map[string][]byte // asset name → contents
 }
 
@@ -307,11 +309,14 @@ func (b *Built) Sign(key ed25519.PrivateKey) {
 	b.Files[SigName] = Sign(b.Files[SumsName], key)
 }
 
+// config is checks/pack.json.
 type config struct {
-	MinTuner string   `json:"min_tuner"`
-	Retired  []string `json:"retired"` // IDs deleted from checks/; see Manifest.Retired
+	MinTuner string   `json:"min_tuner"` // oldest rhythm-tuner that can run the checks
+	Retired  []string `json:"retired"`   // IDs deleted from checks/; see Manifest.Retired
 }
 
+// readConfig reads and validates checks/pack.json, refusing unknown fields
+// so a typo can't quietly drop a setting.
 func readConfig(src fs.FS) (config, error) {
 	var cfg config
 	data, err := fs.ReadFile(src, ConfigName)
@@ -331,6 +336,7 @@ func readConfig(src fs.FS) (config, error) {
 	return cfg, nil
 }
 
+// semver is a release version, with or without the v.
 var semver = regexp.MustCompile(`^v?\d+\.\d+\.\d+$`)
 
 // ErrRejected marks a pack this binary must not use: a newer schema, a
@@ -466,6 +472,7 @@ func extract(archive []byte) (fstest.MapFS, error) {
 	return out, nil
 }
 
+// sum is the hex SHA-256 of b, as the sums file writes it.
 func sum(b []byte) string {
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:])

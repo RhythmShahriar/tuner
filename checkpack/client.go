@@ -23,7 +23,8 @@ import (
 const (
 	// DefaultBase is the rolling release CI publishes packs to.
 	DefaultBase = "https://github.com/RhythmShahriar/tuner/releases/download/checks-latest"
-	DefaultTTL  = 24 * time.Hour
+	// DefaultTTL is how long a consulted release is trusted before asking again.
+	DefaultTTL = 24 * time.Hour
 
 	// Backoff is how long a failed refresh is not retried. Without it a
 	// host that hangs or a firewall that drops the traffic would delay
@@ -43,8 +44,8 @@ var ErrUnreachable = errors.New("check pack host unreachable")
 // vulnerability data: a fresh cache is used as is and a stale one is
 // refreshed. When the refresh fails the stale copy is still used.
 type Client struct {
-	HTTP      *http.Client
-	UserAgent string
+	HTTP      *http.Client  // nil means a client with a 30s timeout
+	UserAgent string        // sent with every request
 	BaseURL   string        // where the release assets live; "" means DefaultBase
 	CacheDir  string        // "" disables the disk cache
 	TTL       time.Duration // consult the release after this long; 0 means DefaultTTL
@@ -71,6 +72,7 @@ type Client struct {
 	Now func() time.Time
 }
 
+// now is the client's clock in UTC.
 func (c *Client) now() time.Time {
 	if c.Now != nil {
 		return c.Now().UTC()
@@ -81,7 +83,7 @@ func (c *Client) now() time.Time {
 // Pack is a verified pack, ready to scan with.
 type Pack struct {
 	Manifest
-	FS      fs.FS
+	FS      fs.FS           // the pack's files: checks, data/ and local/
 	Loaded  []*engine.Check // the pack's checks, parsed
 	Checked time.Time       // when the release was last consulted
 	Stale   bool            // older than the TTL: offline, or the refresh failed
@@ -132,14 +134,14 @@ func DefaultCacheDir() string {
 // again on every use: a key removed from a later build stops trusting a
 // pack cached under it.
 type state struct {
-	Checked  time.Time `json:"checked"`
+	Checked  time.Time `json:"checked"`            // when the release was last consulted
 	Failed   time.Time `json:"failed,omitzero"`    // last refresh that failed; no retry until Backoff has passed
 	Rejected string    `json:"rejected,omitempty"` // the newest pack, when this binary can't use it
-	Manifest *Manifest `json:"manifest,omitempty"`
-	SHA256   string    `json:"sha256,omitempty"`
-	Sums     []byte    `json:"sums,omitempty"` // checks-sha256.txt as signed
-	Sig      []byte    `json:"sig,omitempty"`  // its signature
-	Archive  []byte    `json:"archive,omitempty"`
+	Manifest *Manifest `json:"manifest,omitempty"` // of the cached pack
+	SHA256   string    `json:"sha256,omitempty"`   // of the cached archive, as the signed sums list it
+	Sums     []byte    `json:"sums,omitempty"`     // checks-sha256.txt as signed
+	Sig      []byte    `json:"sig,omitempty"`      // its signature
+	Archive  []byte    `json:"archive,omitempty"`  // checks.tar.gz, verified again on every open
 }
 
 // keep copies the pack part of st, if any, into a new state.
@@ -321,6 +323,7 @@ func (c *Client) verified(st *state) (*opened, error) {
 	return &opened{fsys, loaded}, nil
 }
 
+// opened is a verified pack's unpacked files and parsed checks.
 type opened struct {
 	fsys   fs.FS
 	loaded []*engine.Check
@@ -348,6 +351,9 @@ func (c *Client) open(st *state) (*Pack, error) {
 	return p, nil
 }
 
+// get downloads one release asset, refusing anything over limit bytes.
+// No token or cookie is sent: the assets are public and the signature,
+// not the transport, is what makes them trusted.
 func (c *Client) get(ctx context.Context, name string, limit int64) ([]byte, error) {
 	base := c.BaseURL
 	if base == "" {
@@ -387,6 +393,7 @@ func (c *Client) Cached() bool {
 	return st != nil && len(st.Archive) > 0
 }
 
+// path is the cache file, or "" without a cache directory.
 func (c *Client) path() string {
 	if c.CacheDir == "" {
 		return ""
