@@ -90,6 +90,7 @@ func scanTuner(ctx context.Context, b *Bench, name string, site Site) *Report {
 	return rep
 }
 
+// tunerDoc is what the benchmark reads from Tuner's JSON report.
 type tunerDoc struct {
 	plugins, files []string
 	blocked        bool
@@ -155,6 +156,7 @@ func scanWPScan(ctx context.Context, b *Bench, name string, site Site) *Report {
 	return rep
 }
 
+// parseWPScanJSON lists the plugin slugs in WPScan's JSON output.
 func parseWPScanJSON(out string) ([]string, error) {
 	start := strings.IndexByte(out, '{')
 	if start < 0 {

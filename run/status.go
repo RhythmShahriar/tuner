@@ -22,7 +22,7 @@ import (
 // request budget) and the vulnerability advisor, then records it on each
 // report with report.SetStatus.
 type Status struct {
-	Complete  bool   `json:"complete"`
+	Complete  bool   `json:"complete"`             // every planned request ran
 	StoppedBy string `json:"stopped_by,omitempty"` // interrupted, max-time, waf, home-status, budget or integrity
 	BlockedBy string `json:"blocked_by,omitempty"` // the firewall that challenged the scan
 	VulnData  string `json:"vuln_data,omitempty"`  // one of the Vuln* values below
@@ -76,6 +76,7 @@ func (p *Plan) status(ctx context.Context, err error, slot *vulnSlot, res *engin
 // vulnRank orders vulnerability data statuses from best to worst.
 var vulnRank = map[string]int{VulnOK: 1, VulnPartial: 2, VulnMissing: 3}
 
+// isCanceled reports whether err is a cancellation, such as Ctrl+C.
 func isCanceled(err error) bool { return errors.Is(err, context.Canceled) }
 
 // TrackVulns wraps a vulnerability advisor so Run can tell how much data
@@ -102,6 +103,7 @@ type statusAdvisor interface {
 	AdviseStatus(ctx context.Context, base *url.URL, fp fingerprint.Result) ([]engine.Finding, []string, string)
 }
 
+// Advise is AdviseStatus without the status.
 func (v vulnTracker) Advise(ctx context.Context, base *url.URL, fp fingerprint.Result) ([]engine.Finding, []string) {
 	findings, warnings, _ := v.AdviseStatus(ctx, base, fp)
 	return findings, warnings
@@ -190,6 +192,7 @@ func (s *vulnSlot) set(status string) {
 	}
 }
 
+// get is the worst status recorded; missing when none was.
 func (s *vulnSlot) get() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()

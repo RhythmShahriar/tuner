@@ -17,13 +17,13 @@ import (
 // Digest sums up one run's report plus what changed since the run
 // before it when there was one.
 type Digest struct {
-	Sites    int                     `json:"sites"`
-	Findings int                     `json:"findings"`
-	Counts   map[engine.Severity]int `json:"counts"`
+	Sites    int                     `json:"sites"`    // targets in the report
+	Findings int                     `json:"findings"` // findings across them
+	Counts   map[engine.Severity]int `json:"counts"`   // findings per severity
 	// Compared is false on the first run, when New and Fixed mean nothing.
 	Compared bool `json:"compared"`
-	New      int  `json:"new"`
-	Fixed    int  `json:"fixed"`
+	New      int  `json:"new"`   // findings that are new since the last run
+	Fixed    int  `json:"fixed"` // findings gone since the last run
 }
 
 // String reads "3 sites, 12 findings (1 critical, 2 high, 9 low); 2 new,
@@ -48,6 +48,7 @@ func (d Digest) String() string {
 	return b.String()
 }
 
+// plural is "1 word" or "n words".
 func plural(n int, word string) string {
 	if n == 1 {
 		return "1 " + word
@@ -57,8 +58,8 @@ func plural(n int, word string) string {
 
 // siteReport is the part of a Tuner JSON report a digest reads.
 type siteReport struct {
-	Target   string           `json:"target"`
-	Findings []engine.Finding `json:"findings"`
+	Target   string           `json:"target"`   // as the report names it
+	Findings []engine.Finding `json:"findings"` // what the scan found
 }
 
 // readReport reads a JSON report: one site's object or a batch's array.

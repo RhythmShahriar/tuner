@@ -30,6 +30,8 @@ type mailer struct {
 	o        Options
 }
 
+// newMailer checks an smtp:// or smtps:// URL. The password must come from
+// TUNER_SMTP_PASSWORD: a URL ends up in shell history and CI logs.
 func newMailer(u *url.URL, o Options, shown string) (*mailer, error) {
 	m := &mailer{host: u.Hostname(), implicit: strings.EqualFold(u.Scheme, "smtps"), shown: shown, o: o}
 	port := u.Port()
@@ -71,8 +73,10 @@ func newMailer(u *url.URL, o Options, shown string) (*mailer, error) {
 	return m, nil
 }
 
+// String is the URL as shown to the user.
 func (m *mailer) String() string { return m.shown }
 
+// Send delivers msg over TLS, failing rather than sending in the clear.
 func (m *mailer) Send(ctx context.Context, msg Message) error {
 	dial := m.o.Dial
 	if dial == nil {
@@ -144,6 +148,8 @@ func (m *mailer) secure(c *smtp.Client) error {
 	return errors.New("the mail server does not offer STARTTLS; Tuner sends mail only over TLS (or use smtps://)")
 }
 
+// tlsConfig is the TLS setup for the mail server: TLS 1.2 or later,
+// verified against its host name.
 func (m *mailer) tlsConfig() *tls.Config {
 	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
 	if m.o.TLSConfig != nil {

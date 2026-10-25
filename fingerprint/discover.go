@@ -63,6 +63,7 @@ func Overlay(fsys fs.FS) (Data, error) { return LoadData(overlayFS{fsys, embedde
 // overlayFS opens a file from top, else from base.
 type overlayFS struct{ top, base fs.FS }
 
+// Open opens name from top if it has it, else from base.
 func (o overlayFS) Open(name string) (fs.File, error) {
 	if f, err := o.top.Open(name); err == nil {
 		return f, nil
@@ -107,15 +108,22 @@ func LoadData(fsys fs.FS) (Data, error) {
 	return d, nil
 }
 
+// staticData is the Data that LoadData builds.
 type staticData struct {
 	ns, inferred map[string]string
 	top          []string
 }
 
-func (d *staticData) RESTNamespaces() map[string]string     { return d.ns }
-func (d *staticData) InferredNamespaces() map[string]string { return d.inferred }
-func (d *staticData) TopPlugins() []string                  { return d.top }
+// RESTNamespaces is the checked namespace map; see Data.
+func (d *staticData) RESTNamespaces() map[string]string { return d.ns }
 
+// InferredNamespaces is the unchecked namespace map; see Data.
+func (d *staticData) InferredNamespaces() map[string]string { return d.inferred }
+
+// TopPlugins lists popular plugin slugs, most installed first.
+func (d *staticData) TopPlugins() []string { return d.top }
+
+// slugRe is the form of a wordpress.org plugin slug.
 var slugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
 // ValidSlug reports whether s is a plugin slug wordpress.org could issue.
@@ -187,6 +195,7 @@ func PluginsFromREST(d Data, namespaces []string) []Component {
 }
 
 var (
+	// The opening "=== Name ===" line and the fields every plugin readme.txt has.
 	readmeHeader = regexp.MustCompile(`(?m)^[ \t]*===[ \t]*\S.*===[ \t]*\r?$`)
 	readmeField  = regexp.MustCompile(`(?mi)^[ \t]*(?:Stable tag|Requires at least|Tested up to|Contributors):`)
 )

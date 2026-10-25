@@ -33,6 +33,7 @@ func newBoard(m *Manifest, sites []string, scores []Score) *board {
 	return b
 }
 
+// toolKey is the key of the tool called name.
 func toolKey(name string) string {
 	for _, t := range allTools {
 		if t.Name == name || t.Key == name {
@@ -131,6 +132,7 @@ func scoreboard(b *board, version string, when time.Time) string {
 	return sb.String()
 }
 
+// requests formats a request count; "n/a" when the tool doesn't report one.
 func requests(n int64) string {
 	if n < 0 {
 		return "n/a"
@@ -154,6 +156,7 @@ func result(site Site, s Score) string {
 	}
 }
 
+// firstLine is the first line of s, cut to 80 bytes.
 func firstLine(s string) string {
 	if i := strings.IndexByte(s, '\n'); i >= 0 {
 		s = s[:i]

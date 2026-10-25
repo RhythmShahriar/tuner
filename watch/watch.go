@@ -50,7 +50,7 @@ type Watcher struct {
 	List     string   // targets file passed to scan -l
 	Extra    []string // more scan flags, passed verbatim
 	Dir      string   // state folder: reports, logs, lock and last.json
-	Schedule Schedule
+	Schedule Schedule // when runs start
 	// RunNow starts a daily (At) schedule with a run right away. An
 	// interval schedule always starts with one.
 	RunNow bool
@@ -70,7 +70,7 @@ type Watcher struct {
 	// rejects. FirstFlags go only on a run with no earlier report, such
 	// as --notify-all-first. Without PassSince every run is a first run.
 	SinceFlags []string
-	FirstFlags []string
+	FirstFlags []string  // see SinceFlags
 	Clock      Clock     // default RealClock
 	Log        io.Writer // one line per run; default io.Discard
 
@@ -86,7 +86,7 @@ type Run struct {
 	HTML              string // the rendered HTML report, if any
 	LogFile           string // the scan's terminal output
 	Exit              int    // the scan's exit code, -1 if it didn't start or was killed
-	Digest            Digest
+	Digest            Digest // what the report says and what changed
 	// Warning is a problem worth a line that didn't stop the run, such
 	// as an HTML render failing.
 	Warning string
@@ -94,11 +94,12 @@ type Run struct {
 
 // state is last.json.
 type state struct {
-	Report   string    `json:"report"` // file name in the state folder
-	Finished time.Time `json:"finished"`
-	Exit     int       `json:"exit"`
+	Report   string    `json:"report"`   // file name in the state folder
+	Finished time.Time `json:"finished"` // when that run ended
+	Exit     int       `json:"exit"`     // its exit code
 }
 
+// clock is the Watcher's clock, RealClock unless one is set.
 func (w *Watcher) clock() Clock {
 	if w.Clock == nil {
 		return RealClock{}
@@ -106,6 +107,7 @@ func (w *Watcher) clock() Clock {
 	return w.Clock
 }
 
+// logf writes one line to the log, if there is one.
 func (w *Watcher) logf(format string, a ...any) {
 	if w.Log != nil {
 		fmt.Fprintf(w.Log, format+"\n", a...)
@@ -176,6 +178,7 @@ func (r Run) Line() string {
 	return b.String()
 }
 
+// stamp formats t for the log.
 func stamp(t time.Time) string { return t.Format("2006-01-02 15:04 MST") }
 
 // Args returns the scan arguments for a run writing to report and
@@ -404,6 +407,7 @@ func splitRun(name string) (stamp string, n int) {
 	return stamp, n
 }
 
+// fileExists reports whether p can be stat'ed.
 func fileExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
