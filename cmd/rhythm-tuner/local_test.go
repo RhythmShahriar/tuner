@@ -18,7 +18,7 @@ import (
 // stand-in that reports 8.3.6.
 func localSite(t *testing.T) (root, php string) {
 	t.Helper()
-	root = t.TempDir()
+	root = realTempDir(t)
 	for p, body := range map[string]string{
 		"wp-includes/version.php": "<?php $wp_version = '6.4.1';",
 		"wp-config.php":           "<?php define('DISALLOW_FILE_EDIT', true); define('FORCE_SSL_ADMIN', true); $table_prefix = 'x_';",
@@ -89,7 +89,7 @@ func TestLocalScan(t *testing.T) {
 }
 
 func TestLocalScanErrors(t *testing.T) {
-	dir := t.TempDir()
+	dir := realTempDir(t)
 	file := filepath.Join(dir, "file.txt")
 	os.WriteFile(file, nil, 0o600)
 	for _, target := range []string{filepath.Join(dir, "missing"), "./no-such-dir", file} {
@@ -121,7 +121,7 @@ func distroPHPAPI(t *testing.T) {
 	for _, env := range []string{"TUNER_VULN_API", "TUNER_WPORG_API", "TUNER_PHPNET_API", "TUNER_OSV_API"} {
 		t.Setenv(env, api.URL)
 	}
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	setCacheHome(t, t.TempDir())
 }
 
 // A likely finding fails --fail-on by default; --min-confidence confirmed
@@ -131,7 +131,7 @@ func TestMinConfidence(t *testing.T) {
 		t.Skip("uses a shell script as php")
 	}
 	distroPHPAPI(t)
-	root := t.TempDir()
+	root := realTempDir(t)
 	os.MkdirAll(filepath.Join(root, "wp-includes"), 0o755)
 	os.WriteFile(filepath.Join(root, "wp-includes", "version.php"), []byte("<?php $wp_version = '6.4.1';"), 0o600)
 	php := filepath.Join(t.TempDir(), "php")
@@ -162,7 +162,7 @@ func TestMinConfidenceFailOnNew(t *testing.T) {
 	}
 	needScanFlags(t, "since", "fail-on-new")
 	distroPHPAPI(t)
-	root := t.TempDir()
+	root := realTempDir(t)
 	os.MkdirAll(filepath.Join(root, "wp-includes"), 0o755)
 	os.WriteFile(filepath.Join(root, "wp-includes", "version.php"), []byte("<?php $wp_version = '6.4.1';"), 0o600)
 	php := filepath.Join(t.TempDir(), "php")

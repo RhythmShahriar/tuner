@@ -83,13 +83,50 @@ func tuner(t *testing.T, args ...string) (code int, stdout, stderr string) {
 	return tunerExact(t, args...)
 }
 
+// realTempDir is t.TempDir with its links and short names resolved, the
+// way a local scan reports its folder: on macOS the temp folder is under
+// the /var link to /private/var, and on Windows it can be a short name
+// like RUNNER~1.
+func realTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// testCacheHome marks a test that already set its cache folder.
+const testCacheHome = "TUNER_TEST_CACHE_HOME"
+
+// setCacheHome points os.UserCacheDir at dir on every OS: XDG_CACHE_HOME
+// on Linux, HOME on macOS (~/Library/Caches) and LocalAppData on Windows,
+// which ignore XDG_CACHE_HOME. It returns the folder os.UserCacheDir now
+// gives, which the vulnerability and check pack caches live under.
+func setCacheHome(t *testing.T, dir string) string {
+	t.Helper()
+	t.Setenv(testCacheHome, dir)
+	t.Setenv("XDG_CACHE_HOME", dir)
+	switch runtime.GOOS {
+	case "darwin", "ios":
+		t.Setenv("HOME", dir)
+	case "windows":
+		t.Setenv("LocalAppData", dir)
+	}
+	d, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
 // tunerExact is tuner without the added --rate 0 and --retries 0, for
 // tests of the command line itself.
 func tunerExact(t *testing.T, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // keep the first-run marker out of the real config
-	if os.Getenv("XDG_CACHE_HOME") == "" {
-		t.Setenv("XDG_CACHE_HOME", t.TempDir()) // and the vulnerability cache
+	if os.Getenv(testCacheHome) == "" {
+		setCacheHome(t, t.TempDir()) // and the vulnerability cache
 	}
 	// Never reach the real APIs or the check pack release from tests. Each
 	// one a test points at its own server is left alone.
@@ -268,7 +305,7 @@ func TestVulnScan(t *testing.T) {
 	t.Setenv("TUNER_VULN_API", api.URL)
 	t.Setenv("TUNER_WPORG_API", api.URL)
 	t.Setenv("TUNER_PHPNET_API", api.URL)
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	setCacheHome(t, t.TempDir())
 	packRelease(t, packCheck, "0.2.0") // so update's check pack refresh succeeds
 
 	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1018,7 +1055,7 @@ func TestFailOnNeedsVulnData(t *testing.T) {
 	t.Setenv("TUNER_VULN_API", api.URL)
 	t.Setenv("TUNER_WPORG_API", api.URL)
 	t.Setenv("TUNER_PHPNET_API", api.URL)
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	setCacheHome(t, t.TempDir())
 	site := pluginSite(t).URL
 
 	code, out, errs := tuner(t, "scan", site, "--json", "--fail-on", "high")
@@ -1055,7 +1092,7 @@ func TestFailOnNewNeedsVulnData(t *testing.T) {
 	t.Setenv("TUNER_VULN_API", api.URL)
 	t.Setenv("TUNER_WPORG_API", api.URL)
 	t.Setenv("TUNER_PHPNET_API", api.URL)
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	setCacheHome(t, t.TempDir())
 	site := pluginSite(t).URL
 	before := filepath.Join(t.TempDir(), "before.json")
 	if code, _, errs := tuner(t, "scan", site, "--no-vulns", "-o", before, "-q"); code != exitOK {
@@ -1088,7 +1125,7 @@ func TestVulnDataOK(t *testing.T) {
 	t.Setenv("TUNER_VULN_API", api.URL)
 	t.Setenv("TUNER_WPORG_API", api.URL)
 	t.Setenv("TUNER_PHPNET_API", api.URL)
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	setCacheHome(t, t.TempDir())
 	code, out, errs := tuner(t, "scan", pluginSite(t).URL, "--json", "--fail-on", "critical")
 	var rep statusReport
 	if json.Unmarshal([]byte(out), &rep); code != exitOK || rep.VulnData != "ok" {
@@ -1995,7 +2032,7 @@ func TestEndToEndIntegrityAndDiscover(t *testing.T) {
 // data, unless --allow-partial accepts that.
 func TestEndToEndIntegrityChecksumsDown(t *testing.T) {
 	needScanFlags(t, "integrity")
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	setCacheHome(t, t.TempDir())
 	site := filepath.Join(t.TempDir(), "shop")
 	wordPressFolder(t, site)
 

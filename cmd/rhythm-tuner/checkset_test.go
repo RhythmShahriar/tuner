@@ -76,7 +76,7 @@ func servePackWith(t *testing.T, config, check string, x checkpack.Extras, key e
 	}))
 	t.Cleanup(srv.Close)
 	t.Setenv("TUNER_CHECKS_URL", srv.URL)
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	setCacheHome(t, t.TempDir())
 }
 
 // testPackKey signs the test packs in place of the release key.
@@ -186,7 +186,7 @@ func TestOlderPackAfterUpgradeIsQuiet(t *testing.T) {
 
 func TestScanOfflineWithoutPack(t *testing.T) {
 	t.Setenv("TUNER_CHECKS_URL", "http://127.0.0.1:1")
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	setCacheHome(t, t.TempDir())
 	rep, errs := scanReport(t, leakySite(t).URL, "--offline")
 	if rep.CheckSet != "built-in" || strings.Contains(errs, "check pack") {
 		t.Errorf("offline without a pack: %+v\n%s", rep, errs)
@@ -315,7 +315,7 @@ func TestHangingPackHostBacksOff(t *testing.T) {
 
 func TestUnreachablePackHostWithoutCache(t *testing.T) {
 	trustTestKey(t)
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	setCacheHome(t, t.TempDir())
 	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
@@ -376,7 +376,7 @@ func TestPackDataAndLocalRules(t *testing.T) {
 // pack host says why; other warnings stay hidden.
 func TestPackAlertsUnderQuiet(t *testing.T) {
 	trustTestKey(t)
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	setCacheHome(t, t.TempDir())
 	pack := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, _, _ := w.(http.Hijacker).Hijack()
 		conn.Close()
@@ -402,7 +402,7 @@ func TestPackDataReachesScans(t *testing.T) {
 		t.Fatal(err)
 	}
 	if p.engine.PluginData == nil || p.engine.PluginData.RESTNamespaces()["acme-forms/v1"] != "acme-forms" {
-		t.Errorf("plugin data not from the pack: %+v", p.engine.PluginData)
+		t.Fatalf("plugin data not from the pack: %+v", p.engine.PluginData)
 	}
 	if len(p.engine.PluginData.TopPlugins()) == 0 {
 		t.Error("top plugins the pack lacks should come from the built-in copy")

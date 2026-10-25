@@ -564,7 +564,7 @@ func (v *integrityVisitor) linkData(e *entry, n need) (*fileData, string) {
 	if err != nil {
 		shown = "an unreadable target"
 	}
-	shown = "a link to " + snippet([]byte(shown), 0)
+	shown = "a link to " + snippet([]byte(filepath.ToSlash(shown)), 0)
 	target, err := filepath.EvalSymlinks(e.path)
 	if err != nil {
 		return nil, shown + " that doesn't resolve"

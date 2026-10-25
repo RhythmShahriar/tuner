@@ -32,8 +32,11 @@ func TestUpdateRefreshesOSV(t *testing.T) {
 		}
 	}))
 	defer osv.Close()
-	packRelease(t, packCheck, "0.2.0") // sets XDG_CACHE_HOME
-	cacheHome := os.Getenv("XDG_CACHE_HOME")
+	packRelease(t, packCheck, "0.2.0") // sets the cache folder
+	cacheHome, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("TUNER_OSV_API", osv.URL)
 
 	if code, out, _ := tuner(t, "update"); code != exitOK || !strings.Contains(out, "Nothing cached yet") || batches.Load() != 0 {
@@ -102,7 +105,7 @@ func TestUpdatePrefetchLocal(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses a shell script as php")
 	}
-	packRelease(t, packCheck, "0.2.0") // sets XDG_CACHE_HOME
+	packRelease(t, packCheck, "0.2.0") // sets the cache folder
 	hits, down := fakeVulnAPI(t)
 	osvAPI := osvtest.NewServer(t)
 	t.Setenv("TUNER_OSV_API", osvAPI.URL)
@@ -145,7 +148,7 @@ func TestUpdatePrefetchLocal(t *testing.T) {
 	}
 
 	// OSV.dev down with nothing cached: the prefetch fails and says why.
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	setCacheHome(t, t.TempDir())
 	osvAPI.Down.Store(true)
 	if code, _, errs := tuner(t, "update", "--prefetch", root, "--php", php); code != exitError || !strings.Contains(errs, "2 Composer packages") {
 		t.Errorf("prefetch with OSV down: exit %d, stderr %s", code, errs)
@@ -184,7 +187,7 @@ func TestUpdatePrefetchRemote(t *testing.T) {
 	}
 
 	// With the data service down, a cold prefetch fails and says why.
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	setCacheHome(t, t.TempDir())
 	if code, _, errs := tuner(t, "update", "--prefetch", site.URL); code != exitError || !strings.Contains(errs, "vulnerability data") {
 		t.Errorf("prefetch with API down: exit %d, stderr %s", code, errs)
 	}
@@ -241,7 +244,7 @@ func TestUpdateWithoutTrustedKeys(t *testing.T) {
 	}
 	closed := "http://" + ln.Addr().String()
 	ln.Close()
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	setCacheHome(t, t.TempDir())
 	for _, env := range []string{"TUNER_CHECKS_URL", "TUNER_VULN_API", "TUNER_WPORG_API", "TUNER_PHPNET_API", "TUNER_OSV_API"} {
 		t.Setenv(env, closed)
 	}

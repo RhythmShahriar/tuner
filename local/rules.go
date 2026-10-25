@@ -474,7 +474,8 @@ func (r *Rule) finding(s *scan, e *entry, f *fileData, at int) engine.Finding {
 		if err != nil {
 			target = "an unreadable target"
 		}
-		ev = append(ev, "a link to "+snippet([]byte(target), 0)+", not followed")
+		// Slashes as in every other path of a report, also on Windows.
+		ev = append(ev, "a link to "+snippet([]byte(filepath.ToSlash(target)), 0)+", not followed")
 	}
 	if f.size > int64(len(f.head)) && f.head != nil && len(r.not) > 0 {
 		ev = append(ev, "only the first 1 MB was read, so the file can't be shown to be harmless")

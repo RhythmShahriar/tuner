@@ -6,6 +6,7 @@ package local
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -20,6 +21,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/RhythmShahriar/tuner/engine"
 	"github.com/RhythmShahriar/tuner/fingerprint"
@@ -28,10 +30,22 @@ import (
 
 const rawSecret = "supersecret-db-pass"
 
+// tempDir is t.TempDir with its links and short names resolved, as Root
+// gives it back: on macOS the temp folder is under the /var link to
+// /private/var, and on Windows it can be a short name like RUNNER~1.
+func tempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 // tree writes files (path → content) under a new temp dir.
 func tree(t *testing.T, files map[string]string) string {
 	t.Helper()
-	root := t.TempDir()
+	root := tempDir(t)
 	for p, body := range files {
 		full := filepath.Join(root, filepath.FromSlash(p))
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
@@ -212,7 +226,7 @@ func TestWPConfig(t *testing.T) {
 			continue
 		}
 		if f.Severity != sev || f.Path != "/wp-config.php" || f.Confidence != "high" ||
-			f.URL != "file://"+filepath.ToSlash(root)+"/wp-config.php" || f.Target != root {
+			f.URL != fileURL(root).String()+"/wp-config.php" || f.Target != root {
 			t.Errorf("%s: %+v", id, f)
 		}
 	}
@@ -506,7 +520,7 @@ func TestAdvisor(t *testing.T) {
 		t.Fatalf("no plugin vuln: %v %v", ids(res), res.Warnings)
 	}
 	if f.Severity != engine.Critical || f.Target != root || f.Path != "/wp-content/plugins/contact-form-7/" ||
-		f.URL != "file://"+filepath.ToSlash(root)+"/wp-content/plugins/contact-form-7/" {
+		f.URL != fileURL(root).String()+"/wp-content/plugins/contact-form-7/" {
 		t.Errorf("plugin vuln: %+v", f)
 	}
 	// The machine's PHP goes through the same matching, distro caveat included.
@@ -538,7 +552,7 @@ func TestReadOnly(t *testing.T) {
 	before := snapshot(t, root)
 	scanTree(t, root, Options{})
 	if after := snapshot(t, root); !slices.Equal(before, after) {
-		t.Error("the scan changed the tree")
+		t.Errorf("the scan changed the tree\nbefore %q\nafter  %q", before, after)
 	}
 }
 
@@ -548,12 +562,17 @@ func snapshot(t *testing.T, root string) []string {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fi, _ := d.Info()
-		line := p + " " + fi.Mode().String() + " " + fi.ModTime().String()
+		// Lstat, not d.Info: on Windows d.Info comes from the folder
+		// listing, whose copy of a file's times NTFS updates lazily.
+		fi, err := os.Lstat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		line := p + " " + fi.Mode().String() + " " + fi.ModTime().UTC().Format(time.RFC3339Nano)
 		if !d.IsDir() {
 			b, _ := os.ReadFile(p)
 			sum := sha256.Sum256(b)
-			line += " " + string(sum[:])
+			line += " " + hex.EncodeToString(sum[:])
 		}
 		out = append(out, line)
 		return nil
@@ -562,7 +581,7 @@ func snapshot(t *testing.T, root string) []string {
 }
 
 func TestRoot(t *testing.T) {
-	dir := t.TempDir()
+	dir := tempDir(t)
 	file := filepath.Join(dir, "f")
 	os.WriteFile(file, nil, 0o600)
 	if _, err := Root(filepath.Join(dir, "missing")); err == nil || !strings.Contains(err.Error(), "no such directory") {

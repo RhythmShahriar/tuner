@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -140,6 +141,9 @@ func TestRuleEvidenceIsMaskedAndShort(t *testing.T) {
 func TestCraftedNamesAreCleaned(t *testing.T) {
 	// Anyone who can upload picks the file name. Escape sequences and
 	// bidi overrides in it must not reach the report as raw bytes.
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows file names can't hold control characters")
+	}
 	name := "x\x1b[31mRED\x1b[0m\u202e.php"
 	root := tree(t, map[string]string{
 		"wp-content/uploads/2024/" + name:       "<?php eval(base64_decode($_POST['x']));",

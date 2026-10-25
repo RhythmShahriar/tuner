@@ -16,7 +16,7 @@ import (
 // A file name in the site tree reaches the prefetch warnings, so it must
 // not carry a terminal escape through.
 func TestUpdatePrefetchCleansWarnings(t *testing.T) {
-	packRelease(t, packCheck, "0.2.0") // sets XDG_CACHE_HOME
+	packRelease(t, packCheck, "0.2.0") // sets the cache folder
 	fakeVulnAPI(t)
 	root, php := localSite(t)
 	dir := filepath.Join(root, "wp-content")

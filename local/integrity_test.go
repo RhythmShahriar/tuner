@@ -13,7 +13,6 @@ import (
 	"maps"
 	"net/http"
 	"os"
-	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -346,8 +345,8 @@ func TestIntegrityOff(t *testing.T) {
 }
 
 func TestChecksumsCacheKey(t *testing.T) {
-	c := &Checksums{CacheDir: "/cache"}
-	if p := c.path("plugin", "../../etc@1"); path.Dir(p) != "/cache/plugin" {
+	c := &Checksums{CacheDir: filepath.FromSlash("/cache")}
+	if p := c.path("plugin", "../../etc@1"); filepath.Dir(p) != filepath.Join(c.CacheDir, "plugin") {
 		t.Errorf("cache path %q escapes the cache", p)
 	}
 }
@@ -396,7 +395,9 @@ func TestIntegrityLinks(t *testing.T) {
 		t.Errorf("findings %v", slices.Sorted(maps.Keys(got)))
 	}
 	ev := strings.Join(got["local-integrity-core-modified /wp-includes/load.php"].Evidence.Matched, "\n")
-	if !strings.Contains(ev, "a link to "+filepath.Join(outside, "evil.php")+" outside the install, so it wasn't compared") {
+	// The target is shortened like any snippet: temp folders on macOS
+	// and Windows are long.
+	if !strings.Contains(ev, "a link to "+snippet([]byte(filepath.ToSlash(filepath.Join(outside, "evil.php"))), 0)+" outside the install, so it wasn't compared") {
 		t.Errorf("evidence %q", ev)
 	}
 	if f := got["local-integrity-core-modified /wp-includes/load.php"]; f.Severity != engine.High {

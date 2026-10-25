@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -167,7 +168,8 @@ func TestChecksExportSymlink(t *testing.T) {
 	}
 	for _, name := range []string{"tuner-leak-dotenv.yaml", "README.md"} {
 		fi, err := os.Lstat(filepath.Join(dir, name))
-		if err != nil || !fi.Mode().IsRegular() || fi.Mode().Perm() != 0o644 {
+		// Windows has no Unix modes to compare.
+		if err != nil || !fi.Mode().IsRegular() || (runtime.GOOS != "windows" && fi.Mode().Perm() != 0o644) {
 			t.Errorf("%s: %v %v", name, fi, err)
 		}
 	}

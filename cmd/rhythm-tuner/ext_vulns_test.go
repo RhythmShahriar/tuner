@@ -64,7 +64,7 @@ func TestUpdateWordfence(t *testing.T) {
 // OSV.dev. The data clients get the scan's --timeout, plus the Wordfence
 // feed when TUNER_WORDFENCE_KEY is set.
 func TestScanVulnDataWiring(t *testing.T) {
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	setCacheHome(t, t.TempDir())
 	osvAPI := osvtest.NewServer(t)
 	t.Setenv("TUNER_OSV_API", osvAPI.URL)
 	fakeVulnAPI(t)

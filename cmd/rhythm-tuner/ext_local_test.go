@@ -53,7 +53,7 @@ func TestLocalExtensionIntegrity(t *testing.T) {
 }
 
 func TestLocalExtensionDiscover(t *testing.T) {
-	root := t.TempDir()
+	root := realTempDir(t)
 	for _, f := range []string{"a/wp-includes/version.php", "a/wp-config.php", "a/blog/wp-includes/version.php", "a/blog/wp-config.php", "b/artisan"} {
 		p := filepath.Join(root, filepath.FromSlash(f))
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
@@ -103,7 +103,7 @@ func TestLocalExtensionDiscover(t *testing.T) {
 	}
 
 	// No installs, or no folder at all: usage errors.
-	empty := t.TempDir()
+	empty := realTempDir(t)
 	var ue usageError
 	if _, err := e.expand([]string{empty}, &w); !errors.As(err, &ue) || !strings.Contains(err.Error(), "found no WordPress or Laravel installs under "+empty) {
 		t.Errorf("empty folder: %v", err)
@@ -125,7 +125,7 @@ func TestLocalExtensionDiscover(t *testing.T) {
 // plan, says what it found before the scan and has each target's scan
 // skip the installs nested in it.
 func TestLocalExtensionPlan(t *testing.T) {
-	root := t.TempDir()
+	root := realTempDir(t)
 	for _, f := range []string{"a/wp-includes/version.php", "a/wp-config.php", "a/blog/wp-includes/version.php", "a/blog/wp-config.php"} {
 		p := filepath.Join(root, filepath.FromSlash(f))
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {

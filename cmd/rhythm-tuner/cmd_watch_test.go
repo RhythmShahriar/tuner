@@ -79,7 +79,7 @@ func TestWatchFlags(t *testing.T) {
 	dir := t.TempDir()
 	list := filepath.Join(dir, "Client Sites.txt")
 	os.WriteFile(list, []byte("example.com\n"), 0o600)
-	t.Setenv("XDG_CACHE_HOME", filepath.Join(dir, "cache"))
+	setCacheHome(t, filepath.Join(dir, "cache"))
 
 	w, once, err := planWatch([]string{"-l", list, "--at", "02:00,14:30", "--now", "--keep", "5", "--html"})
 	if err != nil || once {

@@ -17,7 +17,7 @@ import (
 // explain runs the explain command on the built-in checks, offline.
 func explain(t *testing.T, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	setCacheHome(t, t.TempDir())
 	t.Setenv("TUNER_CHECKS_URL", "http://127.0.0.1:1") // never reach the real release
 	var out, errb bytes.Buffer
 	code = cmdExplain(append(args, "--no-check-updates"), &out, &errb)
@@ -164,7 +164,7 @@ func TestExplainNeverFetches(t *testing.T) {
 	}
 
 	hits := hangingHost(t)
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	setCacheHome(t, t.TempDir())
 	out.Reset()
 	if code := cmdExplain([]string{"leak-dotenv"}, &out, &errb); code != exitOK || hits.Load() != 0 {
 		t.Errorf("exit %d, %d requests to the pack host", code, hits.Load())
