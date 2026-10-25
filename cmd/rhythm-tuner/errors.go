@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"regexp"
 	"slices"
@@ -206,10 +207,18 @@ func orList(options []string) string {
 
 // unwrapPath drops the operation and path from a *os.PathError, for a
 // message that already names the file: "-l x.txt: permission denied"
-// rather than "-l x.txt: open x.txt: permission denied".
+// rather than "-l x.txt: open x.txt: permission denied". A missing file
+// and a refused one read the same on every OS: Windows would otherwise
+// say "The system cannot find the file specified."
 func unwrapPath(err error) error {
 	var pe *os.PathError
 	if errors.As(err, &pe) {
+		switch {
+		case errors.Is(pe.Err, fs.ErrNotExist):
+			return errors.New("no such file or directory")
+		case errors.Is(pe.Err, fs.ErrPermission):
+			return errors.New("permission denied")
+		}
 		return pe.Err
 	}
 	return err

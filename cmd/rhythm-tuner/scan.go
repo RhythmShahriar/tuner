@@ -608,7 +608,9 @@ func (p *scanPlan) applyConfig(set map[string]bool, haveTargets bool) error {
 // gets read. Targets are only checked when the file chooses them.
 func insideConfigDir(c *tunerconfig.Config, haveTargets bool) error {
 	outside := func(p string) bool {
-		if filepath.IsAbs(p) || strings.HasPrefix(p, "~") || isDrivePath(p) || strings.HasPrefix(p, `\`) {
+		// A leading slash is the drive's root on Windows, where
+		// filepath.IsAbs says no.
+		if filepath.IsAbs(p) || strings.HasPrefix(p, "~") || isDrivePath(p) || strings.HasPrefix(p, `\`) || strings.HasPrefix(p, "/") {
 			return true
 		}
 		clean := filepath.Clean(filepath.FromSlash(strings.ReplaceAll(p, `\`, "/")))
@@ -624,7 +626,8 @@ func insideConfigDir(c *tunerconfig.Config, haveTargets bool) error {
 	if c.Baseline != "" {
 		rel, err := filepath.Rel(filepath.Dir(c.Path), c.Baseline)
 		if err != nil || outside(rel) {
-			return usagef("%s: baseline: %s is outside the folder that holds %s; name it with --baseline or pass --config", c.Path, c.Baseline, filepath.Base(c.Path))
+			// Slashes as the file has them, also on Windows.
+			return usagef("%s: baseline: %s is outside the folder that holds %s; name it with --baseline or pass --config", c.Path, filepath.ToSlash(c.Baseline), filepath.Base(c.Path))
 		}
 	}
 	return nil
