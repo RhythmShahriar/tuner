@@ -17,6 +17,7 @@ import (
 	"github.com/RhythmShahriar/tuner/report"
 )
 
+// diffUsage is the help for rhythm tuner diff.
 const diffUsage = `Usage:
   rhythm tuner diff <old.json> <new.json> [flags]
 
@@ -35,6 +36,7 @@ Exit codes: 0 ok · 1 new findings at --fail-on-new · 2 usage error ·
 3 a report couldn't be read
 `
 
+// init registers rhythm tuner diff.
 func init() {
 	registerCommand(command{Name: "diff", Args: "<old.json> <new.json>", Summary: "compare two JSON reports: what is new and what was fixed", Run: cmdDiff})
 }
@@ -130,7 +132,10 @@ type savedError struct {
 	err  error
 }
 
+// Error names the file and the reason.
 func (e savedError) Error() string { return e.path + ": " + e.err.Error() }
+
+// Unwrap returns the reason alone.
 func (e savedError) Unwrap() error { return e.err }
 
 // sinceMsg words a --since file readSaved refused, as --baseline does:

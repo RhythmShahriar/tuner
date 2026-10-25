@@ -18,6 +18,7 @@ import (
 	"github.com/RhythmShahriar/tuner/engine"
 )
 
+// init registers rhythm tuner init.
 func init() {
 	registerCommand(command{Name: "init", Args: "ci --target <url>", Summary: "write a CI workflow that runs Tuner", Run: cmdInit})
 }
@@ -48,6 +49,7 @@ func cmdInit(args []string, stdout, stderr io.Writer) int {
 	return exitUsage
 }
 
+// initUsage is the help for rhythm tuner init.
 const initUsage = `Usage:
   rhythm tuner init ci [flags]
 

@@ -17,6 +17,7 @@ import (
 	"github.com/RhythmShahriar/tuner/vulns/osv"
 )
 
+// init registers the vulnerability data sources with rhythm tuner scan.
 func init() { registerScanExtension(vulnsExtension{}) }
 
 // vulnsExtension wires the vulnerability data sources into a scan: the
@@ -24,6 +25,7 @@ func init() { registerScanExtension(vulnsExtension{}) }
 // and the Composer match on an exposed composer.lock.
 type vulnsExtension struct{}
 
+// Help documents TUNER_WORDFENCE_KEY and the Composer match.
 func (vulnsExtension) Help() string {
 	return `Vulnerability data:
       TUNER_WORDFENCE_KEY  a free Wordfence Intelligence API key: plugins,
@@ -33,6 +35,7 @@ func (vulnsExtension) Help() string {
                            matched against OSV.dev (up to 500 packages).`
 }
 
+// Flags adds none: the Wordfence key is read from TUNER_WORDFENCE_KEY.
 func (vulnsExtension) Flags(*flag.FlagSet) {}
 
 // Plan gives the data clients the scan's --timeout, adds the Wordfence
@@ -51,6 +54,7 @@ func (vulnsExtension) Plan(p *scanPlan) error {
 	return nil
 }
 
+// Finished has nothing to add once the scan ends.
 func (vulnsExtension) Finished(*scanPlan, []report.Report, io.Writer) (int, error) {
 	return exitOK, nil
 }
@@ -62,6 +66,7 @@ type selectedResponses struct {
 	sel engine.Selector
 }
 
+// AdviseResponse keeps the advisor's findings the selection allows.
 func (s selectedResponses) AdviseResponse(ctx context.Context, f engine.Finding, body []byte) ([]engine.Finding, []string) {
 	found, warnings := s.ResponseAdvisor.AdviseResponse(ctx, f, body)
 	var kept []engine.Finding

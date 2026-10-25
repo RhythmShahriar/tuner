@@ -49,6 +49,7 @@ type (
 // usagef builds a usageError.
 var usagef = cli.Usagef
 
+// scanOptions holds the rhythm tuner scan flags.
 type scanOptions struct {
 	json, jsonl, sarif, md         bool
 	jsonArray                      bool // JSON, always an array
@@ -87,6 +88,8 @@ type scanOptions struct {
 	noConfig bool   // --no-config: read no settings file
 }
 
+// scanFlagSet declares the scan flags on a new flag set. The help is
+// written by hand (scanHelp), so the flags carry no usage strings.
 func scanFlagSet(o *scanOptions, stderr io.Writer) *flag.FlagSet {
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -182,6 +185,7 @@ type scanPlan struct {
 	write report.WriteOptions
 }
 
+// scan runs rhythm tuner scan and returns the exit code.
 func scan(args []string, stdout, stderr io.Writer) int {
 	plan, err := planScan(args, os.Stdin)
 	if err != nil {
@@ -199,6 +203,8 @@ func scan(args []string, stdout, stderr io.Writer) int {
 	return execute(plan, stdout, stderr)
 }
 
+// planScan parses args into a plan: targets, options, the engine and
+// the data clients.
 func planScan(args []string, stdin io.Reader) (*scanPlan, error) {
 	p := &scanPlan{}
 	o := &p.o
@@ -730,6 +736,8 @@ func checkIDs(all []*engine.Check, ids, excluded []string) error {
 	return nil
 }
 
+// execute runs a planned scan of every target, writes the reports and
+// returns the exit code.
 func execute(p *scanPlan, stdout, stderr io.Writer) int {
 	o := p.o
 	tty := cli.IsTerminal(stdout)
@@ -1148,6 +1156,9 @@ type reportFile struct {
 // file can't belong to one still running.
 const staleReportAge = 24 * time.Hour
 
+// createReport opens a temporary file next to dest for the report. The
+// report reaches dest only when it is complete (see reportFile), so a
+// failed scan never leaves half a report where the old one was.
 func createReport(dest string) (*reportFile, error) {
 	shown := dest
 	dest, err := followLinks(dest)
@@ -1306,6 +1317,7 @@ type uaTransport struct {
 	ua string
 }
 
+// RoundTrip sets the User-Agent unless the request has one.
 func (t uaTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	if t.ua != "" && r.Header.Get("User-Agent") == "" {
 		r = r.Clone(r.Context()) // a RoundTripper must not change the caller's request
@@ -1492,15 +1504,18 @@ func looksLikeHost(s string) bool {
 	return s == "localhost" || strings.ContainsAny(s, ".:")
 }
 
+// isDrivePath reports whether t starts with a Windows drive, as in C: or C:\x.
 func isDrivePath(t string) bool {
 	return len(t) >= 2 && t[1] == ':' && (t[0]|0x20 >= 'a' && t[0]|0x20 <= 'z') &&
 		(len(t) == 2 || t[2] == '/' || t[2] == '\\')
 }
 
+// hasAnyPrefix reports whether s starts with any of prefixes.
 func hasAnyPrefix(s string, prefixes ...string) bool {
 	return slices.ContainsFunc(prefixes, func(p string) bool { return strings.HasPrefix(s, p) })
 }
 
+// isDir reports whether t is an existing directory.
 func isDir(t string) bool {
 	fi, err := os.Stat(t) //nolint:gosec // only checks whether the user's target is a local directory
 	return err == nil && fi.IsDir()

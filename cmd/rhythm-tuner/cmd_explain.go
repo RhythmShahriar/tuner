@@ -19,6 +19,7 @@ import (
 // findingReference is the wiki page with one section per finding ID.
 const findingReference = "https://github.com/RhythmShahriar/rhythm/wiki/Tuner-Finding-Reference"
 
+// init registers rhythm tuner explain.
 func init() {
 	registerCommand(command{Name: "explain", Args: "<id>", Summary: "show a check's full fix offline", Run: cmdExplain})
 }
@@ -93,6 +94,7 @@ func cmdExplain(args []string, stdout, stderr io.Writer) int {
 	return exitOK
 }
 
+// explainUsage is the help for rhythm tuner explain.
 const explainUsage = `Usage:
   rhythm tuner explain <id> [flags]
 
@@ -111,15 +113,15 @@ Flags:
 
 // explanation is what explain prints, also its --json shape.
 type explanation struct {
-	ID         string          `json:"id"`
+	ID         string          `json:"id"`   // the check or rule ID
 	Kind       string          `json:"kind"` // check or rule
-	Name       string          `json:"name"`
+	Name       string          `json:"name"` // the check's name or the rule's title
 	Severity   engine.Severity `json:"severity,omitempty"`
 	Confidence string          `json:"confidence,omitempty"`
-	Profile    engine.Profile  `json:"profile,omitempty"`
+	Profile    engine.Profile  `json:"profile,omitempty"` // cheapest scan profile that runs a check
 	Tags       []string        `json:"tags,omitempty"`
-	Requires   []string        `json:"requires,omitempty"`
-	Paths      []string        `json:"paths,omitempty"`
+	Requires   []string        `json:"requires,omitempty"` // tech the fingerprint must find
+	Paths      []string        `json:"paths,omitempty"`    // what a check requests
 	Impact     string          `json:"impact,omitempty"`
 	Fix        string          `json:"fix,omitempty"`
 	FixServer  *fixServer      `json:"fix_server,omitempty"`
@@ -127,6 +129,7 @@ type explanation struct {
 	Reference  string          `json:"reference"` // the wiki section or the rule's own help page
 }
 
+// fixServer is the check's fix_server snippets.
 type fixServer struct {
 	Nginx  string `json:"nginx,omitempty"`
 	Apache string `json:"apache,omitempty"`

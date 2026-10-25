@@ -16,6 +16,7 @@ import (
 	"github.com/RhythmShahriar/rhythm/kit"
 )
 
+// version is set at build time with -ldflags "-X main.version=...".
 var version = "dev"
 
 // Exit codes.
@@ -27,8 +28,11 @@ const (
 	exitCanceled = 130
 )
 
+// main runs the CLI with the process's arguments and exits with its code.
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 
+// run dispatches to a subcommand, the interactive picker or the scan.
+// It returns the exit code, so tests can call it like main.
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		if term.IsTerminal(os.Stdin.Fd()) && term.IsTerminal(os.Stdout.Fd()) {
@@ -108,6 +112,7 @@ type renamer struct {
 	name string
 }
 
+// Write writes p with every "rhythm tuner" replaced by the name in use.
 func (r renamer) Write(p []byte) (int, error) {
 	if _, err := r.w.Write(bytes.ReplaceAll(p, []byte("rhythm tuner"), []byte(r.name))); err != nil {
 		return 0, err
@@ -178,6 +183,7 @@ func wrapWords(text string, width int) []string {
 	return append(lines, line)
 }
 
+// usage prints the top-level help, with the command name as it was run.
 func usage(w io.Writer) {
 	name := cmdName()
 	lines := []usageLine{

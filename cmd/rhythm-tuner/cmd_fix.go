@@ -23,6 +23,7 @@ var fixStdin io.Reader = os.Stdin
 // under it.
 const maxReport = 64 << 20
 
+// init registers rhythm tuner fix.
 func init() {
 	registerCommand(command{Name: "fix", Args: "<report.json>... --server <name>", Summary: "build one nginx or Apache config from reports", Run: cmdFix})
 }
@@ -116,6 +117,7 @@ func readReport(name string) ([]byte, error) {
 	return data, err
 }
 
+// fixUsage is the help for rhythm tuner fix.
 const fixUsage = `Usage:
   rhythm tuner fix <report.json>... --server nginx|apache [--dry-run]
 

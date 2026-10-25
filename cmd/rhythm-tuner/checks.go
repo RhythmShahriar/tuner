@@ -155,6 +155,7 @@ func checksUsage() string {
 	}) + named(checksHelp)
 }
 
+// checksHelp follows the subcommand list in rhythm tuner checks --help.
 const checksHelp = `
 Lists the checks a scan with the same flags would run. Unlike scan, it
 lists every check unless --profile picks one. test and lint read the
@@ -293,6 +294,7 @@ func checksTest(args []string, stdout, stderr io.Writer) int {
 	return exitOK
 }
 
+// checksTestUsage is the help for rhythm tuner checks test.
 const checksTestUsage = `Usage:
   rhythm tuner checks test [dir]
 
@@ -329,6 +331,7 @@ func checksLint(args []string, stdout, stderr io.Writer) int {
 	return exitOK
 }
 
+// checksLintUsage is the help for rhythm tuner checks lint.
 const checksLintUsage = `Usage:
   rhythm tuner checks lint [dir]
 
@@ -419,6 +422,7 @@ func writeNew(path string, data []byte, written *[]string) error {
 // writeChunk writes the file's data. Tests replace it to play a full disk.
 var writeChunk = func(f *os.File, data []byte) (int, error) { return f.Write(data) }
 
+// checksNewUsage is the help for rhythm tuner checks new.
 const checksNewUsage = `Usage:
   rhythm tuner checks new <id> [dir]
 
@@ -552,6 +556,7 @@ func replaceFile(path string, data []byte) error {
 	return err
 }
 
+// checksExportUsage is the help for rhythm tuner checks export.
 const checksExportUsage = `Usage:
   rhythm tuner checks export --nuclei <dir> [flags]
 

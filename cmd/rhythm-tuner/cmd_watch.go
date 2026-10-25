@@ -23,6 +23,7 @@ import (
 	"github.com/RhythmShahriar/tuner/watch"
 )
 
+// watchUsage is the help for rhythm tuner watch.
 const watchUsage = `Usage:
   rhythm tuner watch -l <file> --every <interval> [flags] [-- <scan flags>]
   rhythm tuner watch -l <file> --at <HH:MM> [flags] [-- <scan flags>]
@@ -91,6 +92,7 @@ var watchOwned = []string{"o", "output", "json", "jsonl", "sarif", "md", "l", "l
 // --notify-all-first to --notify on a run without one.
 var watchPassed = []string{"fail-on-new", "notify", "notify-min"}
 
+// init registers rhythm tuner watch.
 func init() {
 	registerCommand(command{Name: "watch", Args: "-l <file> --every <interval>", Summary: "scan a site list on a schedule and say what changed", Run: cmdWatch})
 }
@@ -318,6 +320,9 @@ func defaultWatchName(list string, targets []string) string {
 // never replaces a sites.txt the user keeps there.
 const watchSitesName = "watch-sites.txt"
 
+// unsafeName matches runs of characters a folder name made from a site
+// must not hold: a site's host or path can't name a folder outside
+// the watch's own.
 var unsafeName = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
 // windowsDevice matches the names Windows keeps for devices, such as CON

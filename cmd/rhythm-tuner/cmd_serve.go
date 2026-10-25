@@ -19,6 +19,7 @@ import (
 	"github.com/RhythmShahriar/tuner/serve"
 )
 
+// serveUsage is the help for rhythm tuner serve.
 const serveUsage = `Usage:
   rhythm tuner serve [--listen 127.0.0.1:8080] [--data <dir>] [flags]
 
@@ -83,6 +84,7 @@ Examples:
     -d '{"url":"https://example.com"}' localhost:8080/v0/targets
 `
 
+// init registers rhythm tuner serve.
 func init() {
 	registerCommand(command{Name: "serve", Args: "[--listen <addr>]", Summary: "run the HTTP API: ownership checks, queued scans, webhooks", Run: cmdServe})
 }

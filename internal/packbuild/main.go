@@ -37,8 +37,11 @@ import (
 	"github.com/RhythmShahriar/tuner/checkpack"
 )
 
+// main runs packbuild with the process's arguments and exits with its code.
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 
+// run builds the check pack into the output folder and signs it when a
+// key is given. It returns the exit code, so tests can call it.
 func run(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("packbuild", flag.ContinueOnError)
 	flags.SetOutput(stderr)
