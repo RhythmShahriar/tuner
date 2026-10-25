@@ -19,6 +19,9 @@ import (
 var (
 	// Database dumps have their own rule, even compressed.
 	sqlDump = regexp.MustCompile(`(?i)\.(sql|mysql|pgsql)(\.(gz|bz2|xz|zip|7z|zst))?$|\.sqlite3?$`)
+	// archive matches file names of archives and backup formats, siteish
+	// names that suggest a site copy and yearDir the media library's
+	// year folders, which hold uploads, not strays.
 	archive = regexp.MustCompile(`(?i)\.(zip|tar|tgz|tbz2?|txz|gz|bz2|xz|7z|rar|wpress)$`)
 	siteish = regexp.MustCompile(`(?i)backup|bak|site|www|html|public|wordpress|wp|db|database|dump|full|export|migrat|old|copy|archive|snapshot|20[0-9]{2}`)
 	yearDir = regexp.MustCompile(`^[0-9]{4}$`)
@@ -41,6 +44,7 @@ type strayVisitor struct {
 func (v *strayVisitor) root() string { return v.s.web }
 func (v *strayVisitor) checks() int  { return len(strayChecks) + len(v.rules) }
 
+// enter reports a stray folder and says whether to look inside it.
 func (v *strayVisitor) enter(e *entry) bool {
 	f, skip := v.s.dir(e.path, e.name)
 	if f != nil {
@@ -59,6 +63,7 @@ func (v *strayVisitor) need(e *entry) need {
 	return n
 }
 
+// visit runs the Go stray-file checks and the web-scope rules on one file.
 func (v *strayVisitor) visit(e *entry, f *fileData) {
 	if x := v.s.file(e, f); x != nil {
 		v.add(*x)
@@ -130,6 +135,7 @@ func (s *scan) file(e *entry, f *fileData) *engine.Finding {
 	return nil
 }
 
+// findingPtr is finding returning a pointer, for checks that may find nothing.
 func (s *scan) findingPtr(id string, sev engine.Severity, p, title string, ev []string, impact, fix string, tags ...string) *engine.Finding {
 	f := s.finding(id, sev, p, title, ev, impact, fix, tags...)
 	return &f
@@ -148,6 +154,7 @@ func thousands(n int) string {
 	return s
 }
 
+// sizeNote formats n for evidence, as " (12.3 MB)"; "" when n is unknown.
 func sizeNote(n int64) string {
 	switch {
 	case n < 0:

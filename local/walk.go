@@ -266,8 +266,10 @@ type ctxHash struct {
 	written int
 }
 
+// hashCheckEvery is how many bytes a ctxHash writes between checks of ctx.
 const hashCheckEvery = 4 << 20
 
+// Write hashes p, failing once ctx is done.
 func (h *ctxHash) Write(p []byte) (int, error) {
 	if h.written += len(p); h.written >= hashCheckEvery {
 		h.written = 0
@@ -284,6 +286,7 @@ type collector struct {
 	found []engine.Finding
 }
 
+// add records findings. Workers call it, so it locks.
 func (c *collector) add(fs ...engine.Finding) {
 	c.mu.Lock()
 	c.found = append(c.found, fs...)

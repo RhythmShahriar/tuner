@@ -307,6 +307,7 @@ type scan struct {
 	mu sync.Mutex
 }
 
+// warn records a warning for the summary. Workers call it, so it locks.
 func (s *scan) warn(format string, a ...any) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -377,6 +378,7 @@ type notRegularError struct {
 	kind string // "a named pipe", "a link to a device", …
 }
 
+// Error says what the path is instead of a regular file.
 func (e *notRegularError) Error() string { return e.path + " is " + e.kind + ", not a regular file" }
 
 // readHead reads at most n bytes of a regular file. Anything else is
@@ -461,6 +463,7 @@ func (s *scan) skip(path, kind string) {
 	}
 }
 
+// isNotRegular reports whether err came from refusing a special file.
 func isNotRegular(err error) bool {
 	var nr *notRegularError
 	return errors.As(err, &nr)
@@ -487,6 +490,7 @@ func fileKind(m fs.FileMode) string {
 // findings go through engine.Filtered like advisor ones.
 type static []engine.Finding
 
+// Advise returns the fixed findings and no warnings.
 func (st static) Advise(context.Context, *url.URL, fingerprint.Result) ([]engine.Finding, []string) {
 	return st, nil
 }

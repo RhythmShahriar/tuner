@@ -101,12 +101,15 @@ func isPHPProject(root string) bool {
 	return false
 }
 
+// execOutput runs name with args and returns its stdout. WaitDelay stops a
+// child that keeps the pipe open from holding the scan after ctx ends.
 func execOutput(ctx context.Context, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // runs the php binary the user chose, with fixed arguments and no shell
 	cmd.WaitDelay = time.Second
 	return cmd.Output()
 }
 
+// firstLine is the first non-blank line of s.
 func firstLine(s string) string {
 	s, _, _ = strings.Cut(strings.TrimSpace(s), "\n")
 	return s
