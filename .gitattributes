@@ -1,0 +1,10 @@
+# Copyright (c) 2026 Rhythm Shahriar <me@rhy.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# LF everywhere, also on Windows checkouts with core.autocrlf: golden
+# files, checks and fixtures are compared byte for byte, and the check
+# pack archive and its signature are built from them.
+* text=auto eol=lf
+*.gz binary
+*.sig binary
+*.png binary
