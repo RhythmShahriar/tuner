@@ -29,6 +29,7 @@ func safeBlock(s string) string {
 	return term.SafeLines(strings.ReplaceAll(s, "\r\n", "\n"))
 }
 
+// mdReplacer escapes Markdown syntax in site text so it renders as written.
 var mdReplacer = func() *strings.Replacer {
 	var pairs []string
 	for _, c := range "\\`*_[]()!<>|#~" {
@@ -65,6 +66,9 @@ func MDCode(s string) string { return mdCode(s, false) }
 // a code span outside a table.
 func MDCodeCell(s string) string { return mdCode(s, true) }
 
+// mdCode wraps s in a code span whose fence is longer than any run of
+// backticks in s, so a site can't close the span early. cell also
+// escapes | for a table cell.
 func mdCode(s string, cell bool) string {
 	s = SafeText(oneLine(s))
 	if s == "" {
@@ -103,10 +107,12 @@ func SafeLink(text, target string) string {
 	return "[" + label + "](" + href + ")"
 }
 
+// oneLine joins s's lines with spaces.
 func oneLine(s string) string {
 	return strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(s)
 }
 
+// longestRun is the longest run of c in s.
 func longestRun(s string, c byte) int {
 	best, n := 0, 0
 	for i := range len(s) {
@@ -136,6 +142,8 @@ func sanitized[T any](v T) T {
 	return out.Interface().(T) // out was made from v's type, so this cannot fail
 }
 
+// copyClean copies src into dst, cleaning every string on the way.
+// block keeps line breaks, for the multiLine fields.
 func copyClean(dst, src reflect.Value, block bool) {
 	switch src.Kind() {
 	case reflect.String:

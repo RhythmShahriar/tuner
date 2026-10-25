@@ -16,6 +16,9 @@ func Markdown(w io.Writer, reports []Report) error {
 	return Write("md", w, reports, WriteOptions{})
 }
 
+// writeMarkdown writes reports as GitHub-flavored Markdown, for pasting
+// into an issue or a pull request. Everything that came from a site goes
+// through MDText or mdCode first.
 func writeMarkdown(w io.Writer, reports []Report, o WriteOptions) error {
 	var b strings.Builder
 	for i, r := range reports {
@@ -113,6 +116,7 @@ func writeMarkdown(w io.Writer, reports []Report, o WriteOptions) error {
 	return err
 }
 
+// sevEmoji is the colored dot for a severity.
 func sevEmoji(s engine.Severity) string {
 	switch s {
 	case engine.Critical:
@@ -127,6 +131,7 @@ func sevEmoji(s engine.Severity) string {
 	return "⚪"
 }
 
+// or returns s, or fallback when s is empty.
 func or(s, fallback string) string {
 	if s == "" {
 		return fallback

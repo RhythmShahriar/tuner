@@ -41,6 +41,8 @@ type Baseline struct {
 	old    string // the file, when it was saved before fingerprints
 }
 
+// advisoryKey is the key that accepts one advisory of the finding with
+// fingerprint fp.
 func advisoryKey(fp, id string) string { return fp + " " + id }
 
 // scope is the prefix of target's keys: "" for a single-target baseline.
@@ -51,6 +53,7 @@ func (b Baseline) scope(target string) string {
 	return TargetKey(target) + " "
 }
 
+// legacyKey is a finding's key in a baseline saved before fingerprints.
 func legacyKey(f engine.Finding) string { return f.ID + " " + f.URL }
 
 // LoadBaseline reads a JSON report (one object or an array of them).
@@ -162,6 +165,8 @@ func (b Baseline) Filter(res *engine.Result) int {
 	return n
 }
 
+// knownVulns matches the advisory count that ends an advisory finding's
+// title, so narrow can restate it for the advisories left.
 var knownVulns = regexp.MustCompile(`: \d+ known vulnerabilit(?:y|ies)$`)
 
 // narrow rewrites an advisory finding to list only fresh, the advisories

@@ -70,8 +70,8 @@ type Config struct {
 	Workers int // scans at once across all sites (default 2)
 	// MaxScanTime is passed to each scan as --max-time (default 30m).
 	MaxScanTime time.Duration
-	MaxQueue    int // queued scans before POST /v0/scans answers 429 (default 100)
-	Runner      Runner
+	MaxQueue    int      // queued scans before POST /v0/scans answers 429 (default 100)
+	Runner      Runner   // runs each scan; required (ExecRunner runs a Tuner binary)
 	Resolver    Resolver // default net.DefaultResolver
 	// HTTP fetches verification files and delivers webhooks. Its
 	// redirect policy is replaced: verification follows same-host
@@ -89,10 +89,10 @@ type Config struct {
 	// WebhookRetry is the wait before each retry of a failed delivery
 	// (default 5s, 30s, 2m).
 	WebhookRetry []time.Duration
-	UserAgent    string
-	Version      string
-	Log          io.Writer // one line per notable event; default io.Discard
-	Now          func() time.Time
+	UserAgent    string           // sent with every verification fetch and webhook
+	Version      string           // shown by /v0/health
+	Log          io.Writer        // one line per notable event; default io.Discard
+	Now          func() time.Time // the clock, for tests; default time.Now
 }
 
 // Server is the API. Create it with New, serve Handler and Close it to
@@ -245,6 +245,8 @@ func CheckListen(addr, token string) error {
 	return nil
 }
 
+// isLoopback reports whether host is localhost or a loopback IP. Only
+// there may the API run without a token.
 func isLoopback(host string) bool {
 	if strings.EqualFold(host, "localhost") {
 		return true
@@ -304,6 +306,7 @@ func isJSON(contentType string) bool {
 	return err == nil && mt == "application/json"
 }
 
+// routes registers the API's endpoints. Anything else is a JSON 404.
 func (s *Server) routes() {
 	m := http.NewServeMux()
 	m.HandleFunc("GET /v0/health", s.health)
@@ -321,6 +324,7 @@ func (s *Server) routes() {
 	s.mux = m
 }
 
+// health answers GET /v0/health with the version and the queue's size.
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	queued, running := s.queue.counts()
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -329,6 +333,7 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+// logf writes one timestamped line to the log, if there is one.
 func (s *Server) logf(format string, a ...any) {
 	if s.cfg.Log == nil {
 		return
@@ -340,10 +345,12 @@ func (s *Server) logf(format string, a ...any) {
 
 // apiError is every error response: {"error": "..."} plus details.
 type apiError struct {
-	Error  string        `json:"error"`
-	Checks []verifyCheck `json:"checks,omitempty"`
+	Error  string        `json:"error"`            // what went wrong
+	Checks []verifyCheck `json:"checks,omitempty"` // each ownership check tried, for a failed verification
 }
 
+// writeJSON writes v as the response body with status code. nosniff keeps
+// a browser from reading site text in it as HTML.
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -353,6 +360,7 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	_ = enc.Encode(v)
 }
 
+// writeError writes {"error": msg} with status code.
 func writeError(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, apiError{Error: msg})
 }

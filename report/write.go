@@ -16,14 +16,14 @@ import (
 // it next to the targets that were, so a script sees every target it asked
 // for.
 type TargetError struct {
-	Target string `json:"target"`
-	Error  string `json:"error"`
+	Target string `json:"target"` // as requested
+	Error  string `json:"error"`  // why it could not be scanned
 }
 
 // Brand puts an agency's name and logo on reports meant for clients.
 type Brand struct {
-	Name     string
-	LogoPath string
+	Name     string // the agency's name, shown in the header
+	LogoPath string // an SVG or PNG logo; SVG is cleaned before it is embedded
 }
 
 // WriteOptions carries everything a writer may need besides the reports.
@@ -33,7 +33,7 @@ type WriteOptions struct {
 	Failed  []TargetError // targets that could not be scanned
 	Version string        // the rhythm-tuner version, for SARIF's tool driver
 	Root    string        // the scan root of a local scan, for fingerprints
-	Brand   Brand
+	Brand   Brand         // on the HTML report
 
 	// Since is an earlier scan of the same targets. The html writer marks
 	// the findings that are new since then, lists the fixed ones and shows
@@ -48,12 +48,14 @@ type WriteOptions struct {
 // Writer renders reports in one format.
 type Writer func(w io.Writer, reports []Report, o WriteOptions) error
 
+// writerEntry is one registered format.
 type writerEntry struct {
 	ext string
 	fn  Writer
 }
 
 var (
+	// writers holds the registered formats by name.
 	writersMu sync.RWMutex
 	writers   = map[string]writerEntry{}
 )
@@ -117,6 +119,7 @@ func FormatForExt(path string) string {
 	return ""
 }
 
+// init registers the built-in formats.
 func init() {
 	RegisterWriter("json", ".json", writeJSON)
 	// JSON Lines findings stream through JSONLine while the scan runs, so

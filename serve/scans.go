@@ -41,18 +41,20 @@ const (
 // or writes the server's files (--checks, -o, --php) or changes where
 // requests go (--proxy, headers) is left out on purpose.
 type ScanOptions struct {
-	Profile     string   `json:"profile,omitempty"`
-	Tags        []string `json:"tags,omitempty"`
-	ExcludeTags []string `json:"exclude_tags,omitempty"`
-	IDs         []string `json:"ids,omitempty"`
-	ExcludeIDs  []string `json:"exclude_ids,omitempty"`
-	Severity    string   `json:"severity,omitempty"`
-	NoVulns     bool     `json:"no_vulns,omitempty"`
+	Profile     string   `json:"profile,omitempty"`      // --profile
+	Tags        []string `json:"tags,omitempty"`         // --tags
+	ExcludeTags []string `json:"exclude_tags,omitempty"` // --exclude-tags
+	IDs         []string `json:"ids,omitempty"`          // --id
+	ExcludeIDs  []string `json:"exclude_ids,omitempty"`  // --exclude-id
+	Severity    string   `json:"severity,omitempty"`     // --severity
+	NoVulns     bool     `json:"no_vulns,omitempty"`     // --no-vulns
 }
 
 // listItem is a tag or check ID, globs allowed; never a flag.
 var listItem = regexp.MustCompile(`^[A-Za-z0-9*?._-]{1,64}$`)
 
+// validate rejects anything that isn't a plain value. Each value becomes
+// a command line argument, so one starting with - could pass as a flag.
 func (o ScanOptions) validate() error {
 	if o.Profile != "" && engine.Profile(o.Profile).Rank() < 0 {
 		return fmt.Errorf("profile %q: want one of %v", o.Profile, engine.Profiles)
@@ -100,8 +102,8 @@ func (o ScanOptions) args() []string {
 // (data is the JSON finding), log (a line the scan printed), done (data
 // is the scan).
 type Event struct {
-	Seq  int             `json:"seq"`
-	Type string          `json:"type"`
+	Seq  int             `json:"seq"`  // numbers events from 1, for Last-Event-ID
+	Type string          `json:"type"` // queued, started, finding, log or done
 	Data json.RawMessage `json:"data"`
 }
 
@@ -136,6 +138,8 @@ type scan struct {
 	changed chan struct{}
 }
 
+// scanFromRecord rebuilds a stored scan. A finished one gets a closed
+// changed channel so streams end at once.
 func scanFromRecord(rec scanRecord) *scan {
 	sc := &scan{id: rec.ID, rec: rec, changed: make(chan struct{})}
 	if final(rec.Status) {
@@ -144,6 +148,7 @@ func scanFromRecord(rec scanRecord) *scan {
 	return sc
 }
 
+// final reports whether a scan with status can change no more.
 func final(status string) bool {
 	return status != statusQueued && status != statusRunning
 }
@@ -196,6 +201,9 @@ func (sc *scan) eventsFrom(seq int) ([]Event, bool, <-chan struct{}) {
 	return out, final(sc.rec.Status), sc.changed
 }
 
+// createScan queues a scan of a registered target. The target must have
+// proven ownership recently: the API only scans sites their owner has
+// let it scan.
 func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		TargetID string `json:"target_id"`
@@ -270,6 +278,7 @@ func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, queued)
 }
 
+// getScan answers GET /v0/scans/{id}. The webhook URL is never shown.
 func (s *Server) getScan(w http.ResponseWriter, r *http.Request) {
 	sc, ok := s.store.scan(r.PathValue("id"))
 	if !ok {
@@ -340,6 +349,7 @@ func (s *Server) work() {
 	}
 }
 
+// runScan runs one scan as a child process and records what it prints.
 func (s *Server) runScan(sc *scan) {
 	sc.mu.Lock()
 	now := s.cfg.Now().UTC()
@@ -443,6 +453,7 @@ func (s *Server) finish(sc *scan, status string, exit int, msg string) {
 	}
 }
 
+// suffix is ": msg", or "" without a message.
 func suffix(msg string) string {
 	if msg == "" {
 		return ""
@@ -459,6 +470,7 @@ type lineWriter struct {
 	fn   func([]byte)
 }
 
+// Write passes each complete line to fn and buffers the rest.
 func (lw *lineWriter) Write(p []byte) (int, error) {
 	lw.mu.Lock()
 	defer lw.mu.Unlock()
@@ -486,6 +498,7 @@ func (lw *lineWriter) Write(p []byte) (int, error) {
 	return n, nil
 }
 
+// flush passes on a last line without a newline.
 func (lw *lineWriter) flush() {
 	lw.mu.Lock()
 	defer lw.mu.Unlock()
@@ -508,14 +521,17 @@ type queue struct {
 	closed  bool
 }
 
+// errQueueFull is the 429 answer when MaxQueue scans are waiting.
 var errQueueFull = errors.New("too many scans queued; try again once some finish")
 
+// newQueue returns an empty queue holding at most max waiting scans.
 func newQueue(max int) *queue {
 	q := &queue{max: max, busy: map[string]bool{}}
 	q.cond = sync.NewCond(&q.mu)
 	return q
 }
 
+// push queues sc, refusing it when the queue is full or closed.
 func (q *queue) push(sc *scan) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -551,6 +567,7 @@ func (q *queue) next() *scan {
 	}
 }
 
+// done frees sc's host and its worker slot.
 func (q *queue) done(sc *scan) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -570,6 +587,7 @@ func (q *queue) close() []*scan {
 	return left
 }
 
+// counts is how many scans wait and how many run, for /v0/health.
 func (q *queue) counts() (queued, running int) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
