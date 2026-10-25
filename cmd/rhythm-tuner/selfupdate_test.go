@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,9 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/RhythmShahriar/rhythm/kit/update"
 
 	"github.com/RhythmShahriar/tuner/internal/release"
 )
@@ -45,20 +49,49 @@ func TestUpdateCheckHonoursKitOffline(t *testing.T) {
 
 	for _, v := range []string{"1", "true", "false", "yes"} {
 		t.Setenv("RHYTHM_OFFLINE", v)
-		if msg, ok := <-checkForUpdate(context.Background(), "ua", false); ok {
-			t.Errorf("RHYTHM_OFFLINE=%s: notice %q", v, msg)
+		if c := checkForUpdate(context.Background(), "ua", false); c != nil {
+			t.Errorf("RHYTHM_OFFLINE=%s: check started", v)
 		}
 	}
 	t.Setenv("RHYTHM_OFFLINE", "")
-	if msg, ok := <-checkForUpdate(context.Background(), "ua", true); ok {
-		t.Errorf("--offline: notice %q", msg)
+	if c := checkForUpdate(context.Background(), "ua", true); c != nil {
+		t.Errorf("--offline: check started")
 	}
 	if hits.Load() != 0 {
 		t.Errorf("offline checks asked GitHub %d times", hits.Load())
 	}
-	msg := <-checkForUpdate(context.Background(), "ua", false)
-	if !strings.Contains(msg, "rhythm-tuner is available: 0.1.0 → 9.0.0") {
-		t.Errorf("notice %q", msg)
+	var out bytes.Buffer
+	opts := updatePrompt(checkForUpdate(context.Background(), "ua", false), "", false, &out, &out)
+	opts.Wait = 5 * time.Second
+	update.PromptAtExit(context.Background(), opts)
+	if !strings.Contains(out.String(), "rhythm-tuner is available: 0.1.0 → 9.0.0") {
+		t.Errorf("notice %q", out.String())
+	}
+}
+
+// A machine format or -q never asks "Update now?": a script reading the
+// report must not wait on an answer. The terminal view may ask.
+func TestUpdatePromptQuietForMachineOutput(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	for _, tc := range []struct {
+		format string
+		quiet  bool
+		want   bool
+	}{
+		{"json", false, true},
+		{"jsonl", false, true},
+		{"sarif", false, true},
+		{"md", false, true},
+		{"", true, true},
+		{"", false, false},
+	} {
+		opts := updatePrompt(nil, tc.format, tc.quiet, &stdout, &stderr)
+		if opts.Quiet != tc.want {
+			t.Errorf("format %q quiet %v: Quiet %v, want %v", tc.format, tc.quiet, opts.Quiet, tc.want)
+		}
+		if opts.Stdout != &stdout || opts.Out != &stderr {
+			t.Errorf("format %q: writers not passed through", tc.format)
+		}
 	}
 }
 

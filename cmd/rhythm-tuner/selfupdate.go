@@ -5,10 +5,8 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"os"
-	"time"
 
 	"github.com/RhythmShahriar/rhythm/kit/update"
 
@@ -29,20 +27,16 @@ func releaseUpdater(ua string, offline bool) *update.Updater {
 }
 
 // checkForUpdate looks for a newer release while the scan runs, at most
-// once a day. The channel yields the notice, or closes without one.
-// Offline runs (--offline or RHYTHM_OFFLINE) never ask GitHub.
-func checkForUpdate(ctx context.Context, ua string, offline bool) <-chan string {
-	return update.Notice(ctx, releaseUpdater(ua, offline))
+// once a day. It returns nil when there is nothing to check. Offline
+// runs (--offline or RHYTHM_OFFLINE) never ask GitHub.
+func checkForUpdate(ctx context.Context, ua string, offline bool) *update.Pending {
+	return update.StartCheck(ctx, releaseUpdater(ua, offline))
 }
 
-// printUpdateNotice prints the notice if the check has finished, waiting
-// only briefly so a slow GitHub never holds up the exit.
-func printUpdateNotice(notice <-chan string, stderr io.Writer) {
-	select {
-	case msg, ok := <-notice:
-		if ok {
-			fmt.Fprintln(stderr, msg)
-		}
-	case <-time.After(200 * time.Millisecond):
-	}
+// updatePrompt is what the scan hands update.PromptAtExit once its
+// report is out. A machine format (--json, --jsonl, --sarif, --md) or -q
+// never asks "Update now?", so a script reading the output never waits
+// on an answer.
+func updatePrompt(check *update.Pending, format string, quiet bool, stdout, stderr io.Writer) update.PromptOptions {
+	return update.PromptOptions{Check: check, Quiet: quiet || format != "", Stdout: stdout, Out: stderr}
 }

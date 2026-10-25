@@ -30,6 +30,7 @@ import (
 
 	"github.com/RhythmShahriar/rhythm/kit/cli"
 	"github.com/RhythmShahriar/rhythm/kit/config"
+	"github.com/RhythmShahriar/rhythm/kit/update"
 	"github.com/RhythmShahriar/tuner/engine"
 	"github.com/RhythmShahriar/tuner/local"
 	"github.com/RhythmShahriar/tuner/report"
@@ -937,7 +938,7 @@ func execute(p *scanPlan, stdout, stderr io.Writer) int {
 	}
 
 	if live && !o.quiet {
-		printUpdateNotice(notice, stderr)
+		update.PromptAtExit(sigCtx, updatePrompt(notice, p.format, o.quiet, stdout, stderr))
 	}
 
 	// Shown even with -q and machine output, like the config note: an
