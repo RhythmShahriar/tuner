@@ -537,7 +537,8 @@ func TestReportReplacedOnlyWhenComplete(t *testing.T) {
 	}
 	data, _ := os.ReadFile(path)
 	fi, _ := os.Stat(path)
-	if !strings.Contains(string(data), "leak-dotenv") || fi.Mode().Perm() != 0o640 {
+	// The kept mode only shows where files have Unix modes.
+	if !strings.Contains(string(data), "leak-dotenv") || (runtime.GOOS != "windows" && fi.Mode().Perm() != 0o640) {
 		t.Errorf("report not replaced (mode %v):\n%.200s", fi.Mode(), data)
 	}
 	if left, _ := filepath.Glob(filepath.Join(filepath.Dir(path), ".*.tmp")); len(left) > 0 {

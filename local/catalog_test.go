@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -61,7 +62,7 @@ func TestMain(m *testing.M) {
 	if code == 0 && len(produced) > 0 && !isNarrowed() {
 		var unseen []string
 		for id := range cat {
-			if _, ok := produced[id]; !ok {
+			if _, ok := produced[id]; !ok && (runtime.GOOS != "windows" || !unixOnly[id]) {
 				unseen = append(unseen, id)
 			}
 		}
@@ -73,6 +74,10 @@ func TestMain(m *testing.M) {
 	}
 	os.Exit(code)
 }
+
+// unixOnly are catalog IDs a scan can't produce on Windows, which has no
+// Unix file modes.
+var unixOnly = map[string]bool{"local-wp-config-perms": true}
 
 // isNarrowed reports whether the test run was limited with -run or
 // -skip, so not every test ran.
