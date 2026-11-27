@@ -26,7 +26,7 @@ x-db-env: &db-env
 
 services:
   db:
-    image: mariadb:13.0.2@sha256:0e4bb0f339feba125d1154fbacd36c16ec8518f52e44e1f82ecec7d6771caf39
+    image: mariadb:13.0.2@sha256:54f493ea0d60b621a5bff84e5b20100f8b86b6efa6b79158e04756c5194a5e4d
     environment:
       MARIADB_DATABASE: wordpress
       MARIADB_USER: wordpress
@@ -109,7 +109,7 @@ services:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
 
   apache:
-    image: httpd:2.4.69@sha256:a30cd4cd57f3f3c3be9b2d16384d2488839996bb14c67df2b51f1ecbb3e584a1
+    image: httpd:2.4.70@sha256:f243c844139c880ddfe575049499ee5f0bf74ebacef7ef6ebbdeefeebd94917e
     depends_on:
       seed:
         condition: service_completed_successfully
